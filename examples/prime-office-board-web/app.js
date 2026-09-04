@@ -172,7 +172,7 @@ async function signIn(){
     S.authErr = /Invalid login/i.test(error.message)
       ? "メールアドレスかパスワードが違います。"
       : /Email not confirmed/i.test(error.message)
-      ? "メール確認が有効になっています。Supabase の Authentication → Sign In / Providers → Email で「Confirm email」をオフにしてください。"
+      ? "このメールアドレスはまだ許可されていません。管理者に「設定」タブから追加してもらってください。"
       : error.message;
     render(); return;
   }
@@ -191,8 +191,16 @@ async function signUp(){
     render(); return;
   }
   if (!data.session){
-    S.authErr = "アカウントは作成されましたが、メール確認が必要な設定になっています。Supabase の Authentication → Sign In / Providers → Email で「Confirm email」をオフにしてから、ログインし直してください。";
-    render(); return;
+    // The address is confirmed on insert when it is allow-listed, so signing in
+    // right away works even though sign-up did not hand back a session.
+    S.busy = true; render();
+    const retry = await sb.auth.signInWithPassword({ email: email, password: pw });
+    S.busy = false;
+    if (retry.error){
+      S.authMode = "in";
+      S.authErr = "アカウントを作成しました。このままログインしてください。入れない場合は、管理者にメールアドレスの登録を確認してもらってください。";
+      render(); return;
+    }
   }
   await refresh();
 }
