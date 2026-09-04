@@ -67,7 +67,7 @@ const S = {
   vaultCfg: null, allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   key: null, vaultErr: "", authErr: "", authMode: "in", busy: false,
-  theme: ls("prime.theme") || "light", settings: null,
+  theme: ls("prime.theme") || "light", settings: null, form: {},
   taskFilter: "all", payFilter: "unpaid", reveal: {}, draftColor: PALETTE[0]
 };
 const member = id => S.members.find(m => m.id === id) || null;
@@ -182,6 +182,7 @@ async function boot(){
   subscribeLive();
 }
 async function refresh(){
+  if (S.user) S.form = {};
   if (!S.user){ S.screen = "auth"; S.ready = true; render(); return; }
   try { await loadAll(); } catch(e){ /* rendered as empty below */ }
   S.screen = S.me ? "app" : "profile";
@@ -324,9 +325,9 @@ function viewAuth(){
       ? "管理者から聞いた招待コードを入れてください。<br>パスワードは8文字以上にしてください。"
       : "スタッフ用の共有ボードです。") + "</p>" +
     '<div class="fields">' +
-      '<label class="f">メールアドレス<input type="email" id="au_email" autocomplete="username" inputmode="email"></label>' +
-      '<label class="f">パスワード<input type="password" id="au_pw" autocomplete="' + (up ? "new-password" : "current-password") + '"></label>' +
-      (up ? '<label class="f">招待コード<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード"></label>' : "") +
+      '<label class="f">メールアドレス<input type="email" id="au_email" autocomplete="username" inputmode="email" value="' + h(S.form.au_email || "") + '"></label>' +
+      '<label class="f">パスワード<input type="password" id="au_pw" autocomplete="' + (up ? "new-password" : "current-password") + '" value="' + h(S.form.au_pw || "") + '"></label>' +
+      (up ? '<label class="f">招待コード<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード" value="' + h(S.form.au_code || "") + '"></label>' : "") +
     "</div>" +
     (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
     '<button class="btn primary" style="width:100%" data-act="' + (up ? "signup" : "signin") + '"' + (S.busy ? " disabled" : "") + ">" +
@@ -340,7 +341,7 @@ function viewProfile(){
     "<h1>表示名を決めてください</h1>" +
     '<p class="lead">スケジュール・タスク・在席表示に使われる名前です。<br>あとから「設定」タブで変更できます。</p>' +
     '<div class="fields">' +
-      '<label class="f">名前<input type="text" id="pf_name" maxlength="12" placeholder="例：ゆうな"></label>' +
+      '<label class="f">名前<input type="text" id="pf_name" maxlength="12" placeholder="例：ゆうな" value="' + h(S.form.pf_name || "") + '"></label>' +
       '<label class="f">色<div class="colorpick" id="pf_colors">' +
         PALETTE.map(c => '<button type="button" data-act="draft-color" data-v="' + c + '" aria-pressed="' +
           (S.draftColor === c) + '" style="background:' + c + '" aria-label="' + c + '"></button>').join("") + "</div></label>" +
@@ -984,6 +985,10 @@ document.addEventListener("click", async function(ev){
     }
   } catch(e){ /* run() already surfaced it */ }
   if (S.screen === "app") { try { await loadAll(); } catch(e){} render(); }
+});
+document.addEventListener("input", function(ev){
+  const t = ev.target;
+  if (t && t.id && /^(au_|pf_)/.test(t.id)) S.form[t.id] = t.value;
 });
 document.addEventListener("keydown", function(ev){
   if (ev.key === "Escape" && el("modalRoot").innerHTML) closeModal();
