@@ -4,6 +4,18 @@
 
 const SUPABASE_URL = "https://ixsycdkazorljshjejcz.supabase.co";
 const SUPABASE_KEY = "sb_publishable_GwiqO3s7SeG6MkmRa5bI0A_-kX7twCN";
+if (!window.supabase || !window.supabase.createClient){
+  // The Supabase client is loaded from a CDN; without it the page can do nothing,
+  // so say so rather than leaving a blank screen.
+  document.getElementById("view").innerHTML =
+    '<div class="gate"><div class="gate-card">' +
+    '<h1>読み込めませんでした</h1>' +
+    '<p class="lead">通信環境の影響で、必要なファイルを取得できませんでした。<br>' +
+    '電波の良い場所でページを再読み込みしてください。</p>' +
+    '<button class="btn primary" style="width:100%" onclick="location.reload()">再読み込み</button>' +
+    "</div></div>";
+  return;
+}
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true }
 });
@@ -33,6 +45,16 @@ function ls(k, v){
   try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e){}
   return null;
 }
+const THEMES = [["light","\u2600","明るい"],["dark","\u263e","暗い"],["auto","\u25d0","端末に合わせる"]];
+function applyTheme(){
+  if (S.theme === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", S.theme);
+}
+function cycleTheme(){
+  const i = THEMES.findIndex(t => t[0] === S.theme);
+  S.theme = THEMES[(i + 1) % THEMES.length][0];
+  ls("prime.theme", S.theme); applyTheme(); render();
+}
 const PALETTE = ["#9C6C1F","#3E6497","#2C7A5B","#A63244","#6B4E8F","#B0670F","#2F7E86","#8A5A3B"];
 const KINDS = { work:{ label:"出勤", cls:"k-work", chip:"brass" }, off:{ label:"公休", cls:"k-off", chip:"bad" },
                 half:{ label:"半休", cls:"k-half", chip:"warn" }, "":{ label:"未定", cls:"", chip:"" } };
@@ -45,6 +67,7 @@ const S = {
   vaultCfg: null, allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   key: null, vaultErr: "", authErr: "", authMode: "in", busy: false,
+  theme: ls("prime.theme") || "light", settings: null,
   taskFilter: "all", payFilter: "unpaid", reveal: {}, draftColor: PALETTE[0]
 };
 const member = id => S.members.find(m => m.id === id) || null;
@@ -107,7 +130,7 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, vcf, alw] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, vcf, alw, bst] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
@@ -115,7 +138,8 @@ async function loadAll(){
     sb.from("payments").select("*"),
     sb.from("vault").select("*"),
     sb.from("vault_config").select("*").eq("id", 1).maybeSingle(),
-    sb.from("allowed_emails").select("*").order("email")
+    sb.from("allowed_emails").select("*").order("email"),
+    sb.from("board_settings").select("*").eq("id", 1).maybeSingle()
   ]);
   if (mem.data) S.members = mem.data.map(normMember);
   if (off.data) S.office = { doorOpen: off.data.door_open, updatedBy: off.data.updated_by, updatedAt: off.data.updated_at };
@@ -126,6 +150,7 @@ async function loadAll(){
   if (vlt.data) S.vault = vlt.data;
   S.vaultCfg = vcf.data || null;
   S.allowed = alw.data || [];
+  S.settings = bst.data || null;
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
 }
 
@@ -136,7 +161,7 @@ function scheduleReload(){
 }
 function subscribeLive(){
   const ch = sb.channel("board");
-  ["members","office","schedule","tasks","payments","vault","vault_config","allowed_emails"].forEach(t => {
+  ["members","office","schedule","tasks","payments","vault","vault_config","allowed_emails","board_settings"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -144,6 +169,7 @@ function subscribeLive(){
 
 /* ============================ auth ============================ */
 async function boot(){
+  applyTheme();
   const { data } = await sb.auth.getSession();
   S.user = data && data.session ? data.session.user : null;
   sb.auth.onAuthStateChange(function(_e, session){
@@ -172,7 +198,7 @@ async function signIn(){
     S.authErr = /Invalid login/i.test(error.message)
       ? "メールアドレスかパスワードが違います。"
       : /Email not confirmed/i.test(error.message)
-      ? "このメールアドレスはまだ許可されていません。管理者に「設定」タブから追加してもらってください。"
+      ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
       : error.message;
     render(); return;
   }
@@ -182,7 +208,10 @@ async function signUp(){
   const email = valOf("au_email"), pw = valOf("au_pw");
   if (!email || pw.length < 8){ S.authErr = "メールアドレスと、8文字以上のパスワードを入力してください。"; render(); return; }
   S.busy = true; S.authErr = ""; render();
-  const { data, error } = await sb.auth.signUp({ email: email, password: pw });
+  const code = valOf("au_code");
+  const { data, error } = await sb.auth.signUp({
+    email: email, password: pw, options: { data: { invite_code: code } }
+  });
   S.busy = false;
   if (error){
     S.authErr = /already registered/i.test(error.message)
@@ -198,7 +227,7 @@ async function signUp(){
     S.busy = false;
     if (retry.error){
       S.authMode = "in";
-      S.authErr = "アカウントを作成しました。このままログインしてください。入れない場合は、管理者にメールアドレスの登録を確認してもらってください。";
+      S.authErr = "アカウントを作成しました。このままログインしてください。入れない場合は、招待コードが合っているか管理者に確認してください。";
       render(); return;
     }
   }
@@ -212,7 +241,7 @@ async function createProfile(){
   S.busy = false;
   if (error){
     S.authErr = /row-level security|violates row-level/i.test(error.message)
-      ? "このメールアドレスはまだ許可されていません。管理者に「設定」タブから追加してもらってください。"
+      ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
       : error.message;
     render(); return;
   }
@@ -269,6 +298,9 @@ function renderDoor(){
       '<button class="btn sm" data-act="door">' + (open ? "閉めた" : "開けた") + "</button>" +
     "</div>";
 }
+const themeEntry = () => THEMES.find(t => t[0] === S.theme) || THEMES[0];
+const themeGlyph = () => themeEntry()[1];
+const themeLabel = () => "表示: " + themeEntry()[2] + "（押すと切替）";
 function renderHere(){
   const here = S.members.filter(m => m.present);
   el("hereBox").innerHTML =
@@ -277,7 +309,9 @@ function renderHere(){
       h(m.name + (m.present ? "・在席" : "・不在")) + '">' + h((m.name || "?").slice(0, 1)) + "</span>").join("") + "</div>" +
     '<span class="chip ' + (here.length ? "ok" : "") + '"><span class="dot"></span>在席 ' + here.length + " / " + S.members.length + "</span>" +
     (S.me ? '<button class="btn sm ' + (S.me.present ? "" : "primary") + '" data-act="present">' +
-      (S.me.present ? "事務所を出る" : "事務所に入った") + "</button>" : "");
+      (S.me.present ? "出た" : "入った") + "</button>" : "") +
+    '<button class="themebtn" data-act="theme" title="' + h(themeLabel()) + '" aria-label="' + h(themeLabel()) + '">' +
+      h(themeGlyph()) + "</button>";
 }
 
 /* ============================ view: ログイン / プロフィール ============================ */
@@ -287,11 +321,12 @@ function viewAuth(){
     '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">事務所ボード</span></div>' +
     "<h1>" + (up ? "アカウントを作る" : "ログイン") + "</h1>" +
     '<p class="lead">' + (up
-      ? "管理者から許可されたメールアドレスで登録できます。<br>パスワードは8文字以上にしてください。"
+      ? "管理者から聞いた招待コードを入れてください。<br>パスワードは8文字以上にしてください。"
       : "スタッフ用の共有ボードです。") + "</p>" +
     '<div class="fields">' +
       '<label class="f">メールアドレス<input type="email" id="au_email" autocomplete="username" inputmode="email"></label>' +
       '<label class="f">パスワード<input type="password" id="au_pw" autocomplete="' + (up ? "new-password" : "current-password") + '"></label>' +
+      (up ? '<label class="f">招待コード<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード"></label>' : "") +
     "</div>" +
     (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
     '<button class="btn primary" style="width:100%" data-act="' + (up ? "signup" : "signin") + '"' + (S.busy ? " disabled" : "") + ">" +
@@ -511,12 +546,12 @@ function viewPay(){
     "<th>期日</th><th>名目</th><th>支払先</th><th class=\"r\">金額</th><th>方法</th><th>担当</th><th></th></tr></thead><tbody>" +
     (list.length ? list.map(p =>
       '<tr class="' + (p.status === "paid" ? "paid" : "") + '">' +
-        "<td>" + (p.status === "paid" ? '<span class="chip ok">済 ' + h(md((p.paidAt || "").slice(0,10) || p.due || "")) + "</span>" : (dueChip(p.due) || '<span class="chip">未定</span>')) + "</td>" +
-        "<td>" + h(p.title) + (p.note ? '<div style="font-size:11.5px;color:var(--muted)">' + h(p.note) + "</div>" : "") + "</td>" +
-        "<td>" + h(p.payee || "—") + "</td>" +
-        '<td class="r num" style="font-weight:600">' + h(yen(p.amount)) + "</td>" +
-        "<td>" + h(p.method || "—") + "</td>" +
-        "<td>" + (p.assignee ? whoChip(p.assignee) : '<span class="chip brass">未定</span>') + "</td>" +
+        '<td data-label="期日"><span>' + (p.status === "paid" ? '<span class="chip ok">済 ' + h(md((p.paidAt || "").slice(0,10) || p.due || "")) + "</span>" : (dueChip(p.due) || '<span class="chip">未定</span>')) + "</span></td>" +
+        '<td data-label="名目"><span>' + h(p.title) + (p.note ? '<div style="font-size:11.5px;color:var(--muted)">' + h(p.note) + "</div>" : "") + "</span></td>" +
+        '<td data-label="支払先"><span>' + h(p.payee || "—") + "</span></td>" +
+        '<td class="r num" data-label="金額" style="font-weight:600"><span>' + h(yen(p.amount)) + "</span></td>" +
+        '<td data-label="方法"><span>' + h(p.method || "—") + "</span></td>" +
+        '<td data-label="担当"><span>' + (p.assignee ? whoChip(p.assignee) : '<span class="chip brass">未定</span>') + "</span></td>" +
         '<td class="acts" style="white-space:nowrap;text-align:right">' +
           '<button class="btn sm" data-act="toggle-pay" data-id="' + h(p.id) + '">' + (p.status === "paid" ? "未払いに戻す" : "支払った") + "</button> " +
           '<button class="btn sm ghost" data-act="edit-pay" data-id="' + h(p.id) + '">編集</button></td></tr>').join("")
@@ -557,14 +592,14 @@ function viewVault(){
     "<th>媒体</th><th>URL</th><th>ID</th><th>パスワード</th><th>メモ</th><th></th></tr></thead><tbody>" +
     (rows.length ? rows.map(function(v){
       const r = S.reveal[v.id];
-      return "<tr><td style=\"font-weight:700\">" + h(v.media) + "</td>" +
-        "<td>" + (v.url ? '<a href="' + h(v.url) + '" target="_blank" rel="noopener noreferrer">開く ↗</a>' : "—") + "</td>" +
-        '<td><span class="secret"><code>' + (r ? h(r.loginId || "—") : "••••••••") + "</code>" +
+      return '<tr><td data-label="媒体" style="font-weight:700"><span>' + h(v.media) + "</span></td>" +
+        '<td data-label="URL"><span>' + (v.url ? '<a href="' + h(v.url) + '" target="_blank" rel="noopener noreferrer">開く ↗</a>' : "—") + "</span></td>" +
+        '<td data-label="ID"><span class="secret"><code>' + (r ? h(r.loginId || "—") : "••••••••") + "</code>" +
           (r ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="loginId">複製</button>' : "") + "</span></td>" +
-        '<td><span class="secret"><code>' + (r ? h(r.password || "—") : "••••••••") + "</code>" +
+        '<td data-label="パスワード"><span class="secret"><code>' + (r ? h(r.password || "—") : "••••••••") + "</code>" +
           (r ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="password">複製</button>' : "") + "</span></td>" +
-        '<td style="color:var(--muted);font-size:12.5px">' + h(v.note || "") + "</td>" +
-        '<td style="white-space:nowrap;text-align:right">' +
+        '<td data-label="メモ" style="color:var(--muted);font-size:12.5px"><span>' + h(v.note || "") + "</span></td>" +
+        '<td class="acts" style="white-space:nowrap;text-align:right">' +
           '<button class="btn sm" data-act="reveal" data-id="' + h(v.id) + '">' + (r ? "隠す" : "表示") + "</button> " +
           '<button class="btn sm ghost" data-act="edit-vault" data-id="' + h(v.id) + '">編集</button></td></tr>';
     }).join("") : '<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--muted)">まだ登録がありません</td></tr>') +
@@ -584,15 +619,7 @@ function viewSettings(){
       '<button class="btn sm ghost" data-act="edit-member" data-id="' + h(m.id) + '">編集</button></div>').join("")
       : '<div class="empty">—</div>') + "</div></div></section>" +
 
-    '<section class="sec"><div class="sec-head"><h2>ログインを許可するメールアドレス</h2>' +
-    '<span class="hint">ここに登録した人だけがアカウントを作れます。</span>' +
-    '<div class="spacer"></div><button class="btn primary" data-act="new-allowed">＋ 追加</button></div>' +
-    '<div class="panel"><div class="rows" style="border-top:0">' +
-    (S.allowed.length ? S.allowed.map(a =>
-      '<div class="row" style="align-items:center;gap:10px"><span class="num" style="flex:1;font-size:13px">' + h(a.email) + "</span>" +
-      (a.note ? '<span class="chip">' + h(a.note) + "</span>" : "") +
-      '<button class="btn sm danger" data-act="del-allowed" data-id="' + h(a.email) + '">削除</button></div>').join("")
-      : '<div class="empty">まだ登録がありません。スタッフのメールアドレスを追加してください。</div>') + "</div></div></section>" +
+    viewSignupGate() +
 
     '<section class="sec"><div class="sec-head"><h2>このアカウント</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
@@ -608,6 +635,50 @@ function viewSettings(){
     '<div class="note">予定・タスク・支払いは、ログインしたスタッフ全員が読み書きできます。<br>' +
     '媒体のID・パスワードは合言葉で暗号化してから保存されるため、合言葉を知らない人には読めません。<br>' +
     '銀行やクレジットカードの認証情報など、漏れると被害が大きいものはここに置かないでください。</div></section>';
+}
+
+function viewSignupGate(){
+  const st = S.settings || { signup_mode: "code", invite_code: "" };
+  const mode = st.signup_mode;
+  const modes = [
+    ["code", "招待コード", "コードを知っている人だけが登録できます。おすすめ。"],
+    ["allowlist", "メールアドレス", "下のリストに載せたアドレスの人だけが登録できます。"],
+    ["open", "誰でも", "URL を知っていれば誰でも登録できます。外部の人にも中身が見えます。"]
+  ];
+  return '<section class="sec"><div class="sec-head"><h2>スタッフの登録方法</h2>' +
+    '<span class="hint">新しいスタッフがアカウントを作るときの条件です。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    modes.map(m =>
+      '<button class="row" style="width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:' +
+        (mode === m[0] ? "var(--surface-2)" : "none") + ';align-items:flex-start;gap:11px" data-act="signup-mode" data-v="' + m[0] + '">' +
+      '<span class="tick' + (mode === m[0] ? " on" : "") + '" style="pointer-events:none">' + (mode === m[0] ? "✓" : "") + "</span>" +
+      '<span style="flex:1"><span style="font-weight:700;font-size:14px">' + h(m[1]) + "</span>" +
+      '<span style="display:block;font-size:12.5px;color:var(--muted);margin-top:2px">' + h(m[2]) + "</span></span></button>").join("") +
+    "</div>" +
+    (mode === "code"
+      ? '<div style="padding:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:12px;color:var(--muted);font-weight:700">いまの招待コード</span>' +
+        '<code style="font-family:var(--mono);font-size:17px;font-weight:600;letter-spacing:.08em;background:var(--surface-2);border:1px solid var(--line);padding:5px 12px;border-radius:4px">' +
+          h(st.invite_code || "—") + "</code>" +
+        '<button class="btn sm" data-act="copy-code">コピー</button>' +
+        '<button class="btn sm ghost" data-act="new-code">作り直す</button>' +
+        '<p style="flex:1 1 100%;font-size:12px;color:var(--muted);margin-top:4px">' +
+        'このコードをスタッフに口頭や LINE で伝えてください。作り直すと、それ以前のコードは使えなくなります。</p></div>'
+      : mode === "open"
+      ? '<div style="padding:14px"><p class="note" style="margin:0">URL を知っている人は誰でも登録でき、シフト・支払い・事務所の状況が見えます。' +
+        '外部に URL が漏れたときに気づけないので、登録が済んだら「招待コード」に戻すことをおすすめします。</p></div>'
+      : "") +
+    "</div></section>" +
+    (mode === "allowlist"
+      ? '<section class="sec"><div class="sec-head"><h2>ログインを許可するメールアドレス</h2>' +
+        '<div class="spacer"></div><button class="btn primary" data-act="new-allowed">＋ 追加</button></div>' +
+        '<div class="panel"><div class="rows" style="border-top:0">' +
+        (S.allowed.length ? S.allowed.map(a =>
+          '<div class="row" style="align-items:center;gap:10px"><span class="num" style="flex:1;font-size:13px">' + h(a.email) + "</span>" +
+          (a.note ? '<span class="chip">' + h(a.note) + "</span>" : "") +
+          '<button class="btn sm danger" data-act="del-allowed" data-id="' + h(a.email) + '">削除</button></div>').join("")
+          : '<div class="empty">まだ登録がありません。</div>') + "</div></div></section>"
+      : "");
 }
 
 /* ============================ modal ============================ */
@@ -890,6 +961,17 @@ document.addEventListener("click", async function(ev){
       case "del-member":
         await run(sb.from("members").delete().eq("id", id), "スタッフを外しました"); closeModal(); break;
 
+      case "theme": cycleTheme(); break;
+      case "signup-mode":
+        await run(sb.from("board_settings").update({ signup_mode: btn.dataset.v, updated_at: nowIso() }).eq("id", 1), "変更しました");
+        break;
+      case "new-code": {
+        const code = "PRIME-" + String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+        await run(sb.from("board_settings").update({ invite_code: code, updated_at: nowIso() }).eq("id", 1), "新しいコードにしました");
+        break;
+      }
+      case "copy-code":
+        copy((S.settings || {}).invite_code || "", "招待コード"); break;
       case "new-allowed": modalAllowed(); break;
       case "save-allowed": {
         const email = valOf("a_email").toLowerCase();
