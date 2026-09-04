@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Old+Mincho:wght@600;700&display=swap">
 <style>
 *{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%; text-size-adjust:100%}
 img{max-width:100%}
 [hidden]{display:none !important}
 
@@ -63,7 +64,7 @@ img{max-width:100%}
 
 *{box-sizing:border-box}
 body{
-  margin:0; background:var(--paper); color:var(--ink);
+  margin:0; background:var(--paper); color:var(--ink); overflow-x:hidden;
   font-family:var(--sans); font-size:15px; line-height:1.65;
   -webkit-font-smoothing:antialiased;
 }
@@ -144,6 +145,7 @@ a{color:var(--brass); text-underline-offset:3px}
   background:var(--bad); color:#fff; font-size:10.5px; font-weight:700; line-height:17px;
   font-family:var(--mono);
 }
+.tab .t-sm{display:none}
 
 main{padding:22px 0 80px}
 .grid-home{display:grid; grid-template-columns:minmax(0,1.62fr) minmax(0,1fr); gap:26px; align-items:start}
@@ -278,7 +280,7 @@ tr.paid td:not(.acts){opacity:.55}
 
 /* modal */
 .scrim{position:fixed; inset:0; background:rgba(20,16,22,.55); backdrop-filter:blur(2px); z-index:100; display:grid; place-items:center; padding:16px}
-.modal{background:var(--surface); border:1px solid var(--line-strong); border-radius:6px; box-shadow:var(--shadow); width:min(560px,100%); max-height:88vh; display:flex; flex-direction:column}
+.modal{background:var(--surface); border:1px solid var(--line-strong); border-radius:6px; box-shadow:var(--shadow); width:min(560px,100%); max-height:88vh; max-height:88dvh; display:flex; flex-direction:column}
 .modal header{padding:15px 18px 11px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
 .modal header h3{font-family:var(--serif); font-size:16px}
 .modal .body{padding:16px 18px; overflow:auto}
@@ -300,7 +302,7 @@ tr.paid td:not(.acts){opacity:.55}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} }
 
 /* ---------- auth / gate screens (web build only) ---------- */
-.gate{min-height:100dvh; display:grid; place-items:center; padding:24px 16px}
+.gate{min-height:100vh; min-height:100dvh; display:grid; place-items:center; padding:24px 16px}
 .gate-card{width:min(400px,100%); background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:26px 24px; box-shadow:var(--shadow)}
 .gate .brand{justify-content:center; margin:0 0 4px}
 .gate h1{font-family:var(--serif); font-size:19px; text-align:center; margin-bottom:5px}
@@ -313,6 +315,25 @@ tr.paid td:not(.acts){opacity:.55}
 .colorpick button{width:30px; height:30px; border-radius:50%; border:2px solid transparent; padding:0}
 .colorpick button[aria-pressed="true"]{border-color:var(--ink)}
 .who-bar{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted)}
+/* ---------- shop notes ---------- */
+.shop{border-bottom:1px solid var(--line)}
+.shop:last-child{border-bottom:0}
+.shop-head{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:14px 16px 8px}
+.shop-head h3{font-family:var(--serif); font-size:17px}
+.shop-head .spacer{margin-left:auto}
+.shop-grid{display:grid; grid-template-columns:104px minmax(0,1fr); gap:2px 14px; padding:0 16px 15px; margin:0}
+.shop-grid dt{
+  font-size:11px; font-family:var(--mono); letter-spacing:.08em; color:var(--muted);
+  font-weight:700; padding-top:4px;
+}
+.shop-grid dd{margin:0; font-size:13.5px; white-space:pre-wrap; word-break:break-word; padding-bottom:6px}
+.shop-grid dd.blank{color:var(--muted); font-style:italic}
+@media (max-width:560px){
+  .shop-grid{grid-template-columns:minmax(0,1fr); gap:0}
+  .shop-grid dt{padding-top:9px}
+  .shop-grid dd{padding-bottom:2px}
+}
+
 /* ---------- theme switch ---------- */
 .themebtn{
   border:1px solid var(--line-strong); background:var(--surface); color:var(--muted);
@@ -346,9 +367,12 @@ tr.paid td:not(.acts){opacity:.55}
   }
   .tabs-in{padding:0; justify-content:space-between}
   .tab{
-    flex:1 1 0; padding:9px 2px 8px; font-size:10.5px; letter-spacing:-.02em;
+    flex:1 1 0; padding:9px 1px 8px; font-size:11px; letter-spacing:-.02em;
     border-bottom:0; border-top:2px solid transparent; min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
   }
+  .tab .t-lg{display:none}
+  .tab .t-sm{display:inline}
   .tab[aria-selected="true"]{border-top-color:var(--brass); border-bottom-color:transparent}
   .tab .badge{margin-left:3px}
 
@@ -378,7 +402,7 @@ tr.paid td:not(.acts){opacity:.55}
 
   /* modals as bottom sheets */
   .scrim{padding:0; place-items:end stretch}
-  .modal{width:100%; max-height:92dvh; border-radius:14px 14px 0 0; border-bottom:0}
+  .modal{width:100%; max-height:92vh; max-height:92dvh; border-radius:14px 14px 0 0; border-bottom:0}
   .modal footer{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
   .modal footer .btn{flex:1 1 auto; min-height:42px}
   .modal footer .left{flex:1 1 100%; order:2; margin-right:0}

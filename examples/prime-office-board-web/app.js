@@ -64,7 +64,7 @@ const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエ�
 const S = {
   user: null, me: null, ready: false, screen: "loading",
   members: [], office: { doorOpen:false }, sched: {}, tasks: [], payments: [], vault: [],
-  allowed: [],
+  shops: [], allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
   theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
@@ -112,13 +112,14 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, alw, bst] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, shp, alw, bst] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
     sb.from("tasks").select("*"),
     sb.from("payments").select("*"),
     sb.from("vault").select("*"),
+    sb.from("shops").select("*").order("sort_order").order("name"),
     sb.from("allowed_emails").select("*").order("email"),
     sb.from("board_settings").select("*").eq("id", 1).maybeSingle()
   ]);
@@ -129,6 +130,7 @@ async function loadAll(){
   if (tsk.data) S.tasks = tsk.data.map(normTask);
   if (pay.data) S.payments = pay.data.map(normPay);
   if (vlt.data) S.vault = vlt.data;
+  if (shp.data) S.shops = shp.data;
   S.allowed = alw.data || [];
   S.settings = bst.data || null;
   if (S.settings) S.mode = S.settings.signup_mode;
@@ -142,7 +144,7 @@ function scheduleReload(){
 }
 function subscribeLive(){
   const ch = sb.channel("board");
-  ["members","office","schedule","tasks","payments","vault","allowed_emails","board_settings"].forEach(t => {
+  ["members","office","schedule","tasks","payments","vault","shops","allowed_emails","board_settings"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -240,12 +242,29 @@ const valOf = id => { const n = el(id); return n ? n.value.trim() : ""; };
 
 /* ============================ render: shell ============================ */
 const TABS = [
-  { id:"home",   label:"ホーム" },
-  { id:"sched",  label:"スケジュール" },
-  { id:"tasks",  label:"タスク" },
-  { id:"pay",    label:"支払い" },
-  { id:"vault",  label:"媒体アカウント" },
-  { id:"set",    label:"設定" }
+  { id:"home",   label:"ホーム",         short:"ホーム" },
+  { id:"sched",  label:"スケジュール",   short:"予定" },
+  { id:"tasks",  label:"タスク",         short:"タスク" },
+  { id:"pay",    label:"支払い",         short:"支払" },
+  { id:"shops",  label:"店舗",           short:"店舗" },
+  { id:"vault",  label:"媒体アカウント", short:"媒体" },
+  { id:"set",    label:"設定",           short:"設定" }
+];
+
+// Each shop's recruitment sheet, in the order the office already writes it.
+const SHOP_FIELDS = [
+  ["hours",      "営業時間",   "例：15:00-4:00受付", false],
+  ["station",    "最寄り駅",   "例：梅田駅", false],
+  ["pickup",     "送り迎え",   "料金・対応範囲・自走の場合の扱いなど", true],
+  ["hiring",     "採用基準",   "", true],
+  ["pay",        "女子給",     "例：70-9000", true],
+  ["nomination", "指名料",     "例：1000-5000", false],
+  ["misc",       "雑費",       "例：2本目以降から一律2000", false],
+  ["standby",    "待機",       "例：梅田近辺待機", false],
+  ["id_docs",    "必要な身分証", "例：顔つき身分証", true],
+  ["training",   "講習の有無", "", true],
+  ["pr",         "PR",         "応募者に伝えたい強み", true],
+  ["note",       "その他メモ", "社内向けの補足", true]
 ];
 const openTasks = () => S.tasks.filter(t => t.status !== "done");
 const wantedTasks = () => openTasks().filter(t => !t.assignee);
@@ -262,6 +281,7 @@ function render(){
   v.className = "wrap";
   renderDoor(); renderHere(); renderTabs();
   v.innerHTML = S.tab === "sched" ? viewSched()
+    : S.tab === "shops" ? viewShops()
     : S.tab === "tasks" ? viewTasks()
     : S.tab === "pay"   ? viewPay()
     : S.tab === "vault" ? viewVault()
@@ -272,7 +292,8 @@ function renderTabs(){
   const badges = { tasks: wantedTasks().length,
                    pay: unpaid().filter(p => { const n = daysUntil(p.due); return n !== null && n <= 0; }).length };
   el("tabs").innerHTML = TABS.map(t =>
-    '<button class="tab" role="tab" aria-selected="' + (S.tab === t.id) + '" data-tab="' + t.id + '">' + h(t.label) +
+    '<button class="tab" role="tab" aria-selected="' + (S.tab === t.id) + '" data-tab="' + t.id + '">' +
+    '<span class="t-lg">' + h(t.label) + '</span><span class="t-sm">' + h(t.short) + "</span>" +
     (badges[t.id] ? '<span class="badge num">' + badges[t.id] + "</span>" : "") + "</button>").join("");
 }
 function renderDoor(){
@@ -549,6 +570,44 @@ function viewPay(){
     "</tbody></table></div></section>";
 }
 
+/* ============================ view: 店舗 ============================ */
+// Staff paste this straight into replies to applicants, so keep the ■ headings
+// exactly as the office already writes them.
+function shopText(sp){
+  const lines = ["■店名", sp.name];
+  if (sp.url) lines.push(sp.url);
+  SHOP_FIELDS.forEach(function(f){
+    if (f[0] === "note") return;              // internal only
+    const v = (sp[f[0]] || "").trim();
+    if (!v) return;
+    lines.push("", "■" + f[1], v);
+  });
+  return lines.join("\n");
+}
+function viewShops(){
+  const list = S.shops;
+  return '<section class="sec"><div class="sec-head"><h2>店舗の詳細</h2>' +
+    '<span class="hint">応募の問い合わせにそのまま答えられるように、条件をまとめておく場所です。</span>' +
+    '<div class="spacer"></div><button class="btn primary" data-act="new-shop">＋ 店舗を追加</button></div>' +
+    '<div class="panel">' +
+    (list.length ? list.map(function(sp){
+      return '<div class="shop">' +
+        '<div class="shop-head"><h3>' + h(sp.name) + "</h3>" +
+        (sp.url ? '<a href="' + h(sp.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">サイト ↗</a>' : "") +
+        '<div class="spacer"></div>' +
+        '<button class="btn sm" data-act="copy-shop" data-id="' + h(sp.id) + '">まとめてコピー</button> ' +
+        '<button class="btn sm ghost" data-act="edit-shop" data-id="' + h(sp.id) + '">編集</button></div>' +
+        '<dl class="shop-grid">' +
+        SHOP_FIELDS.map(function(f){
+          const v = (sp[f[0]] || "").trim();
+          if (!v && f[0] === "note") return "";
+          return "<dt>" + h(f[1]) + "</dt><dd" + (v ? "" : ' class="blank"') + ">" +
+            (v ? h(v) : "未記入") + "</dd>";
+        }).join("") + "</dl></div>";
+    }).join("") : '<div class="empty">まだ登録がありません。「店舗を追加」から登録してください。</div>') +
+    "</div></section>";
+}
+
 /* ============================ view: 媒体アカウント ============================ */
 function viewVault(){
   const rows = S.vault.slice().sort((a,b) => (a.media || "").localeCompare(b.media || "", "ja"));
@@ -726,6 +785,25 @@ function modalVault(v){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-vault" data-id="' + h(v.id || "") + '">保存</button>');
 }
+function modalShop(sp){
+  sp = sp || {};
+  showModal(sp.id ? "店舗を編集" : "店舗を追加",
+    '<div class="fields">' +
+    '<label class="f">店名<input type="text" id="s_name" maxlength="60" value="' + h(sp.name || "") + '" placeholder="例：プライム　ロイヤル"></label>' +
+    '<label class="f">サイトURL<input type="url" id="s_url" value="' + h(sp.url || "") + '" placeholder="https://"></label>' +
+    SHOP_FIELDS.map(function(f){
+      const v = h(sp[f[0]] || "");
+      return '<label class="f">' + h(f[1]) +
+        (f[3] ? '<textarea id="s_' + f[0] + '" placeholder="' + h(f[2]) + '">' + v + "</textarea>"
+              : '<input type="text" id="s_' + f[0] + '" value="' + v + '" placeholder="' + h(f[2]) + '">') +
+        "</label>";
+    }).join("") +
+    '<label class="f">並び順<input type="number" id="s_sort" value="' + h(sp.sort_order != null ? sp.sort_order : (S.shops.length + 1)) + '"></label>' +
+    "</div>",
+    (sp.id ? '<button class="btn danger left" data-act="del-shop" data-id="' + h(sp.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-shop" data-id="' + h(sp.id || "") + '">保存</button>');
+}
 function modalMember(m){
   m = m || {};
   showModal("スタッフを編集",
@@ -798,6 +876,17 @@ function revealOne(id){
     S.reveal[id] = { loginId: v.login_id, password: v.password };
   }
   render();
+}
+
+async function saveShopFromModal(id){
+  const name = valOf("s_name");
+  if (!name){ toast("店名を入力してください"); return; }
+  const body = { name: name, url: valOf("s_url"), sort_order: Number(valOf("s_sort") || 0),
+    updated_by: S.me.id, updated_at: nowIso() };
+  SHOP_FIELDS.forEach(function(f){ body[f[0]] = valOf("s_" + f[0]); });
+  if (id) await run(sb.from("shops").update(body).eq("id", id), "保存しました");
+  else await run(sb.from("shops").insert(body), "登録しました");
+  closeModal();
 }
 
 /* ============================ events ============================ */
@@ -912,6 +1001,15 @@ document.addEventListener("click", async function(ev){
       }
       case "copy-code":
         copy((S.settings || {}).invite_code || "", "招待コード"); break;
+      case "new-shop": modalShop(null); break;
+      case "edit-shop": modalShop(S.shops.find(x => x.id === id)); break;
+      case "save-shop": await saveShopFromModal(id); break;
+      case "del-shop": await run(sb.from("shops").delete().eq("id", id), "削除しました"); closeModal(); break;
+      case "copy-shop": {
+        const sp = S.shops.find(x => x.id === id);
+        if (sp) copy(shopText(sp), "店舗の詳細");
+        break;
+      }
       case "new-allowed": modalAllowed(); break;
       case "save-allowed": {
         const email = valOf("a_email").toLowerCase();
