@@ -8,8 +8,14 @@ Artifact 版（`../prime-office-board/`）と画面・機能は同じで、デ�
 
 - 公開先: <https://prime-office-board.onrender.com>
 - データベース / 認証: Supabase（プロジェクト `PRIME Office Board`、東京リージョン）
-- ホスティング: Render 静的サイト。このディレクトリを publish path として、
-  ブランチへの push で自動デプロイされる
+- ホスティング: Render 静的サイト（`prime-office-board`）。このディレクトリを
+  publish path として、ブランチへの push で自動デプロイされる
+
+Render はリポジトリ直下の `package.json` を見て依存インストールを試みるが、
+このリポジトリは `packageManager: yarn@4` を指定しており、Render の既定の
+Yarn 1.22 では失敗する。このアプリはビルド不要なので、サービスの環境変数に
+`SKIP_INSTALL_DEPS=true` を設定してインストール自体を飛ばしている。
+リポジトリのルートをこのディレクトリに変更できるなら、そちらのほうが素直。
 
 ## 構成
 
