@@ -64,10 +64,10 @@ const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエ�
 const S = {
   user: null, me: null, ready: false, screen: "loading",
   members: [], office: { doorOpen:false }, sched: {}, tasks: [], payments: [], vault: [],
-  vaultCfg: null, allowed: [],
+  allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
-  key: null, vaultErr: "", authErr: "", authMode: "in", busy: false,
-  theme: ls("prime.theme") || "light", settings: null, form: {},
+  authErr: "", authMode: "in", busy: false,
+  theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
   taskFilter: "all", payFilter: "unpaid", reveal: {}, draftColor: PALETTE[0]
 };
 const member = id => S.members.find(m => m.id === id) || null;
@@ -94,25 +94,7 @@ async function run(promise, okMsg){
   return res;
 }
 
-/* ============================ crypto (媒体アカウント) ============================ */
-const TE = new TextEncoder(), TD = new TextDecoder();
-const b64 = buf => { const b = new Uint8Array(buf); let s = ""; for (let i=0;i<b.length;i++) s += String.fromCharCode(b[i]); return btoa(s); };
-const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-const VERIFY_TOKEN = "PRIME-VAULT-V1";
-async function deriveKey(pass, saltB64){
-  const km = await crypto.subtle.importKey("raw", TE.encode(pass), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name:"PBKDF2", salt: ub64(saltB64), iterations: 250000, hash:"SHA-256" },
-    km, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"]);
-}
-async function sealJson(key, obj){
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name:"AES-GCM", iv: iv }, key, TE.encode(JSON.stringify(obj)));
-  return { iv: b64(iv), ct: b64(ct) };
-}
-async function openJson(key, blob){
-  const pt = await crypto.subtle.decrypt({ name:"AES-GCM", iv: ub64(blob.iv) }, key, ub64(blob.ct));
-  return JSON.parse(TD.decode(pt));
-}
+/* ============================ clipboard ============================ */
 async function copy(text, what){
   try { await navigator.clipboard.writeText(text); toast((what || "") + "をコピーしました"); }
   catch(e){ toast("コピーできませんでした。長押しで選択してください。"); }
@@ -130,14 +112,13 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, vcf, alw, bst] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, alw, bst] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
     sb.from("tasks").select("*"),
     sb.from("payments").select("*"),
     sb.from("vault").select("*"),
-    sb.from("vault_config").select("*").eq("id", 1).maybeSingle(),
     sb.from("allowed_emails").select("*").order("email"),
     sb.from("board_settings").select("*").eq("id", 1).maybeSingle()
   ]);
@@ -148,9 +129,9 @@ async function loadAll(){
   if (tsk.data) S.tasks = tsk.data.map(normTask);
   if (pay.data) S.payments = pay.data.map(normPay);
   if (vlt.data) S.vault = vlt.data;
-  S.vaultCfg = vcf.data || null;
   S.allowed = alw.data || [];
   S.settings = bst.data || null;
+  if (S.settings) S.mode = S.settings.signup_mode;
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
 }
 
@@ -161,7 +142,7 @@ function scheduleReload(){
 }
 function subscribeLive(){
   const ch = sb.channel("board");
-  ["members","office","schedule","tasks","payments","vault","vault_config","allowed_emails","board_settings"].forEach(t => {
+  ["members","office","schedule","tasks","payments","vault","allowed_emails","board_settings"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -176,13 +157,17 @@ async function boot(){
     const next = session ? session.user : null;
     const changed = (next && next.id) !== (S.user && S.user.id);
     S.user = next;
-    if (changed){ S.key = null; S.reveal = {}; refresh(); }
+    if (changed){ S.reveal = {}; S.mode = ""; refresh(); }
   });
   await refresh();
   subscribeLive();
 }
 async function refresh(){
   if (S.user) S.form = {};
+  if (!S.mode){
+    const r = await sb.rpc("signup_mode");
+    S.mode = (r && !r.error && r.data) ? r.data : "code";
+  }
   if (!S.user){ S.screen = "auth"; S.ready = true; render(); return; }
   try { await loadAll(); } catch(e){ /* rendered as empty below */ }
   S.screen = S.me ? "app" : "profile";
@@ -199,7 +184,8 @@ async function signIn(){
     S.authErr = /Invalid login/i.test(error.message)
       ? "メールアドレスかパスワードが違います。"
       : /Email not confirmed/i.test(error.message)
-      ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
+      ? (S.mode === "code" ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
+         : "登録が許可されていません。管理者に確認してください。")
       : error.message;
     render(); return;
   }
@@ -228,7 +214,7 @@ async function signUp(){
     S.busy = false;
     if (retry.error){
       S.authMode = "in";
-      S.authErr = "アカウントを作成しました。このままログインしてください。入れない場合は、招待コードが合っているか管理者に確認してください。";
+      S.authErr = "アカウントを作成しました。このままログインしてください。";
       render(); return;
     }
   }
@@ -242,13 +228,14 @@ async function createProfile(){
   S.busy = false;
   if (error){
     S.authErr = /row-level security|violates row-level/i.test(error.message)
-      ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
+      ? (S.mode === "code" ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
+         : "登録が許可されていません。管理者に確認してください。")
       : error.message;
     render(); return;
   }
   await refresh();
 }
-async function signOut(){ await sb.auth.signOut(); S.key = null; S.reveal = {}; await refresh(); }
+async function signOut(){ await sb.auth.signOut(); S.reveal = {}; await refresh(); }
 const valOf = id => { const n = el(id); return n ? n.value.trim() : ""; };
 
 /* ============================ render: shell ============================ */
@@ -322,12 +309,14 @@ function viewAuth(){
     '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">事務所ボード</span></div>' +
     "<h1>" + (up ? "アカウントを作る" : "ログイン") + "</h1>" +
     '<p class="lead">' + (up
-      ? "管理者から聞いた招待コードを入れてください。<br>パスワードは8文字以上にしてください。"
+      ? (S.mode === "code"
+          ? "管理者から聞いた招待コードを入れてください。<br>パスワードは8文字以上にしてください。"
+          : "メールアドレスとパスワードを決めるだけで始められます。<br>パスワードは8文字以上にしてください。")
       : "スタッフ用の共有ボードです。") + "</p>" +
     '<div class="fields">' +
       '<label class="f">メールアドレス<input type="email" id="au_email" autocomplete="username" inputmode="email" value="' + h(S.form.au_email || "") + '"></label>' +
       '<label class="f">パスワード<input type="password" id="au_pw" autocomplete="' + (up ? "new-password" : "current-password") + '" value="' + h(S.form.au_pw || "") + '"></label>' +
-      (up ? '<label class="f">招待コード<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード" value="' + h(S.form.au_code || "") + '"></label>' : "") +
+      (up && S.mode === "code" ? '<label class="f">招待コード<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード" value="' + h(S.form.au_code || "") + '"></label>' : "") +
     "</div>" +
     (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
     '<button class="btn primary" style="width:100%" data-act="' + (up ? "signup" : "signin") + '"' + (S.busy ? " disabled" : "") + ">" +
@@ -562,33 +551,10 @@ function viewPay(){
 
 /* ============================ view: 媒体アカウント ============================ */
 function viewVault(){
-  const head = '<section class="sec"><div class="sec-head"><h2>媒体アカウント</h2>' +
-    '<span class="hint">各媒体のURL・ID・パスワードをまとめておく場所です。</span>';
-  if (!crypto.subtle) return head + "</div><div class=\"note\">この環境では暗号化が使えないため、この機能は利用できません。</div></section>";
-  if (!S.vaultCfg){
-    return head + "</div>" +
-      '<div class="note" style="margin-bottom:16px">ID・パスワードは<strong>この画面の中で暗号化してから</strong>保存します。合言葉はどこにも保存されないので、合言葉を知っているスタッフだけが中身を読めます。<br>合言葉を忘れると復元できません。必ず全員で共有し、控えを残してください。</div>' +
-      '<div class="panel lockbox"><div class="glyph">🔐</div>' +
-      '<h3 style="font-family:var(--serif);font-size:17px;margin-bottom:4px">合言葉を決める</h3>' +
-      '<p style="font-size:13px;color:var(--muted);margin-bottom:14px">最初の一人が決めて、他のスタッフに伝えてください。</p>' +
-      '<div class="fields" style="text-align:left">' +
-      '<label class="f">合言葉（8文字以上）<input type="password" id="vp1" autocomplete="new-password"></label>' +
-      '<label class="f">もう一度<input type="password" id="vp2" autocomplete="new-password"></label>' +
-      '<button class="btn primary" data-act="vault-init">この合言葉で始める</button></div></div></section>';
-  }
-  if (!S.key){
-    return head + "</div>" +
-      '<div class="panel lockbox"><div class="glyph">🔑</div>' +
-      '<h3 style="font-family:var(--serif);font-size:17px;margin-bottom:4px">合言葉を入力</h3>' +
-      '<p style="font-size:13px;color:var(--muted);margin-bottom:14px">スタッフ間で共有している合言葉を入れてください。</p>' +
-      '<div class="fields" style="text-align:left">' +
-      '<label class="f">合言葉<input type="password" id="vp1" autocomplete="current-password"></label>' +
-      (S.vaultErr ? '<p style="color:var(--bad);font-size:12.5px;font-weight:700">' + h(S.vaultErr) + "</p>" : "") +
-      '<button class="btn primary" data-act="vault-unlock">解錠する</button></div></div></section>';
-  }
   const rows = S.vault.slice().sort((a,b) => (a.media || "").localeCompare(b.media || "", "ja"));
-  return head + '<div class="spacer"></div><button class="btn sm ghost" data-act="vault-lock">施錠する</button>' +
-    '<button class="btn primary" data-act="new-vault">＋ 媒体を追加</button></div>' +
+  return '<section class="sec"><div class="sec-head"><h2>媒体アカウント</h2>' +
+    '<span class="hint">各媒体のURL・ID・パスワードをまとめておく場所です。</span>' +
+    '<div class="spacer"></div><button class="btn primary" data-act="new-vault">＋ 媒体を追加</button></div>' +
     '<div class="panel tbl-scroll"><table class="data" style="min-width:720px"><thead><tr>' +
     "<th>媒体</th><th>URL</th><th>ID</th><th>パスワード</th><th>メモ</th><th></th></tr></thead><tbody>" +
     (rows.length ? rows.map(function(v){
@@ -605,7 +571,7 @@ function viewVault(){
           '<button class="btn sm ghost" data-act="edit-vault" data-id="' + h(v.id) + '">編集</button></td></tr>';
     }).join("") : '<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--muted)">まだ登録がありません</td></tr>') +
     "</tbody></table></div>" +
-    '<p style="font-size:12px;color:var(--muted);margin-top:10px">保存されているのは暗号文だけです。合言葉はこのブラウザのメモリ上にのみ置かれ、タブを閉じると消えます。</p></section>';
+    '<p style="font-size:12px;color:var(--muted);margin-top:10px">ログインできるスタッフは全員このページを見られます。銀行やクレジットカードの認証情報は登録しないでください。</p></section>';
 }
 
 /* ============================ view: 設定 ============================ */
@@ -633,8 +599,9 @@ function viewSettings(){
     "</div></div></section>" +
 
     '<section class="sec"><div class="sec-head"><h2>データの扱い</h2></div>' +
-    '<div class="note">予定・タスク・支払いは、ログインしたスタッフ全員が読み書きできます。<br>' +
-    '媒体のID・パスワードは合言葉で暗号化してから保存されるため、合言葉を知らない人には読めません。<br>' +
+    '<div class="note">予定・タスク・支払い・媒体アカウントは、ログインしたスタッフ全員が読み書きできます。<br>' +
+    '媒体のID・パスワードもそのまま保存されるので、ログインできる人には見えます。<br>' +
+    '「スタッフの登録方法」を「誰でも」にしている間は、URL を知った人が登録して中身を見られます。<br>' +
     '銀行やクレジットカードの認証情報など、漏れると被害が大きいものはここに置かないでください。</div></section>';
 }
 
@@ -744,18 +711,17 @@ function modalPay(p){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-pay" data-id="' + h(p.id || "") + '">保存</button>');
 }
-function modalVault(v, plain){
-  v = v || {}; plain = plain || {};
+function modalVault(v){
+  v = v || {};
   showModal(v.id ? "媒体アカウントを編集" : "媒体アカウントを追加",
     '<div class="fields">' +
     '<label class="f">媒体名<input type="text" id="v_media" maxlength="40" value="' + h(v.media || "") + '" placeholder="例：シティヘブンネット"></label>' +
     '<div class="presets">' + MEDIA_PRESETS.map(x => '<button type="button" class="preset" data-act="preset" data-v="' + h(x) + '">' + h(x) + "</button>").join("") + "</div>" +
     '<label class="f">管理画面のURL<input type="url" id="v_url" value="' + h(v.url || "") + '" placeholder="https://"></label>' +
     '<div class="fields two">' +
-      '<label class="f">ID<input type="text" id="v_id" value="' + h(plain.loginId || "") + '" autocomplete="off"></label>' +
-      '<label class="f">パスワード<input type="text" id="v_pw" value="' + h(plain.password || "") + '" autocomplete="off"></label></div>' +
-    '<label class="f">メモ（暗号化されません）<input type="text" id="v_note" maxlength="60" value="' + h(v.note || "") + '"></label>' +
-    '<p style="font-size:12px;color:var(--muted)">IDとパスワードは保存時に暗号化されます。媒体名・URL・メモは暗号化されないので、機密はメモに書かないでください。</p></div>',
+      '<label class="f">ID<input type="text" id="v_id" value="' + h(v.login_id || "") + '" autocomplete="off"></label>' +
+      '<label class="f">パスワード<input type="text" id="v_pw" value="' + h(v.password || "") + '" autocomplete="off"></label></div>' +
+    '<label class="f">メモ<input type="text" id="v_note" maxlength="60" value="' + h(v.note || "") + '"></label></div>',
     (v.id ? '<button class="btn danger left" data-act="del-vault" data-id="' + h(v.id) + '">削除</button>' : "") +
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-vault" data-id="' + h(v.id || "") + '">保存</button>');
@@ -818,39 +784,19 @@ async function savePayFromModal(id){
 async function saveVaultFromModal(id){
   const media = valOf("v_media");
   if (!media){ toast("媒体名を入力してください"); return; }
-  if (!S.key){ toast("先に合言葉で解錠してください"); return; }
-  const enc = await sealJson(S.key, { loginId: valOf("v_id"), password: valOf("v_pw") });
-  const body = { media: media, url: valOf("v_url"), note: valOf("v_note"), enc: enc, updated_by: S.me.id, updated_at: nowIso() };
+  const body = { media: media, url: valOf("v_url"), note: valOf("v_note"),
+    login_id: valOf("v_id"), password: valOf("v_pw"), updated_by: S.me.id, updated_at: nowIso() };
   if (id){ await run(sb.from("vault").update(body).eq("id", id), "保存しました"); delete S.reveal[id]; }
   else await run(sb.from("vault").insert(body), "保存しました");
   closeModal();
 }
-async function vaultInit(){
-  const p1 = valOf("vp1"), p2 = valOf("vp2");
-  if (p1.length < 8){ toast("合言葉は8文字以上にしてください"); return; }
-  if (p1 !== p2){ toast("2つの合言葉が一致しません"); return; }
-  const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
-  const key = await deriveKey(p1, salt);
-  const verify = await sealJson(key, VERIFY_TOKEN);
-  await run(sb.from("vault_config").upsert({ id: 1, salt: salt, verify: verify }, { onConflict: "id" }));
-  S.key = key; S.vaultErr = ""; toast("合言葉を設定しました");
-}
-async function vaultUnlock(){
-  const p = valOf("vp1");
-  if (!p) return;
-  try {
-    const key = await deriveKey(p, S.vaultCfg.salt);
-    if (await openJson(key, S.vaultCfg.verify) !== VERIFY_TOKEN) throw new Error("bad");
-    S.key = key; S.vaultErr = "";
-  } catch(e){ S.vaultErr = "合言葉が違います。"; }
-  render();
-}
-async function revealOne(id){
-  if (S.reveal[id]){ delete S.reveal[id]; render(); return; }
-  const v = S.vault.find(x => x.id === id);
-  if (!v || !v.enc || !S.key) return;
-  try { S.reveal[id] = await openJson(S.key, v.enc); }
-  catch(e){ toast("この行は今の合言葉では読めません"); }
+function revealOne(id){
+  if (S.reveal[id]) delete S.reveal[id];
+  else {
+    const v = S.vault.find(x => x.id === id);
+    if (!v) return;
+    S.reveal[id] = { loginId: v.login_id, password: v.password };
+  }
   render();
 }
 
@@ -924,20 +870,12 @@ document.addEventListener("click", async function(ev){
         break;
       }
 
-      case "vault-init": await vaultInit(); break;
-      case "vault-unlock": await vaultUnlock(); break;
-      case "vault-lock": S.key = null; S.reveal = {}; render(); toast("施錠しました"); break;
-      case "new-vault": modalVault(null, null); break;
-      case "edit-vault": {
-        const v = S.vault.find(x => x.id === id);
-        let plain = S.reveal[id];
-        if (!plain && v && v.enc && S.key){ try { plain = await openJson(S.key, v.enc); } catch(e){ plain = null; } }
-        modalVault(v, plain); break;
-      }
+      case "new-vault": modalVault(null); break;
+      case "edit-vault": modalVault(S.vault.find(x => x.id === id)); break;
       case "save-vault": await saveVaultFromModal(id); break;
       case "del-vault":
         await run(sb.from("vault").delete().eq("id", id), "削除しました"); delete S.reveal[id]; closeModal(); break;
-      case "reveal": await revealOne(id); break;
+      case "reveal": revealOne(id); break;
       case "copy-v": {
         const r = S.reveal[id];
         if (r) copy(r[btn.dataset.k] || "", btn.dataset.k === "password" ? "パスワード" : "ID");
@@ -965,6 +903,7 @@ document.addEventListener("click", async function(ev){
       case "theme": cycleTheme(); break;
       case "signup-mode":
         await run(sb.from("board_settings").update({ signup_mode: btn.dataset.v, updated_at: nowIso() }).eq("id", 1), "変更しました");
+        S.mode = btn.dataset.v;
         break;
       case "new-code": {
         const code = "PRIME-" + String(Math.floor(Math.random() * 10000)).padStart(4, "0");
