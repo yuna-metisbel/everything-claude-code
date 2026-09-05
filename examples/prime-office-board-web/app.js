@@ -247,7 +247,7 @@ const TABS = [
   { id:"tasks",  label:"タスク",         short:"タスク" },
   { id:"pay",    label:"支払い",         short:"支払" },
   { id:"shops",  label:"店舗",           short:"店舗" },
-  { id:"vault",  label:"媒体アカウント", short:"媒体" },
+  { id:"vault",  label:"ID /パス",       short:"ID/パス" },
   { id:"set",    label:"設定",           short:"設定" }
 ];
 
@@ -632,13 +632,13 @@ function viewShops(){
     "</div></section>";
 }
 
-/* ============================ view: 媒体アカウント ============================ */
+/* ============================ view: ID /パス ============================ */
 function viewVault(){
   const rows = S.vault.slice().sort((a,b) => (a.media || "").localeCompare(b.media || "", "ja"));
-  return '<section class="sec"><div class="sec-head"><h2>媒体アカウント</h2>' +
+  return '<section class="sec"><div class="sec-head"><h2>ID /パス</h2>' +
     '<span class="hint">各媒体のURL・ID・パスワードをまとめておく場所です。</span>' +
-    '<div class="spacer"></div><button class="btn primary" data-act="new-vault">＋ 媒体を追加</button></div>' +
-    '<div class="panel tbl-scroll"><table class="data" style="min-width:720px"><thead><tr>' +
+    '<div class="spacer"></div><button class="btn primary" data-act="new-vault">＋ 追加</button></div>' +
+    '<div class="panel tbl-scroll"><table class="data data-wide"><thead><tr>' +
     "<th>媒体</th><th>URL</th><th>ID</th><th>パスワード</th><th>メモ</th><th></th></tr></thead><tbody>" +
     (rows.length ? rows.map(function(v){
       const r = S.reveal[v.id];
@@ -682,7 +682,7 @@ function viewSettings(){
     "</div></div></section>" +
 
     '<section class="sec"><div class="sec-head"><h2>データの扱い</h2></div>' +
-    '<div class="note">予定・タスク・支払い・媒体アカウントは、ログインしたスタッフ全員が読み書きできます。<br>' +
+    '<div class="note">予定・タスク・支払い・店舗・ID /パスは、ログインしたスタッフ全員が読み書きできます。<br>' +
     '媒体のID・パスワードもそのまま保存されるので、ログインできる人には見えます。<br>' +
     '「スタッフの登録方法」を「誰でも」にしている間は、URL を知った人が登録して中身を見られます。<br>' +
     '銀行やクレジットカードの認証情報など、漏れると被害が大きいものはここに置かないでください。</div></section>';
@@ -796,7 +796,7 @@ function modalPay(p){
 }
 function modalVault(v){
   v = v || {};
-  showModal(v.id ? "媒体アカウントを編集" : "媒体アカウントを追加",
+  showModal(v.id ? "ID /パスを編集" : "ID /パスを追加",
     '<div class="fields">' +
     '<label class="f">媒体名<input type="text" id="v_media" maxlength="40" value="' + h(v.media || "") + '" placeholder="例：シティヘブンネット"></label>' +
     '<div class="presets">' + MEDIA_PRESETS.map(x => '<button type="button" class="preset" data-act="preset" data-v="' + h(x) + '">' + h(x) + "</button>").join("") + "</div>" +
