@@ -58,6 +58,16 @@ function cycleTheme(){
 const PALETTE = ["#9C6C1F","#3E6497","#2C7A5B","#A63244","#6B4E8F","#B0670F","#2F7E86","#8A5A3B"];
 const KINDS = { work:{ label:"出勤", cls:"k-work", chip:"brass" }, off:{ label:"公休", cls:"k-off", chip:"bad" },
                 half:{ label:"半休", cls:"k-half", chip:"warn" }, "":{ label:"未定", cls:"", chip:"" } };
+const VAULT_COLS = [
+  ["media",     "媒体"],
+  ["shop",      "店舗"],
+  ["cast_name", "キャスト"],
+  ["url",       "URL"],
+  ["login_id",  "ID"],
+  ["password",  "パスワード"],
+  ["note",      "メモ"]
+];
+const VAULT_GROUPS = [["media","媒体別"],["shop","店舗別"],["cast_name","キャスト別"],["","まとめない"]];
 const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエス魂","リフナビ","メンズエステ求人","エステの達人","X (旧Twitter)","公式LINE","Instagram","Googleビジネス","予約システム","勤怠システム"];
 
 /* ============================ state ============================ */
@@ -68,7 +78,8 @@ const S = {
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
   theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
-  taskFilter: "all", payFilter: "unpaid", reveal: {}, draftColor: PALETTE[0]
+  taskFilter: "all", payFilter: "unpaid", reveal: {}, draftColor: PALETTE[0],
+  vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: ""
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
@@ -633,27 +644,82 @@ function viewShops(){
 }
 
 /* ============================ view: ID /パス ============================ */
+function vaultCell(v, key){
+  const raw = (v[key] || "").trim();
+  if (key === "url") return raw ? '<a href="' + h(raw) + '" target="_blank" rel="noopener noreferrer">開く ↗</a>' : "—";
+  if (key === "login_id" || key === "password"){
+    const shown = S.reveal[v.id];
+    return '<span class="secret"><code>' + (shown ? h(raw || "—") : "••••••••") + "</code>" +
+      (shown && raw ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="' + key + '">複製</button>' : "") +
+      "</span>";
+  }
+  return raw ? h(raw) : "—";
+}
+function vaultMatches(v, q){
+  if (!q) return true;
+  // deliberately not the password: nobody should find an entry by guessing it
+  return ["media", "shop", "cast_name", "url", "login_id", "note"]
+    .some(function(k){ return String(v[k] || "").toLowerCase().indexOf(q) >= 0; });
+}
+function renderVaultList(){
+  const q = S.vaultQ.trim().toLowerCase();
+  const rows = S.vault.filter(function(v){ return vaultMatches(v, q); });
+  if (!rows.length){
+    return '<div class="panel"><div class="empty">' +
+      (S.vault.length ? "見つかりませんでした。" : "まだ登録がありません。") + "</div></div>";
+  }
+  const groupKey = S.vaultGroup;
+  const cols = VAULT_COLS.filter(function(c){ return c[0] !== groupKey; });
+
+  const buckets = [];
+  const index = {};
+  rows.forEach(function(v){
+    const name = groupKey ? String(v[groupKey] || "").trim() : "";
+    const key = name || "\u0000";
+    if (!index[key]){ index[key] = { name: name, items: [] }; buckets.push(index[key]); }
+    index[key].items.push(v);
+  });
+  buckets.sort(function(x, y){
+    if (!x.name) return 1;
+    if (!y.name) return -1;
+    return x.name.localeCompare(y.name, "ja");
+  });
+  const blank = { media: "媒体なし", shop: "店舗なし", cast_name: "キャストなし" }[groupKey] || "";
+
+  return buckets.map(function(g){
+    g.items.sort(function(x, y){
+      return String(x.media || "").localeCompare(String(y.media || ""), "ja") ||
+             String(x.cast_name || "").localeCompare(String(y.cast_name || ""), "ja");
+    });
+    return (groupKey
+      ? '<div class="grp-head"><span class="grp-name">' + h(g.name || blank) + "</span>" +
+        '<span class="chip">' + g.items.length + "件</span></div>"
+      : "") +
+      '<div class="panel tbl-scroll" style="margin-bottom:14px"><table class="data data-wide"><thead><tr>' +
+      cols.map(function(c){ return "<th>" + h(c[1]) + "</th>"; }).join("") + "<th></th></tr></thead><tbody>" +
+      g.items.map(function(v){
+        return "<tr>" + cols.map(function(c){
+          return '<td data-label="' + h(c[1]) + '"><span>' + vaultCell(v, c[0]) + "</span></td>";
+        }).join("") +
+        '<td class="acts" style="white-space:nowrap;text-align:right">' +
+          '<button class="btn sm" data-act="reveal" data-id="' + h(v.id) + '">' +
+            (S.reveal[v.id] ? "隠す" : "表示") + "</button> " +
+          '<button class="btn sm ghost" data-act="edit-vault" data-id="' + h(v.id) + '">編集</button></td></tr>';
+      }).join("") + "</tbody></table></div>";
+  }).join("");
+}
 function viewVault(){
-  const rows = S.vault.slice().sort((a,b) => (a.media || "").localeCompare(b.media || "", "ja"));
   return '<section class="sec"><div class="sec-head"><h2>ID /パス</h2>' +
     '<span class="hint">各媒体のURL・ID・パスワードをまとめておく場所です。</span>' +
     '<div class="spacer"></div><button class="btn primary" data-act="new-vault">＋ 追加</button></div>' +
-    '<div class="panel tbl-scroll"><table class="data data-wide"><thead><tr>' +
-    "<th>媒体</th><th>URL</th><th>ID</th><th>パスワード</th><th>メモ</th><th></th></tr></thead><tbody>" +
-    (rows.length ? rows.map(function(v){
-      const r = S.reveal[v.id];
-      return '<tr><td data-label="媒体" style="font-weight:700"><span>' + h(v.media) + "</span></td>" +
-        '<td data-label="URL"><span>' + (v.url ? '<a href="' + h(v.url) + '" target="_blank" rel="noopener noreferrer">開く ↗</a>' : "—") + "</span></td>" +
-        '<td data-label="ID"><span class="secret"><code>' + (r ? h(r.loginId || "—") : "••••••••") + "</code>" +
-          (r ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="loginId">複製</button>' : "") + "</span></td>" +
-        '<td data-label="パスワード"><span class="secret"><code>' + (r ? h(r.password || "—") : "••••••••") + "</code>" +
-          (r ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="password">複製</button>' : "") + "</span></td>" +
-        '<td data-label="メモ" style="color:var(--muted);font-size:12.5px"><span>' + h(v.note || "") + "</span></td>" +
-        '<td class="acts" style="white-space:nowrap;text-align:right">' +
-          '<button class="btn sm" data-act="reveal" data-id="' + h(v.id) + '">' + (r ? "隠す" : "表示") + "</button> " +
-          '<button class="btn sm ghost" data-act="edit-vault" data-id="' + h(v.id) + '">編集</button></td></tr>';
-    }).join("") : '<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--muted)">まだ登録がありません</td></tr>') +
-    "</tbody></table></div>" +
+    '<div class="vault-bar">' +
+      '<input type="text" id="v_q" class="vault-search" placeholder="媒体・店舗・キャスト・メモで検索" value="' + h(S.vaultQ) + '">' +
+      '<label class="vault-group"><span>まとめ方</span><select id="v_group">' +
+        VAULT_GROUPS.map(function(g){
+          return '<option value="' + g[0] + '"' + (S.vaultGroup === g[0] ? " selected" : "") + ">" + g[1] + "</option>";
+        }).join("") + "</select></label>" +
+    "</div>" +
+    '<div id="vaultList">' + renderVaultList() + "</div>" +
     '<p style="font-size:12px;color:var(--muted);margin-top:10px">ログインできるスタッフは全員このページを見られます。銀行やクレジットカードの認証情報は登録しないでください。</p></section>';
 }
 
@@ -794,12 +860,24 @@ function modalPay(p){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-pay" data-id="' + h(p.id || "") + '">保存</button>');
 }
+function vaultSuggest(key, extra){
+  const seen = {};
+  return (extra || []).concat(S.vault.map(function(v){ return v[key]; }))
+    .map(function(x){ return String(x || "").trim(); })
+    .filter(function(x){ if (!x || seen[x]) return false; seen[x] = 1; return true; })
+    .map(function(x){ return '<option value="' + h(x) + '"></option>'; }).join("");
+}
 function modalVault(v){
   v = v || {};
   showModal(v.id ? "ID /パスを編集" : "ID /パスを追加",
     '<div class="fields">' +
     '<label class="f">媒体名<input type="text" id="v_media" maxlength="40" value="' + h(v.media || "") + '" placeholder="例：シティヘブンネット"></label>' +
     '<div class="presets">' + MEDIA_PRESETS.map(x => '<button type="button" class="preset" data-act="preset" data-v="' + h(x) + '">' + h(x) + "</button>").join("") + "</div>" +
+    '<div class="fields two">' +
+      '<label class="f">店舗<input type="text" id="v_shop" list="dl_shop" maxlength="40" value="' + h(v.shop || "") + '" placeholder="例：プライム　ロイヤル"></label>' +
+      '<label class="f">キャスト<input type="text" id="v_cast" list="dl_cast" maxlength="40" value="' + h(v.cast_name || "") + '" placeholder="個人のアカウントなら名前"></label></div>' +
+    '<datalist id="dl_shop">' + vaultSuggest("shop", S.shops.map(function(x){ return x.name; })) + "</datalist>" +
+    '<datalist id="dl_cast">' + vaultSuggest("cast_name", []) + "</datalist>" +
     '<label class="f">管理画面のURL<input type="url" id="v_url" value="' + h(v.url || "") + '" placeholder="https://"></label>' +
     '<div class="fields two">' +
       '<label class="f">ID<input type="text" id="v_id" value="' + h(v.login_id || "") + '" autocomplete="off"></label>' +
@@ -886,6 +964,7 @@ async function saveVaultFromModal(id){
   const media = valOf("v_media");
   if (!media){ toast("媒体名を入力してください"); return; }
   const body = { media: media, url: valOf("v_url"), note: valOf("v_note"),
+    shop: valOf("v_shop"), cast_name: valOf("v_cast"),
     login_id: valOf("v_id"), password: valOf("v_pw"), updated_by: S.me.id, updated_at: nowIso() };
   if (id){ await run(sb.from("vault").update(body).eq("id", id), "保存しました"); delete S.reveal[id]; }
   else await run(sb.from("vault").insert(body), "保存しました");
@@ -986,7 +1065,12 @@ document.addEventListener("click", async function(ev){
       case "save-vault": await saveVaultFromModal(id); break;
       case "del-vault":
         await run(sb.from("vault").delete().eq("id", id), "削除しました"); delete S.reveal[id]; closeModal(); break;
-      case "reveal": revealOne(id); break;
+      case "reveal": {
+        revealOne(id);
+        const box = el("vaultList");
+        if (box && S.tab === "vault") box.innerHTML = renderVaultList();
+        break;
+      }
       case "copy-v": {
         const r = S.reveal[id];
         if (r) copy(r[btn.dataset.k] || "", btn.dataset.k === "password" ? "パスワード" : "ID");
@@ -1047,7 +1131,21 @@ document.addEventListener("click", async function(ev){
 });
 document.addEventListener("input", function(ev){
   const t = ev.target;
-  if (t && t.id && /^(au_|pf_)/.test(t.id)) S.form[t.id] = t.value;
+  if (!t || !t.id) return;
+  if (/^(au_|pf_)/.test(t.id)) S.form[t.id] = t.value;
+  if (t.id === "v_q"){
+    S.vaultQ = t.value;
+    const box = el("vaultList");
+    if (box) box.innerHTML = renderVaultList();
+  }
+});
+document.addEventListener("change", function(ev){
+  const t = ev.target;
+  if (t && t.id === "v_group"){
+    S.vaultGroup = t.value; ls("prime.vaultGroup", t.value);
+    const box = el("vaultList");
+    if (box) box.innerHTML = renderVaultList();
+  }
 });
 document.addEventListener("keydown", function(ev){
   if (ev.key === "Escape" && el("modalRoot").innerHTML) closeModal();
