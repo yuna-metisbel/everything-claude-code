@@ -56,8 +56,16 @@ function cycleTheme(){
   ls("prime.theme", S.theme); applyTheme(); render();
 }
 const PALETTE = ["#9C6C1F","#3E6497","#2C7A5B","#A63244","#6B4E8F","#B0670F","#2F7E86","#8A5A3B"];
-const KINDS = { work:{ label:"出勤", cls:"k-work", chip:"brass" }, off:{ label:"公休", cls:"k-off", chip:"bad" },
-                half:{ label:"半休", cls:"k-half", chip:"warn" }, "":{ label:"未定", cls:"", chip:"" } };
+// Everyone is an independent contractor, so this says where they are working
+// from rather than whether they clocked in.
+const KINDS = {
+  office: { label:"事務所",   cell:"事務所", cls:"k-office", chip:"brass" },
+  home:   { label:"在宅",     cell:"在宅",   cls:"k-home",   chip:"cool" },
+  out:    { label:"外仕事",   cell:"外",     cls:"k-out",    chip:"warn" },
+  off:    { label:"休み",     cell:"休",     cls:"k-off",    chip:"bad" },
+  "":     { label:"未定",     cell:"",       cls:"",         chip:"" }
+};
+const KIND_ORDER = ["", "office", "home", "out", "off"];
 const VAULT_COLS = [
   ["media",     "媒体"],
   ["shop",      "店舗"],
@@ -74,7 +82,7 @@ const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエ�
 const S = {
   user: null, me: null, ready: false, screen: "loading",
   members: [], office: { doorOpen:false }, sched: {}, tasks: [], payments: [], vault: [],
-  shops: [], allowed: [],
+  shops: [], notices: [], allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
   theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
@@ -83,6 +91,7 @@ const S = {
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
+const recruitUrl = () => (S.settings && S.settings.recruit_url) || "";
 const dayOf = (memberId, date) => S.sched[memberId + "|" + date] || null;
 
 function toast(msg){
@@ -118,12 +127,13 @@ const normTask   = r => ({ id:r.id, title:r.title, detail:r.detail, assignee:r.a
 const normPay    = r => ({ id:r.id, title:r.title, payee:r.payee, amount:Number(r.amount), due:r.due, method:r.method,
                            assignee:r.assignee, status:r.status, note:r.note, paidAt:r.paid_at, createdAt:r.created_at });
 const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:r.plan,
-                           ngFrom:r.ng_from, ngTo:r.ng_to, note:r.note });
+                           ngFrom:r.ng_from, ngTo:r.ng_to, note:r.note,
+                           from:r.from_time, to:r.to_time, url:r.link_url });
 
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, shp, alw, bst] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
@@ -131,6 +141,7 @@ async function loadAll(){
     sb.from("payments").select("*"),
     sb.from("vault").select("*"),
     sb.from("shops").select("*").order("sort_order").order("name"),
+    sb.from("notices").select("*").order("created_at", { ascending: false }),
     sb.from("allowed_emails").select("*").order("email"),
     sb.from("board_settings").select("*").eq("id", 1).maybeSingle()
   ]);
@@ -142,6 +153,7 @@ async function loadAll(){
   if (pay.data) S.payments = pay.data.map(normPay);
   if (vlt.data) S.vault = vlt.data;
   if (shp.data) S.shops = shp.data;
+  if (ntc.data) S.notices = ntc.data;
   S.allowed = alw.data || [];
   S.settings = bst.data || null;
   if (S.settings) S.mode = S.settings.signup_mode;
@@ -155,7 +167,7 @@ function scheduleReload(){
 }
 function subscribeLive(){
   const ch = sb.channel("board");
-  ["members","office","schedule","tasks","payments","vault","shops","allowed_emails","board_settings"].forEach(t => {
+  ["members","office","schedule","tasks","payments","vault","shops","notices","allowed_emails","board_settings"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -360,6 +372,62 @@ function viewProfile(){
     "</div></div>";
 }
 
+/* ============================ お知らせ・共通予定 ============================ */
+// Team-wide entries: a whole-team meeting, a call with a media rep, or a plain
+// announcement such as a new staff member joining.
+function noticeRow(n){
+  const d = n.date ? daysUntil(n.date) : null;
+  const when = n.date
+    ? '<span class="chip ' + (d === null ? "" : d < 0 ? "" : d === 0 ? "warn" : d <= 7 ? "cool" : "") + '">' +
+      h(md(n.date)) + "(" + DOW[new Date(n.date + "T00:00:00").getDay()] + ")" +
+      (d === 0 ? " 今日" : d === 1 ? " 明日" : "") + "</span>"
+    : '<span class="chip">お知らせ</span>';
+  return '<div class="row" style="flex-direction:column;gap:5px;align-items:stretch">' +
+    '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">' +
+      (n.pinned ? '<span class="chip brass">重要</span>' : "") + when +
+      '<span style="font-size:14.5px;font-weight:700;flex:1;min-width:0;word-break:break-word">' + h(n.title) + "</span>" +
+      '<button class="btn sm ghost" data-act="edit-notice" data-id="' + h(n.id) + '">編集</button></div>' +
+    (n.body ? '<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word">' + h(n.body) + "</div>" : "") +
+    (n.url ? '<div><a href="' + h(n.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">リンクを開く ↗</a></div>' : "") +
+    '<div style="font-size:11px;color:var(--muted)">' + h((member(n.created_by) || {}).name || "") +
+      (n.created_at ? " ・ " + h(stamp(n.created_at)) : "") + "</div></div>";
+}
+function sortedNotices(){
+  return S.notices.slice().sort(function(a, b){
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    const ad = a.date ? daysUntil(a.date) : null, bd = b.date ? daysUntil(b.date) : null;
+    // upcoming dated items first, then undated, then past
+    const rank = x => x === null ? 1 : x >= 0 ? 0 : 2;
+    if (rank(ad) !== rank(bd)) return rank(ad) - rank(bd);
+    if (ad !== null && bd !== null) return rank(ad) === 2 ? bd - ad : ad - bd;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+}
+function modalNotice(n){
+  n = n || {};
+  showModal(n.id ? "お知らせを編集" : "お知らせ・共通予定を追加",
+    '<div class="fields">' +
+    '<label class="f">見出し<input type="text" id="n_title" maxlength="80" value="' + h(n.title || "") + '" placeholder="例：全体ミーティング / 新人スタッフが入りました"></label>' +
+    '<label class="f">日付（お知らせだけなら空でも可）<input type="date" id="n_date" value="' + h(n.date || "") + '"></label>' +
+    '<label class="f">内容<textarea id="n_body" placeholder="時間・場所・共有したいことなど">' + h(n.body || "") + "</textarea></label>" +
+    '<label class="f">リンク<input type="url" id="n_url" value="' + h(n.url || "") + '" placeholder="https://"></label>' +
+    '<label class="f" style="flex-direction:row;align-items:center;gap:8px">' +
+      '<input type="checkbox" id="n_pin" style="width:auto"' + (n.pinned ? " checked" : "") + ">上に固定する（重要）</label></div>",
+    (n.id ? '<button class="btn danger left" data-act="del-notice" data-id="' + h(n.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-notice" data-id="' + h(n.id || "") + '">保存</button>');
+}
+async function saveNoticeFromModal(id){
+  const title = valOf("n_title");
+  if (!title){ toast("見出しを入力してください"); return; }
+  const pin = el("n_pin");
+  const body = { title: title, date: valOf("n_date") || null, body: valOf("n_body"),
+    url: valOf("n_url"), pinned: !!(pin && pin.checked), updated_at: nowIso() };
+  if (id) await run(sb.from("notices").update(body).eq("id", id), "保存しました");
+  else { body.created_by = S.me.id; await run(sb.from("notices").insert(body), "登録しました"); }
+  closeModal();
+}
+
 /* ============================ view: ホーム ============================ */
 const kindChip = k => '<span class="chip ' + KINDS[k || ""].chip + '">' + KINDS[k || ""].label + "</span>";
 function todayRow(m){
@@ -374,9 +442,11 @@ function todayRow(m){
       '<span class="who"><span class="pip" style="background:' + h(m.color) + '"></span>' + h(m.name) +
       (isMe ? ' <span style="color:var(--muted);font-weight:400;font-size:11px">(あなた)</span>' : "") + "</span>" +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' + kindChip(d.kind) +
-        (m.present ? '<span class="chip ok"><span class="dot"></span>事務所</span>' : "") + "</div>" +
+        ((d.from || d.to) ? '<span class="chip"><span class="num">' + h(d.from || "--:--") + "〜" + h(d.to || "--:--") + "</span></span>" : "") +
+        (m.present ? '<span class="chip ok"><span class="dot"></span>在席</span>' : "") + "</div>" +
     "</div><div>" +
       '<div class="today-plan' + (d.plan ? "" : " blank") + '">' + (d.plan ? h(d.plan) : "今日の動きは未記入") + "</div>" + ng +
+      (d.url ? '<div style="margin-top:4px"><a href="' + h(d.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">関連リンクを開く ↗</a></div>' : "") +
       '<div style="margin-top:7px"><button class="btn sm" data-act="edit-day" data-id="' + h(m.id) + '" data-date="' + today() + '">' +
         (isMe ? "自分の今日を書く" : "この日を編集") + "</button></div>" +
     "</div></div>";
@@ -400,7 +470,17 @@ function viewHome(){
   const wanted = wantedTasks().sort((a,b) => (a.due||"9").localeCompare(b.due||"9"));
   const bills = unpaid().sort((a,b) => (a.due||"9").localeCompare(b.due||"9")).slice(0, 4);
   const load = S.members.map(m => ({ m: m, n: openTasks().filter(t => t.assignee === m.id).length }));
+  const notices = sortedNotices();
   return '<div class="grid-home"><div>' +
+      '<section class="sec"><div class="sec-head"><h2>お知らせ・共通予定</h2>' +
+        '<span class="hint">全体ミーティングや打ち合わせ、共有事項など。</span>' +
+        '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
+        '<div class="panel"><div class="rows" style="border-top:0">' +
+        (notices.length ? notices.slice(0, 5).map(noticeRow).join("")
+          : '<div class="empty">お知らせはありません</div>') + "</div></div>" +
+        (notices.length > 5 ? '<p style="font-size:12px;color:var(--muted);margin-top:6px">ほか ' +
+          (notices.length - 5) + ' 件は「スケジュール」タブに表示されます。</p>' : "") +
+      "</section>" +
       '<section class="sec"><div class="sec-head"><div class="eyebrow">' + h(today().replace(/-/g,"/")) + " (" + DOW[new Date().getDay()] + ")" +
         '</div><div class="spacer"></div><span class="hint">今日の全員の動き</span></div>' +
         '<h2 style="font-family:var(--serif);font-size:19px;margin-bottom:12px">今日は誰が、何をしていますか</h2>' +
@@ -451,10 +531,12 @@ function viewSched(){
     for (let d = 1; d <= n; d++){
       const date = ym + "-" + pad(d), day = dayOf(m.id, date) || {};
       const K = KINDS[day.kind || ""];
-      const marks = ((day.ngFrom || day.ngTo) ? '<span class="m ngm"></span>' : "") + ((day.plan || day.note) ? '<span class="m notem"></span>' : "");
+      const marks = ((day.ngFrom || day.ngTo) ? '<span class="m ngm"></span>' : "") +
+        ((day.plan || day.note) ? '<span class="m notem"></span>' : "") +
+        (day.url ? '<span class="m linkm"></span>' : "");
       r += '<td class="day ' + K.cls + (date === t ? " today-col" : "") + '">' +
         '<button class="cell" data-act="edit-day" data-id="' + h(m.id) + '" data-date="' + date + '" title="' + h(m.name + " " + date) + '">' +
-        '<span class="k">' + (day.kind ? K.label.slice(0, 2) : "") + '</span><span class="marks">' + marks + "</span></button></td>";
+        '<span class="k">' + h(day.kind ? K.cell : "") + '</span><span class="marks">' + marks + "</span></button></td>";
     }
     return "<tr>" + r + "</tr>";
   }).join("");
@@ -466,7 +548,13 @@ function viewSched(){
       if (day && (day.ngFrom || day.ngTo)) ngList.push({ m: m, date: date, d: day });
     }
   });
-  return '<section class="sec"><div class="sec-head"><h2>' + h(label) + " の勤務・休み</h2><div class=\"spacer\"></div>" +
+  const monthNotices = sortedNotices().filter(function(n){ return !n.date || n.date.slice(0, 7) === ym; });
+  return '<section class="sec"><div class="sec-head"><h2>お知らせ・共通予定</h2>' +
+    '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (monthNotices.length ? monthNotices.map(noticeRow).join("")
+      : '<div class="empty">この月のお知らせはありません</div>') + "</div></div></section>" +
+    '<section class="sec"><div class="sec-head"><h2>' + h(label) + " の予定</h2><div class=\"spacer\"></div>" +
     '<button class="btn sm" data-act="month" data-delta="-1">← 前の月</button>' +
     '<button class="btn sm" data-act="month" data-delta="0">今月</button>' +
     '<button class="btn sm" data-act="month" data-delta="1">次の月 →</button></div>' +
@@ -474,11 +562,13 @@ function viewSched(){
     (S.members.length ? body : '<tr><td class="name">—</td><td colspan="' + n + '" style="padding:18px;text-align:center;color:var(--muted)">メンバーがいません</td></tr>') +
     "</tbody></table></div>" +
     '<div class="legend">' +
-      '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>出勤</span>' +
-      '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>公休</span>' +
-      '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>半休</span>' +
+      '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>事務所</span>' +
+      '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>在宅</span>' +
+      '<span><i style="background:var(--warn-soft);border:1px solid var(--line)"></i>外仕事</span>' +
+      '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>休み</span>' +
       '<span><i style="background:var(--bad);border-radius:50%"></i>連絡がつかない時間帯あり</span>' +
-      '<span><i style="background:var(--brass);border-radius:50%"></i>その日の予定メモあり</span>' +
+      '<span><i style="background:var(--brass);border-radius:50%"></i>予定メモあり</span>' +
+      '<span><i style="background:var(--cool);border-radius:50%"></i>関連リンクあり</span>' +
       '<span style="margin-left:auto">マスを押すと編集できます</span></div></section>' +
     '<section class="sec"><div class="sec-head"><h2>連絡がつかない時間帯（今月）</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
@@ -737,6 +827,14 @@ function viewSettings(){
 
     viewSignupGate() +
 
+    '<section class="sec"><div class="sec-head"><h2>求人パイプのURL</h2>' +
+    '<span class="hint">スケジュールの「関連リンク」からワンタップで入れられます。</span></div>' +
+    '<div class="panel"><div style="padding:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      '<input type="url" id="set_recruit" style="flex:1 1 220px" value="' + h(recruitUrl()) + '" placeholder="https://">' +
+      '<button class="btn primary" data-act="save-recruit">保存</button>' +
+      (recruitUrl() ? '<a href="' + h(recruitUrl()) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">開く ↗</a>' : "") +
+    "</div></div></section>" +
+
     '<section class="sec"><div class="sec-head"><h2>このアカウント</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
       '<div class="row" style="align-items:center"><span style="flex:1">表示名</span><b>' + h(meName()) + "</b>" +
@@ -818,9 +916,15 @@ function modalDay(memberId, date){
   const w = DOW[dow(date.slice(0, 7), Number(date.slice(8, 10)))];
   showModal(m.name + " ・ " + date.replace(/-/g, "/") + "（" + w + "）",
     '<div class="fields">' +
-    '<label class="f">その日の区分<select id="d_kind">' +
-      ["", "work", "off", "half"].map(k => '<option value="' + k + '"' + ((d.kind || "") === k ? " selected" : "") + ">" +
+    '<label class="f">その日の動き方<select id="d_kind">' +
+      KIND_ORDER.map(k => '<option value="' + k + '"' + ((d.kind || "") === k ? " selected" : "") + ">" +
         KINDS[k].label + "</option>").join("") + "</select></label>" +
+    '<div class="fields two">' +
+      '<label class="f">事務所・現場にいる時間（開始）<input type="time" id="d_from" value="' + h(d.from || "") + '"></label>' +
+      '<label class="f">同（終了）<input type="time" id="d_to" value="' + h(d.to || "") + '"></label></div>' +
+    '<label class="f">関連リンク（面接・撮影の詳細など）' +
+      '<input type="url" id="d_url" value="' + h(d.url || "") + '" placeholder="' + h(recruitUrl() || "https://") + '"></label>' +
+    (recruitUrl() ? '<button type="button" class="btn sm" data-act="use-recruit">求人パイプのURLを入れる</button>' : "") +
     '<label class="f">今日1日の動き（全員が見られます）<textarea id="d_plan" placeholder="例：13時まで在宅で写真の差し替え、15時から事務所、夕方に面接1件">' + h(d.plan || "") + "</textarea></label>" +
     '<div class="fields two">' +
       '<label class="f">連絡がつかない時間帯（開始）<input type="time" id="d_ngf" value="' + h(d.ngFrom || "") + '"></label>' +
@@ -933,6 +1037,7 @@ async function saveDay(memberId, date, day){
   await run(sb.from("schedule").upsert({
     member_id: memberId, date: date, kind: day.kind || "", plan: day.plan || "",
     ng_from: day.ngFrom || "", ng_to: day.ngTo || "", note: day.note || "",
+    from_time: day.from || "", to_time: day.to || "", link_url: day.url || "",
     updated_by: S.me.id, updated_at: nowIso()
   }, { onConflict: "member_id,date" }));
 }
@@ -1022,10 +1127,11 @@ document.addEventListener("click", async function(ev){
       case "edit-day": modalDay(id, btn.dataset.date); break;
       case "save-day":
         await saveDay(id, btn.dataset.date, { kind: valOf("d_kind"), plan: valOf("d_plan"),
-          ngFrom: valOf("d_ngf"), ngTo: valOf("d_ngt"), note: valOf("d_note") });
+          ngFrom: valOf("d_ngf"), ngTo: valOf("d_ngt"), note: valOf("d_note"),
+          from: valOf("d_from"), to: valOf("d_to"), url: valOf("d_url") });
         toast("保存しました"); closeModal(); break;
       case "clear-day":
-        await saveDay(id, btn.dataset.date, { kind:"", plan:"", ngFrom:"", ngTo:"", note:"" });
+        await saveDay(id, btn.dataset.date, { kind:"", plan:"", ngFrom:"", ngTo:"", note:"", from:"", to:"", url:"" });
         toast("空にしました"); closeModal(); break;
 
       case "task-filter": S.taskFilter = btn.dataset.f; render(); break;
@@ -1076,6 +1182,7 @@ document.addEventListener("click", async function(ev){
         if (r) copy(r[btn.dataset.k] || "", btn.dataset.k === "password" ? "パスワード" : "ID");
         break;
       }
+      case "use-recruit": { const n = el("d_url"); if (n) n.value = recruitUrl(); break; }
       case "preset": { const n = el("v_media"); if (n){ n.value = btn.dataset.v; n.focus(); } break; }
 
       case "edit-member": modalMember(member(id)); break;
@@ -1107,6 +1214,13 @@ document.addEventListener("click", async function(ev){
       }
       case "copy-code":
         copy((S.settings || {}).invite_code || "", "招待コード"); break;
+      case "save-recruit":
+        await run(sb.from("board_settings").update({ recruit_url: valOf("set_recruit"), updated_at: nowIso() }).eq("id", 1), "保存しました");
+        break;
+      case "new-notice": modalNotice(null); break;
+      case "edit-notice": modalNotice(S.notices.find(x => x.id === id)); break;
+      case "save-notice": await saveNoticeFromModal(id); break;
+      case "del-notice": await run(sb.from("notices").delete().eq("id", id), "削除しました"); closeModal(); break;
       case "new-shop": modalShop(null); break;
       case "edit-shop": modalShop(S.shops.find(x => x.id === id)); break;
       case "save-shop": await saveShopFromModal(id); break;
