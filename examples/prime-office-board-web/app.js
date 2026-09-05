@@ -251,21 +251,7 @@ const TABS = [
   { id:"set",    label:"設定",           short:"設定" }
 ];
 
-// Each shop's recruitment sheet, in the order the office already writes it.
-const SHOP_FIELDS = [
-  ["hours",      "営業時間",   "例：15:00-4:00受付", false],
-  ["station",    "最寄り駅",   "例：梅田駅", false],
-  ["pickup",     "送り迎え",   "料金・対応範囲・自走の場合の扱いなど", true],
-  ["hiring",     "採用基準",   "", true],
-  ["pay",        "女子給",     "例：70-9000", true],
-  ["nomination", "指名料",     "例：1000-5000", false],
-  ["misc",       "雑費",       "例：2本目以降から一律2000", false],
-  ["standby",    "待機",       "例：梅田近辺待機", false],
-  ["id_docs",    "必要な身分証", "例：顔つき身分証", true],
-  ["training",   "講習の有無", "", true],
-  ["pr",         "PR",         "応募者に伝えたい強み", true],
-  ["note",       "その他メモ", "社内向けの補足", true]
-];
+
 const openTasks = () => S.tasks.filter(t => t.status !== "done");
 const wantedTasks = () => openTasks().filter(t => !t.assignee);
 const unpaid = () => S.payments.filter(p => p.status !== "paid");
@@ -574,15 +560,51 @@ function viewPay(){
 // Staff paste this straight into replies to applicants, so keep the ■ headings
 // exactly as the office already writes them.
 function shopText(sp){
-  const lines = ["■店名", sp.name];
-  if (sp.url) lines.push(sp.url);
-  SHOP_FIELDS.forEach(function(f){
-    if (f[0] === "note") return;              // internal only
-    const v = (sp[f[0]] || "").trim();
-    if (!v) return;
-    lines.push("", "■" + f[1], v);
+  const out = ["■店名", sp.name];
+  if (sp.url) out.push("", "■URL", sp.url);
+  (sp.sections || []).forEach(function(sec){
+    const label = (sec.label || "").trim(), value = (sec.value || "").trim();
+    if (!label && !value) return;
+    out.push("");
+    if (label) out.push("■" + label);
+    if (value) out.push(value);
   });
-  return lines.join("\n");
+  return out.join("\n");
+}
+
+// Splits an ■ block into ordered {label, value} pairs, keeping every heading the
+// office wrote — including ones with the text on the same line after a colon, and
+// ones that are a whole sentence with no value at all.
+function parseShopText(text){
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  const sections = [];
+  let cur = null, lead = [];
+  lines.forEach(function(raw){
+    const line = raw.replace(/^\s+/, "");
+    if (line.charAt(0) === "\u25a0"){
+      const rest = line.slice(1);
+      const m = rest.match(/^([^：:]*)[：:]([\s\S]*)$/);
+      cur = m ? { label: m[1].trim(), value: [m[2].trim()] } : { label: rest.trim(), value: [] };
+      sections.push(cur);
+    } else if (cur){
+      cur.value.push(raw);
+    } else if (raw.trim()){
+      lead.push(raw);
+    }
+  });
+  const tidy = sections.map(function(sec){
+    return { label: sec.label, value: sec.value.join("\n").replace(/^\n+|\s+$/g, "") };
+  });
+  if (lead.length) tidy.unshift({ label: "", value: lead.join("\n").trim() });
+
+  let name = "", url = "";
+  const kept = [];
+  tidy.forEach(function(sec){
+    if (sec.label === "店名" && !name){ name = sec.value; return; }
+    if (/^URL$/i.test(sec.label) && !url){ url = sec.value; return; }
+    kept.push(sec);
+  });
+  return { name: name, url: url, sections: kept };
 }
 function viewShops(){
   const list = S.shops;
@@ -598,12 +620,14 @@ function viewShops(){
         '<button class="btn sm" data-act="copy-shop" data-id="' + h(sp.id) + '">まとめてコピー</button> ' +
         '<button class="btn sm ghost" data-act="edit-shop" data-id="' + h(sp.id) + '">編集</button></div>' +
         '<dl class="shop-grid">' +
-        SHOP_FIELDS.map(function(f){
-          const v = (sp[f[0]] || "").trim();
-          if (!v && f[0] === "note") return "";
-          return "<dt>" + h(f[1]) + "</dt><dd" + (v ? "" : ' class="blank"') + ">" +
-            (v ? h(v) : "未記入") + "</dd>";
-        }).join("") + "</dl></div>";
+        ((sp.sections || []).length
+          ? sp.sections.map(function(sec){
+              const label = (sec.label || "").trim(), value = (sec.value || "").trim();
+              return "<dt>" + h(label) + "</dt><dd" + (value ? "" : ' class="blank"') + ">" +
+                (value ? h(value) : "—") + "</dd>";
+            }).join("")
+          : '<dd class="blank" style="grid-column:1 / -1">項目がありません。「編集」から貼り付けてください。</dd>') +
+        "</dl></div>";
     }).join("") : '<div class="empty">まだ登録がありません。「店舗を追加」から登録してください。</div>') +
     "</div></section>";
 }
@@ -785,19 +809,18 @@ function modalVault(v){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-vault" data-id="' + h(v.id || "") + '">保存</button>');
 }
+const SHOP_PLACEHOLDER = "\u25a0店名：\n\u25a0営業時間：15:00〜3:00\n\u25a0最寄り駅：\n日本橋\n\u25a0女子給\n70分6,000〜\n90分8,000〜";
 function modalShop(sp){
   sp = sp || {};
   showModal(sp.id ? "店舗を編集" : "店舗を追加",
     '<div class="fields">' +
-    '<label class="f">店名<input type="text" id="s_name" maxlength="60" value="' + h(sp.name || "") + '" placeholder="例：プライム　ロイヤル"></label>' +
-    '<label class="f">サイトURL<input type="url" id="s_url" value="' + h(sp.url || "") + '" placeholder="https://"></label>' +
-    SHOP_FIELDS.map(function(f){
-      const v = h(sp[f[0]] || "");
-      return '<label class="f">' + h(f[1]) +
-        (f[3] ? '<textarea id="s_' + f[0] + '" placeholder="' + h(f[2]) + '">' + v + "</textarea>"
-              : '<input type="text" id="s_' + f[0] + '" value="' + v + '" placeholder="' + h(f[2]) + '">') +
-        "</label>";
-    }).join("") +
+    '<label class="f">貼り付け（■ の形式そのまま）' +
+      '<textarea id="s_paste" rows="16" style="min-height:280px;font-size:13px;line-height:1.7" placeholder="' +
+      h(SHOP_PLACEHOLDER) + '">' + h(sp.id ? shopText(sp) : "") + "</textarea></label>" +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
+      '求人票をそのまま貼ってください。<strong>■</strong> で始まる行が見出しになります。' +
+      '「■店名：〇〇」のように同じ行に書いても、次の行に書いても大丈夫です。<br>' +
+      '見出しの数や順番は店舗ごとに自由です。</p>' +
     '<label class="f">並び順<input type="number" id="s_sort" value="' + h(sp.sort_order != null ? sp.sort_order : (S.shops.length + 1)) + '"></label>' +
     "</div>",
     (sp.id ? '<button class="btn danger left" data-act="del-shop" data-id="' + h(sp.id) + '">削除</button>' : "") +
@@ -879,11 +902,10 @@ function revealOne(id){
 }
 
 async function saveShopFromModal(id){
-  const name = valOf("s_name");
-  if (!name){ toast("店名を入力してください"); return; }
-  const body = { name: name, url: valOf("s_url"), sort_order: Number(valOf("s_sort") || 0),
-    updated_by: S.me.id, updated_at: nowIso() };
-  SHOP_FIELDS.forEach(function(f){ body[f[0]] = valOf("s_" + f[0]); });
+  const parsed = parseShopText(valOf("s_paste"));
+  if (!parsed.name){ toast("「■店名」の行を入れてください"); return; }
+  const body = { name: parsed.name, url: parsed.url, sections: parsed.sections,
+    sort_order: Number(valOf("s_sort") || 0), updated_by: S.me.id, updated_at: nowIso() };
   if (id) await run(sb.from("shops").update(body).eq("id", id), "保存しました");
   else await run(sb.from("shops").insert(body), "登録しました");
   closeModal();
