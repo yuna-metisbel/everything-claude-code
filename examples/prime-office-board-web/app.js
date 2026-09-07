@@ -89,7 +89,12 @@ const S = {
   authErr: "", authMode: "in", busy: false,
   theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
-  vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: ""
+  vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
+  // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
+  siteCode: "", gate: null, staffMe: null,
+  sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
+  siteDay: today(), siteMonth: today().slice(0, 7), todoFilter: "open",
+  staff: [], punches: [], keyEvents: [], keyDuty: {}, todos: [], sshifts: {}
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
@@ -136,7 +141,7 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
@@ -146,7 +151,8 @@ async function loadAll(){
     sb.from("shops").select("*").order("sort_order").order("name"),
     sb.from("notices").select("*").order("created_at", { ascending: false }),
     sb.from("allowed_emails").select("*").order("email"),
-    sb.from("board_settings").select("*").eq("id", 1).maybeSingle()
+    sb.from("board_settings").select("*").eq("id", 1).maybeSingle(),
+    sb.from("sites").select("*").order("sort_order").order("name")
   ]);
   if (mem.data) S.members = mem.data.map(normMember);
   if (off.data) S.office = { doorOpen: off.data.door_open, updatedBy: off.data.updated_by, updatedAt: off.data.updated_at };
@@ -161,6 +167,17 @@ async function loadAll(){
   S.settings = bst.data || null;
   if (S.settings) S.mode = S.settings.signup_mode;
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
+  S.sites = sit.data || [];
+  if (!site(S.siteId)) S.siteId = S.sites.length ? S.sites[0].id : "";
+  await loadSite(S.siteId);
+}
+
+// スタッフとして入っているときは、自分の拠点ぶんだけを読む。
+async function loadStaffAll(){
+  const r = await sb.from("sites").select("*").eq("id", S.staffMe.siteId);
+  S.sites = r.data || [];
+  S.siteId = S.staffMe.siteId;
+  await loadSite(S.siteId);
 }
 
 let reloadTimer = null;
@@ -170,7 +187,8 @@ function scheduleReload(){
 }
 function subscribeLive(){
   const ch = sb.channel("board");
-  ["members","office","schedule","tasks","payments","vault","shops","notices","allowed_emails","board_settings"].forEach(t => {
+  ["members","office","schedule","tasks","payments","vault","shops","notices","allowed_emails","board_settings",
+   "sites","staff","punches","key_events","key_duty","staff_todos","staff_shifts"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -179,24 +197,41 @@ function subscribeLive(){
 /* ============================ auth ============================ */
 async function boot(){
   applyTheme();
+  S.siteCode = urlSiteCode();
   const { data } = await sb.auth.getSession();
   S.user = data && data.session ? data.session.user : null;
   sb.auth.onAuthStateChange(function(_e, session){
     const next = session ? session.user : null;
     const changed = (next && next.id) !== (S.user && S.user.id);
     S.user = next;
-    if (changed){ S.reveal = {}; S.mode = ""; refresh(); }
+    if (changed){ S.reveal = {}; S.mode = ""; S.staffMe = null; refresh(); }
   });
   await refresh();
   subscribeLive();
 }
 async function refresh(){
   if (S.user) S.form = {};
+  if (!S.user){
+    // 入り口コード付きの URL はスタッフ用。素の URL は本部のログイン。
+    if (S.siteCode){ await loadGate(S.siteCode); S.screen = "sitegate"; S.ready = true; render(); return; }
+    if (!S.mode){
+      const r = await sb.rpc("signup_mode");
+      S.mode = (r && !r.error && r.data) ? r.data : "code";
+    }
+    S.screen = "auth"; S.ready = true; render(); return;
+  }
+  // ログイン済みなら、まず本部メンバーかスタッフかを見分ける。
+  const st = await sb.from("staff").select(STAFF_COLS).eq("auth_user_id", S.user.id).maybeSingle();
+  S.staffMe = st.data ? normStaff(st.data) : null;
+  if (S.staffMe){
+    try { await loadStaffAll(); } catch(e){ /* 下で空として描く */ }
+    if (!siteTabs().some(t => t.id === S.siteTab)) S.siteTab = (siteTabs()[0] || {}).id || "att";
+    S.screen = "staff"; S.ready = true; render(); return;
+  }
   if (!S.mode){
     const r = await sb.rpc("signup_mode");
     S.mode = (r && !r.error && r.data) ? r.data : "code";
   }
-  if (!S.user){ S.screen = "auth"; S.ready = true; render(); return; }
   try { await loadAll(); } catch(e){ /* rendered as empty below */ }
   S.screen = S.me ? "app" : "profile";
   S.ready = true;
@@ -272,8 +307,9 @@ const TABS = [
   { id:"sched",  label:"スケジュール",   short:"予定" },
   { id:"tasks",  label:"タスク",         short:"タスク" },
   { id:"pay",    label:"支払い",         short:"支払" },
+  { id:"sites",  label:"スタッフ拠点",   short:"拠点" },
   { id:"shops",  label:"店舗",           short:"店舗" },
-  { id:"vault",  label:"ID /パス",       short:"ID/パス" },
+  { id:"vault",  label:"ID /パス",       short:"ID" },
   { id:"set",    label:"設定",           short:"設定" }
 ];
 
@@ -283,22 +319,52 @@ const wantedTasks = () => openTasks().filter(t => !t.assignee);
 const unpaid = () => S.payments.filter(p => p.status !== "paid");
 
 function render(){
-  const chrome = S.screen === "app";
-  el("masthead").hidden = !chrome;
-  el("tabsNav").hidden = !chrome;
+  const hq = S.screen === "app", staff = S.screen === "staff";
+  el("masthead").hidden = !hq;
+  el("tabsNav").hidden = !(hq || staff);
   const v = el("view");
   if (!S.ready){ v.innerHTML = '<p class="empty" style="border:0">読み込み中…</p>'; return; }
   if (S.screen === "auth"){ v.className = ""; v.innerHTML = viewAuth(); return; }
+  if (S.screen === "sitegate"){ v.className = ""; v.innerHTML = viewSiteGate(); return; }
   if (S.screen === "profile"){ v.className = ""; v.innerHTML = viewProfile(); return; }
   v.className = "wrap";
+  if (staff){
+    renderStaffBar(); renderStaffTabs();
+    v.innerHTML = S.siteTab === "key" ? viewKey()
+      : S.siteTab === "todo"  ? viewTodo()
+      : S.siteTab === "shift" ? viewShift()
+      : viewAtt();
+    if (S.siteTab === "shift") scrollShiftToToday();
+    return;
+  }
   renderDoor(); renderHere(); renderTabs();
   v.innerHTML = S.tab === "sched" ? viewSched()
     : S.tab === "shops" ? viewShops()
     : S.tab === "tasks" ? viewTasks()
     : S.tab === "pay"   ? viewPay()
+    : S.tab === "sites" ? viewSites()
     : S.tab === "vault" ? viewVault()
     : S.tab === "set"   ? viewSettings()
     : viewHome();
+  if (S.tab === "sites" && S.siteTab === "shift") scrollShiftToToday();
+}
+// スタッフ側は本部のヘッダーを出さず、拠点名と自分の名前だけを出す。
+function renderStaffBar(){
+  const t = curSite() || {};
+  el("bannerBox").innerHTML =
+    '<div class="wrap staff-bar"><span class="mark">PRIME</span>' +
+    '<span class="staff-site">' + h(t.name || "") + "</span>" +
+    '<span class="spacer" style="flex:1"></span>' +
+    '<span class="staff-me">' + h(S.staffMe ? S.staffMe.name : "") +
+      (S.staffMe && S.staffMe.role === "manager" ? '<span class="chip brass">店長</span>' : "") + "</span>" +
+    '<button class="btn sm ghost" data-act="theme" aria-label="' + h(themeLabel()) + '">' + themeGlyph() + "</button>" +
+    '<button class="btn sm ghost" data-act="signout">出る</button></div>';
+}
+function renderStaffTabs(){
+  const tabs = siteTabs();
+  el("tabs").innerHTML = tabs.map(t =>
+    '<button class="tab" role="tab" aria-selected="' + (S.siteTab === t.id) + '" data-stab="' + t.id + '">' +
+    '<span class="t-lg">' + h(t.label) + '</span><span class="t-sm">' + h(t.short) + "</span></button>").join("");
 }
 function renderTabs(){
   const badges = { tasks: wantedTasks().length,
@@ -713,6 +779,565 @@ function viewPay(){
       : '<tr><td colspan="7" style="text-align:center;padding:22px;color:var(--muted)">' +
         (showingPaid ? "この月の記録はありません" : "該当する支払いはありません") + "</td></tr>") +
     "</tbody></table></div></section>";
+}
+
+/* ============================ 拠点（スタッフ用の入り口） ============================ */
+// 本部は members、各拠点のスタッフは staff。両者は別の入り口から入るが、
+// 見る画面（勤怠・鍵・TODO・シフト）は同じ関数で描く。本部はそれを拠点ごとに切り替えて見る。
+const STAFF_TABS = [
+  { id:"att",   label:"勤怠",   short:"勤怠" },
+  { id:"key",   label:"鍵",     short:"鍵" },
+  { id:"todo",  label:"TODO",   short:"TODO" },
+  { id:"shift", label:"シフト", short:"シフト" }
+];
+const SHIFT_KINDS = [
+  ["work",      "出勤", "ok"],
+  ["off",       "休み", "bad"],
+  ["undecided", "未定", ""]
+];
+const shiftKind = k => SHIFT_KINDS.find(x => x[0] === k) || SHIFT_KINDS[2];
+
+// 打刻はタイムスタンプで持つので、表示と日付のまとめは日本時間に直してから行う。
+const JST_MS = 9 * 3600000;
+const jstDay = iso => (iso ? new Date(Date.parse(iso) + JST_MS).toISOString().slice(0, 10) : "");
+const jstHM  = iso => {
+  if (!iso) return "";
+  const d = new Date(Date.parse(iso) + JST_MS);
+  return pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes());
+};
+// 日本時間の "YYYY-MM-DDTHH:MM" を UTC の ISO に戻す（手動修正の入力欄用）。
+const jstInputToIso = v => (v ? new Date(Date.parse(v + ":00+09:00")).toISOString() : null);
+const isoToJstInput = iso => (iso ? new Date(Date.parse(iso) + JST_MS).toISOString().slice(0, 16) : "");
+
+// 出勤→退勤を順に組にする。夜勤が日付をまたいでも、その勤務は出勤した日に残す。
+function pairPunches(rows){
+  const byStaff = {};
+  rows.slice().sort((a, b) => a.punchedAt.localeCompare(b.punchedAt)).forEach(function(r){
+    (byStaff[r.staffId] = byStaff[r.staffId] || []).push(r);
+  });
+  const out = [];
+  Object.keys(byStaff).forEach(function(staffId){
+    let pending = null;
+    byStaff[staffId].forEach(function(r){
+      if (r.kind === "in"){
+        if (pending) out.push({ staffId: staffId, inRec: pending, outRec: null });
+        pending = r;
+      } else if (pending){
+        out.push({ staffId: staffId, inRec: pending, outRec: r }); pending = null;
+      } else {
+        out.push({ staffId: staffId, inRec: null, outRec: r }); // 出勤のない単独の退勤
+      }
+    });
+    if (pending) out.push({ staffId: staffId, inRec: pending, outRec: null }); // 勤務中
+  });
+  return out.map(function(p){
+    return Object.assign(p, { day: jstDay((p.inRec || p.outRec).punchedAt) });
+  });
+}
+const shiftsOnDay = day => pairPunches(S.punches).filter(p => p.day === day);
+const onDutyNow = () => pairPunches(S.punches).filter(p => p.inRec && !p.outRec);
+const myOnDuty = () => onDutyNow().find(p => p.staffId === staffMeId()) || null;
+
+const site = id => S.sites.find(x => x.id === id) || null;
+const curSite = () => site(S.siteId);
+const staffOf = id => S.staff.find(x => x.id === id) || null;
+const staffName = id => (staffOf(id) || {}).name || "—";
+// 本部として見ているのか、スタッフとして入っているのか。
+const isHq = () => !!S.me;
+const staffMeId = () => (S.staffMe ? S.staffMe.id : null);
+// 打刻の手直しや名簿の編集ができるのは本部と店長だけ。
+const canManageSite = () => isHq() || !!(S.staffMe && S.staffMe.role === "manager");
+const siteTabs = () => {
+  const t = (curSite() || {}).tabs || {};
+  return STAFF_TABS.filter(x => t[x.id] !== false);
+};
+
+const normStaff  = r => ({ id:r.id, siteId:r.site_id, name:r.name, role:r.role, keyHolder:r.key_holder,
+                           keyNote:r.key_note, active:r.active, sortOrder:r.sort_order, pinSet:r.pin_set,
+                           lastLoginAt:r.last_login_at });
+const normPunch  = r => ({ id:r.id, siteId:r.site_id, staffId:r.staff_id, kind:r.kind,
+                           punchedAt:r.punched_at, note:r.note });
+const normKeyEv  = r => ({ id:r.id, siteId:r.site_id, staffId:r.staff_id, kind:r.kind,
+                           happenedAt:r.happened_at, note:r.note });
+const normTodo   = r => ({ id:r.id, siteId:r.site_id, title:r.title, detail:r.detail, assignee:r.assignee,
+                           due:r.due, status:r.status, doneBy:r.done_by, doneAt:r.done_at,
+                           doneMemo:r.done_memo, createdBy:r.created_by, createdAt:r.created_at });
+const normSShift = r => ({ siteId:r.site_id, staffId:r.staff_id, date:r.date, kind:r.kind,
+                           from:r.from_time, to:r.to_time, note:r.note });
+
+// pin_hash は列ごと読めないようにしてあるので、* ではなく必要な列だけを名指しする。
+const STAFF_COLS = "id,site_id,name,role,key_holder,key_note,active,sort_order,pin_set,last_login_at";
+
+async function loadSite(siteId){
+  if (!siteId){ S.staff = []; S.punches = []; S.keyEvents = []; S.keyDuty = {}; S.todos = []; S.sshifts = {}; return; }
+  const m = S.siteMonth;
+  const from = m + "-01", to = m + "-" + pad(daysInMonth(m));
+  // 夜勤が前後の日にはみ出すので、打刻だけは前後1日ぶん広く取る。
+  const fromIso = new Date(Date.parse(from + "T00:00:00+09:00") - 26 * 3600000).toISOString();
+  const toIso   = new Date(Date.parse(to + "T23:59:59+09:00") + 26 * 3600000).toISOString();
+  const [stf, pch, kev, kdt, tdo, shf] = await Promise.all([
+    sb.from("staff").select(STAFF_COLS).eq("site_id", siteId).order("sort_order").order("name"),
+    sb.from("punches").select("*").eq("site_id", siteId).gte("punched_at", fromIso).lte("punched_at", toIso),
+    sb.from("key_events").select("*").eq("site_id", siteId).order("happened_at", { ascending: false }).limit(60),
+    sb.from("key_duty").select("*").eq("site_id", siteId).gte("date", from).lte("date", to),
+    sb.from("staff_todos").select("*").eq("site_id", siteId).order("created_at", { ascending: false }).limit(300),
+    sb.from("staff_shifts").select("*").eq("site_id", siteId).gte("date", from).lte("date", to)
+  ]);
+  S.staff = (stf.data || []).map(normStaff);
+  S.punches = (pch.data || []).map(normPunch);
+  S.keyEvents = (kev.data || []).map(normKeyEv);
+  S.keyDuty = {}; (kdt.data || []).forEach(function(r){ S.keyDuty[r.date] = r; });
+  S.todos = (tdo.data || []).map(normTodo);
+  S.sshifts = {}; (shf.data || []).forEach(function(r){ S.sshifts[r.staff_id + "|" + r.date] = normSShift(r); });
+  if (S.staffMe) S.staffMe = S.staff.find(x => x.id === S.staffMe.id) || S.staffMe;
+}
+
+/* ---------------------------- スタッフの入り口 ---------------------------- */
+function urlSiteCode(){
+  const m = /[?&]s=([a-z0-9-]{2,24})/i.exec(location.search || "");
+  return m ? m[1].toLowerCase() : "";
+}
+async function loadGate(code){
+  const r = await sb.rpc("site_gate", { p_code: code });
+  S.gate = (r && !r.error && r.data && r.data.id) ? r.data : null;
+  if (!S.gate) S.authErr = "この入り口は見つからないか、いま停止中です。";
+}
+async function staffSignIn(){
+  const staffId = S.form.st_who || "";
+  const pin = (S.form.st_pin || "").trim();
+  if (!staffId){ S.authErr = "名前を選んでください。"; render(); return; }
+  if (!/^[0-9]{4}$/.test(pin)){ S.authErr = "暗証番号は数字4桁です。"; render(); return; }
+  S.busy = true; S.authErr = ""; render();
+  let out = null;
+  try {
+    out = await sb.functions.invoke("staff-login", { body: { code: S.siteCode, staffId: staffId, pin: pin } });
+  } catch(e){ out = { error: e }; }
+  if (out.error || !out.data || !out.data.tokenHash){
+    let msg = "ログインできませんでした。";
+    // Edge Function はエラー本文に理由を入れて返す。
+    try {
+      const body = out.error && out.error.context ? await out.error.context.json() : null;
+      if (body && body.error) msg = body.error;
+    } catch(e){ /* 本文が読めないときは既定の文言 */ }
+    S.busy = false; S.authErr = msg; S.form.st_pin = ""; render(); return;
+  }
+  const v = await sb.auth.verifyOtp({ token_hash: out.data.tokenHash, type: "email" });
+  S.busy = false;
+  if (v.error){ S.authErr = "ログインできませんでした。もう一度お試しください。"; render(); return; }
+  S.form = {};
+  await refresh();
+}
+function viewSiteGate(){
+  const g = S.gate;
+  if (!g){
+    return '<div class="gate"><div class="gate-card">' +
+      '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">スタッフ</span></div>' +
+      "<h1>入り口が見つかりません</h1>" +
+      '<p class="lead">URL が違うか、この入り口はいま停止中です。<br>本部に確認してください。</p>' +
+      "</div></div>";
+  }
+  const list = g.staff || [];
+  return '<div class="gate"><div class="gate-card">' +
+    '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">' + h(g.name) + "</span></div>" +
+    "<h1>" + h(g.name) + " スタッフ</h1>" +
+    '<p class="lead">名前を選んで、本部から聞いた暗証番号（4桁）を入れてください。</p>' +
+    (list.length
+      ? '<div class="fields">' +
+        '<label class="f">名前<select id="st_who">' +
+          '<option value="">— 選んでください —</option>' +
+          list.map(function(s){
+            return '<option value="' + h(s.id) + '"' + (S.form.st_who === s.id ? " selected" : "") + (s.hasPin ? "" : " disabled") + ">" +
+              h(s.name) + (s.hasPin ? "" : "（暗証番号 未発行）") + "</option>"; }).join("") +
+          "</select></label>" +
+        '<label class="f">暗証番号<input type="password" id="st_pin" inputmode="numeric" autocomplete="off" ' +
+          'maxlength="4" pattern="[0-9]*" placeholder="4桁" value="' + h(S.form.st_pin || "") + '"></label>' +
+        "</div>" +
+        (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
+        '<button class="btn primary" style="width:100%" data-act="staff-signin"' + (S.busy ? " disabled" : "") + ">" +
+          (S.busy ? "確認中…" : "入る") + "</button>"
+      : '<p class="empty" style="border:0">まだ名簿にスタッフが登録されていません。本部に連絡してください。</p>') +
+    "</div></div>";
+}
+
+/* ---------------------------- 勤怠 ---------------------------- */
+function viewAtt(){
+  const day = S.siteDay;
+  const rows = shiftsOnDay(day);
+  const seen = {}; rows.forEach(function(r){ seen[r.staffId] = 1; });
+  const blanks = canManageSite()
+    ? S.staff.filter(s => s.active && !seen[s.id]).map(s => ({ staffId: s.id, inRec: null, outRec: null, day: day }))
+    : [];
+  const on = onDutyNow();
+  const mine = myOnDuty();
+  const cell = (rec, empty) => rec
+    ? '<span class="chip ok num" data-act="' + (canManageSite() ? "fix-punch" : "") + '" data-id="' + h(rec.id) + '">' + h(jstHM(rec.punchedAt)) + "</span>"
+    : '<span class="chip">' + h(empty) + "</span>";
+
+  return '<section class="sec">' +
+    (staffMeId()
+      ? '<div class="panel punch-card">' +
+          '<div class="punch-now">' + (mine
+            ? '<b>勤務中</b><span>' + h(jstHM(mine.inRec.punchedAt)) + " から</span>"
+            : "<b>未出勤</b><span>まだ今日の打刻がありません</span>") + "</div>" +
+          '<button class="btn primary punch-btn" data-act="punch" data-v="' + (mine ? "out" : "in") + '">' +
+            (mine ? "退勤する" : "出勤する") + "</button></div>"
+      : "") +
+    '<div class="sec-head"><h2>勤務中</h2><span class="chip brass num">' + on.length + "人</span></div>" +
+    '<div class="panel" style="margin-bottom:16px">' +
+      (on.length
+        ? '<div class="rows">' + on.map(function(p){
+            return '<div class="row" style="align-items:center;gap:10px">' +
+              '<span style="flex:1;font-size:14px">' + h(staffName(p.staffId)) + "</span>" +
+              '<span class="chip ok num">' + h(jstHM(p.inRec.punchedAt)) + " 〜</span></div>"; }).join("") + "</div>"
+        : '<div class="empty">いま勤務中の人はいません</div>') + "</div>" +
+
+    '<div class="sec-head"><h2>' + h(day.slice(5).replace("-", "/")) + " の記録</h2>" +
+      '<div class="btn-row">' +
+        '<button class="btn sm" data-act="site-day" data-delta="-1">← 前日</button>' +
+        '<button class="btn sm" data-act="site-day" data-delta="0">今日</button>' +
+        '<button class="btn sm" data-act="site-day" data-delta="1">翌日 →</button></div></div>' +
+    '<div class="panel tbl-scroll"><table class="data"><thead><tr>' +
+      "<th>スタッフ</th><th>出勤</th><th>退勤</th><th>勤務</th>" + (canManageSite() ? "<th></th>" : "") + "</tr></thead><tbody>" +
+    ((rows.length || blanks.length)
+      ? rows.concat(blanks).map(function(p){
+          const dur = p.inRec && p.outRec
+            ? Math.round((Date.parse(p.outRec.punchedAt) - Date.parse(p.inRec.punchedAt)) / 60000)
+            : null;
+          return "<tr>" +
+            '<td data-label="スタッフ"><span>' + h(staffName(p.staffId)) + "</span></td>" +
+            '<td data-label="出勤"><span>' + cell(p.inRec, "—") + "</span></td>" +
+            '<td data-label="退勤"><span>' + cell(p.outRec, p.inRec ? "勤務中" : "—") + "</span></td>" +
+            '<td data-label="勤務" class="num"><span>' +
+              (dur === null ? "—" : Math.floor(dur / 60) + "時間" + pad(dur % 60) + "分") + "</span></td>" +
+            (canManageSite()
+              ? '<td class="acts"><button class="btn sm ghost" data-act="add-punch" data-id="' + h(p.staffId) +
+                '" data-date="' + h(day) + '">打刻を追加</button></td>'
+              : "") + "</tr>"; }).join("")
+      : '<tr><td colspan="5" style="text-align:center;padding:22px;color:var(--muted)">この日の記録はありません</td></tr>') +
+    "</tbody></table></div></section>";
+}
+
+/* ---------------------------- 鍵 ---------------------------- */
+function viewKey(){
+  const day = S.siteDay;
+  const duty = S.keyDuty[day] || {};
+  const holders = S.staff.filter(s => s.active && s.keyHolder);
+  const last = kind => S.keyEvents.filter(e => e.kind === kind)[0] || null;
+  const lastOpen = last("open"), lastClose = last("close");
+  const stateLine = (ev, word) => ev
+    ? h(staffName(ev.staffId) + " が " + jstDay(ev.happenedAt).slice(5).replace("-", "/") + " " + jstHM(ev.happenedAt) + " に" + word)
+    : "まだ記録がありません";
+
+  return '<section class="sec">' +
+    '<div class="panel punch-card" style="margin-bottom:16px">' +
+      '<div class="punch-now"><b>いまの状態</b><span>' +
+        (lastOpen && (!lastClose || lastOpen.happenedAt > lastClose.happenedAt)
+          ? "あいています — " + stateLine(lastOpen, "開けました")
+          : lastClose ? "閉まっています — " + stateLine(lastClose, "閉めました")
+          : "まだ記録がありません") + "</span></div>" +
+      '<div class="btn-row" style="margin-left:0">' +
+        '<button class="btn primary" data-act="key-report" data-v="open">開けた</button>' +
+        '<button class="btn" data-act="key-report" data-v="close">閉めた</button></div></div>' +
+
+    '<div class="sec-head"><h2>' + h(day.slice(5).replace("-", "/")) + " の担当</h2>" +
+      '<div class="btn-row">' +
+        '<button class="btn sm" data-act="site-day" data-delta="-1">← 前日</button>' +
+        '<button class="btn sm" data-act="site-day" data-delta="0">今日</button>' +
+        '<button class="btn sm" data-act="site-day" data-delta="1">翌日 →</button></div></div>' +
+    '<div class="panel" style="margin-bottom:16px"><div class="rows">' +
+      '<div class="row" style="align-items:center;gap:10px"><span style="width:64px;font-size:13px;color:var(--muted)">開ける</span>' +
+        '<span style="flex:1;font-size:14px">' + (duty.open_staff ? h(staffName(duty.open_staff)) : "未定") + "</span>" +
+        '<button class="btn sm ghost" data-act="edit-duty" data-date="' + h(day) + '">変更</button></div>' +
+      '<div class="row" style="align-items:center;gap:10px"><span style="width:64px;font-size:13px;color:var(--muted)">閉める</span>' +
+        '<span style="flex:1;font-size:14px">' + (duty.close_staff ? h(staffName(duty.close_staff)) : "未定") + "</span>" +
+        '<button class="btn sm ghost" data-act="edit-duty" data-date="' + h(day) + '">変更</button></div>' +
+      (duty.note ? '<div class="row"><span style="font-size:13px;color:var(--ink-2)">' + h(duty.note) + "</span></div>" : "") +
+    "</div></div>" +
+
+    '<div class="sec-head"><h2>鍵を持っている人</h2>' +
+      (canManageSite() ? '<div class="btn-row"><button class="btn sm" data-act="edit-holders">登録する</button></div>' : "") + "</div>" +
+    '<div class="panel" style="margin-bottom:16px">' +
+      (holders.length
+        ? '<div class="rows">' + holders.map(function(s){
+            return '<div class="row" style="align-items:center;gap:10px">' +
+              '<span style="flex:1;font-size:14px">' + h(s.name) + "</span>" +
+              (s.keyNote ? '<span style="font-size:12px;color:var(--muted)">' + h(s.keyNote) + "</span>" : "") + "</div>"; }).join("") + "</div>"
+        : '<div class="empty">まだ登録がありません</div>') + "</div>" +
+
+    '<div class="sec-head"><h2>開け閉めの記録</h2></div>' +
+    '<div class="panel">' +
+      (S.keyEvents.length
+        ? '<div class="rows">' + S.keyEvents.slice(0, 30).map(function(e){
+            return '<div class="row" style="align-items:center;gap:10px">' +
+              '<span class="chip ' + (e.kind === "open" ? "ok" : "") + '">' + (e.kind === "open" ? "開けた" : "閉めた") + "</span>" +
+              '<span style="flex:1;font-size:14px">' + h(staffName(e.staffId)) +
+                (e.note ? '<div style="font-size:11.5px;color:var(--muted)">' + h(e.note) + "</div>" : "") + "</span>" +
+              '<span class="num" style="font-size:12.5px;color:var(--muted)">' +
+                h(jstDay(e.happenedAt).slice(5).replace("-", "/") + " " + jstHM(e.happenedAt)) + "</span></div>"; }).join("") + "</div>"
+        : '<div class="empty">まだ記録がありません</div>') + "</div></section>";
+}
+
+/* ---------------------------- TODO ---------------------------- */
+function viewTodo(){
+  const f = S.todoFilter;
+  const list = S.todos.filter(t => f === "all" ? true : f === "done" ? t.status === "done" : t.status !== "done")
+    .sort(function(a, b){
+      if (a.status !== b.status) return a.status === "done" ? 1 : -1;
+      return (a.due || "9999").localeCompare(b.due || "9999") || b.createdAt.localeCompare(a.createdAt);
+    });
+  const chips = [["open","やること"],["done","終わったこと"],["all","すべて"]];
+  return '<section class="sec"><div class="sec-head"><h2>TODO</h2>' +
+    '<div class="btn-row"><button class="btn primary" data-act="new-todo">＋ 追加</button></div></div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
+    chips.map(c => '<button class="btn sm' + (f === c[0] ? " primary" : "") + '" data-act="todo-filter" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
+    '<div class="panel">' + (list.length ? list.map(todoRow).join("") : '<div class="empty">該当するものはありません</div>') + "</div></section>";
+}
+function todoRow(t){
+  const done = t.status === "done";
+  const late = !done && t.due && daysUntil(t.due) !== null && daysUntil(t.due) < 0;
+  return '<div class="row todo-row' + (done ? " is-done" : "") + '">' +
+    '<button class="tick' + (done ? " on" : "") + '" data-act="toggle-todo" data-id="' + h(t.id) + '" aria-label="終わった"></button>' +
+    '<div style="flex:1;min-width:0">' +
+      '<div style="font-size:14px' + (done ? ";text-decoration:line-through;color:var(--muted)" : "") + '">' + h(t.title) + "</div>" +
+      (t.detail ? '<div style="font-size:12px;color:var(--muted);white-space:pre-wrap">' + h(t.detail) + "</div>" : "") +
+      // 終わった人が残したメモ。次の人が読むためにあるので、終わっても畳まない。
+      (t.doneMemo ? '<div class="today-done">' + h(t.doneMemo) + "</div>" : "") +
+      '<div class="todo-meta">' +
+        (t.assignee ? '<span class="chip">' + h(staffName(t.assignee)) + "</span>" : '<span class="chip brass">担当なし</span>') +
+        (t.due ? '<span class="chip' + (late ? " bad" : "") + ' num">' + h(md(t.due)) + " まで</span>" : "") +
+        (done && t.doneBy ? '<span class="done-tag">' + h(staffName(t.doneBy)) + " が完了</span>" : "") +
+      "</div></div>" +
+    '<button class="btn sm ghost" data-act="edit-todo" data-id="' + h(t.id) + '">編集</button></div>';
+}
+function modalTodo(t){
+  t = t || {};
+  const done = t.status === "done";
+  showModal(t.id ? "TODO を編集" : "TODO を追加",
+    '<div class="fields">' +
+    '<label class="f">やること<input type="text" id="td_title" maxlength="80" value="' + h(t.title || "") + '" placeholder="例：タオルを補充する"></label>' +
+    '<label class="f">詳細<textarea id="td_detail" placeholder="やり方や置き場所など">' + h(t.detail || "") + "</textarea></label>" +
+    '<div class="fields two">' +
+      '<label class="f">担当<select id="td_assignee">' + staffOptions(t.assignee, "— 決めない —") + "</select></label>" +
+      '<label class="f">いつまでに<input type="date" id="td_due" value="' + h(t.due || "") + '"></label></div>' +
+    '<label class="f">終わったときのメモ（共有）<textarea id="td_memo" placeholder="やってみて気づいたこと、次の人に伝えたいこと">' +
+      h(t.doneMemo || "") + "</textarea></label>" +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">終わった人がここに書いておくと、' +
+      "次に同じことをする人がそのまま読めます。" + (done ? "" : "「終わった」を押したあとでも書けます。") + "</p></div>",
+    (t.id ? '<button class="btn danger left" data-act="del-todo" data-id="' + h(t.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-todo" data-id="' + h(t.id || "") + '">保存</button>');
+}
+function staffOptions(sel, blank){
+  return '<option value="">' + h(blank) + "</option>" +
+    S.staff.filter(s => s.active).map(function(s){
+      return '<option value="' + h(s.id) + '"' + (sel === s.id ? " selected" : "") + ">" + h(s.name) + "</option>"; }).join("");
+}
+
+/* ---------------------------- シフト ---------------------------- */
+function viewShift(){
+  const m = S.siteMonth, n = daysInMonth(m);
+  const people = S.staff.filter(s => s.active);
+  const mine = staffMeId();
+  const head = '<tr><th class="name">スタッフ</th>' +
+    Array.from({ length: n }, function(_, i){
+      const d = i + 1, w = dow(m, d);
+      return '<th class="' + (w === 0 ? "sun" : w === 6 ? "sat" : "") + '"><span>' + d + "</span><small>" + DOW[w] + "</small></th>";
+    }).join("") + "</tr>";
+  const body = people.map(function(s){
+    const own = isHq() || canManageSite() || s.id === mine;
+    return '<tr><td class="name"><span class="who">' + h(s.name) +
+      (s.id === mine ? '<span class="mine">あなた</span>' : "") + "</span></td>" +
+      Array.from({ length: n }, function(_, i){
+        const date = m + "-" + pad(i + 1);
+        const r = S.sshifts[s.id + "|" + date];
+        const k = shiftKind(r ? r.kind : "undecided");
+        const time = r && r.from ? r.from : "";
+        const label = r && r.kind !== "undecided" ? (r.kind === "off" ? "休" : (time || "出")) : "";
+        return '<td class="day ' + (r ? "s-" + r.kind : "") + (date === today() ? " today-col" : "") + '">' +
+          (own
+            ? '<button class="cell" data-act="edit-shift" data-id="' + h(s.id) + '" data-date="' + date +
+              '" title="' + h(s.name + " " + date) + '"><span class="k">' + h(label) + "</span></button>"
+            : '<span class="cell"><span class="k">' + h(label) + "</span></span>") + "</td>";
+      }).join("") + "</tr>";
+  }).join("");
+  return '<section class="sec"><div class="sec-head"><h2>' +
+      h(m.slice(0, 4) + "年" + Number(m.slice(5, 7)) + "月のシフト") + "</h2>" +
+      '<div class="btn-row">' +
+        '<button class="btn sm" data-act="site-month" data-delta="-1">← 前月</button>' +
+        '<button class="btn sm" data-act="site-month" data-delta="0">今月</button>' +
+        '<button class="btn sm" data-act="site-month" data-delta="1">翌月 →</button></div></div>' +
+    '<p class="hint" style="font-size:12px;color:var(--muted);margin-bottom:10px">' +
+      (isHq() || canManageSite() ? "マスを押すと登録できます。" : "自分の行のマスを押すと登録できます。") + "</p>" +
+    (people.length
+      ? '<div class="cal-scroll"><table class="cal"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>"
+      : '<div class="panel"><div class="empty">まだ名簿にスタッフがいません</div></div>') + "</section>";
+}
+// 月の頭ではなく今日のあたりが見えている方が、開いてすぐ使える。
+function scrollShiftToToday(){
+  const box = $(".cal-scroll"), cell = $(".cal-scroll td.today-col");
+  if (!box || !cell) return;
+  box.scrollLeft = Math.max(0, cell.offsetLeft - box.clientWidth / 2);
+}
+function modalShift(staffId, date){
+  const r = S.sshifts[staffId + "|" + date] || {};
+  showModal(staffName(staffId) + "・" + Number(date.slice(5, 7)) + "/" + Number(date.slice(8, 10)),
+    '<div class="fields">' +
+    '<label class="f">区分<select id="sh_kind">' + SHIFT_KINDS.map(function(k){
+      return '<option value="' + k[0] + '"' + ((r.kind || "undecided") === k[0] ? " selected" : "") + ">" + k[1] + "</option>"; }).join("") + "</select></label>" +
+    '<div class="fields two">' +
+      '<label class="f">開始<input type="time" id="sh_from" value="' + h(r.from || "") + '"></label>' +
+      '<label class="f">終了<input type="time" id="sh_to" value="' + h(r.to || "") + '"></label></div>' +
+    '<label class="f">メモ<input type="text" id="sh_note" maxlength="60" value="' + h(r.note || "") + '" placeholder="遅れる、早上がりなど"></label></div>',
+    '<button class="btn danger left" data-act="clear-shift" data-id="' + h(staffId) + '" data-date="' + date + '">空にする</button>' +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-shift" data-id="' + h(staffId) + '" data-date="' + date + '">保存</button>');
+}
+
+/* ---------------------------- 本部から見る拠点タブ ---------------------------- */
+function viewSites(){
+  if (!S.sites.length){
+    return '<section class="sec"><div class="sec-head"><h2>スタッフ拠点</h2>' +
+      '<div class="btn-row"><button class="btn primary" data-act="new-site">＋ 拠点を追加</button></div></div>' +
+      '<div class="panel"><div class="empty">まだ拠点がありません</div></div></section>';
+  }
+  const sub = S.siteTab;
+  const tabs = siteTabs();
+  return '<section class="sec"><div class="sec-head"><h2>スタッフ拠点</h2>' +
+      '<div class="btn-row"><button class="btn" data-act="new-site">＋ 拠点</button></div></div>' +
+    '<div class="site-switch">' + S.sites.map(function(t){
+      return '<button class="btn sm' + (t.id === S.siteId ? " primary" : "") + '" data-act="pick-site" data-id="' + h(t.id) + '">' +
+        h(t.name) + (t.open ? "" : " <span style=\"opacity:.7\">停止中</span>") + "</button>"; }).join("") + "</div>" +
+    '<div class="site-switch sub">' +
+      tabs.map(function(t){
+        return '<button class="btn sm' + (sub === t.id ? " primary" : "") + '" data-act="site-tab" data-v="' + t.id + '">' + h(t.label) + "</button>"; }).join("") +
+      '<button class="btn sm' + (sub === "admin" ? " primary" : "") + '" data-act="site-tab" data-v="admin">管理</button></div>' +
+    (sub === "admin" ? viewSiteAdmin()
+      : !tabs.some(t => t.id === sub) ? '<div class="panel"><div class="empty">このタブは本部の設定で非表示になっています</div></div>'
+      : sub === "key" ? viewKey()
+      : sub === "todo" ? viewTodo()
+      : sub === "shift" ? viewShift()
+      : viewAtt()) + "</section>";
+}
+function viewSiteAdmin(){
+  const t = curSite();
+  if (!t) return "";
+  const url = location.origin + location.pathname + "?s=" + t.code;
+  const tabs = t.tabs || {};
+  return '<div class="sec-head" style="margin-top:4px"><h2 style="font-size:15px">' + h(t.name) + " の設定</h2>" +
+      '<div class="btn-row"><button class="btn sm ghost" data-act="edit-site" data-id="' + h(t.id) + '">名前・コード</button></div></div>' +
+    '<div class="panel" style="margin-bottom:16px"><div class="rows">' +
+      '<div class="row" style="align-items:center;gap:10px">' +
+        '<span style="flex:1;font-size:13.5px"><b>入り口を公開する</b>' +
+          '<div style="font-size:12px;color:var(--muted)">停止すると、登録済みのスタッフもログインできなくなります</div></span>' +
+        '<button class="btn sm' + (t.open ? " primary" : "") + '" data-act="site-open" data-id="' + h(t.id) + '">' +
+          (t.open ? "公開中" : "停止中") + "</button></div>" +
+      '<div class="row" style="align-items:center;gap:10px">' +
+        '<span style="flex:1;font-size:13.5px;word-break:break-all">' + h(url) + "</span>" +
+        '<button class="btn sm ghost" data-act="copy-site-url" data-id="' + h(t.id) + '">コピー</button></div>' +
+      '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">' +
+        '<span style="width:100%;font-size:13.5px"><b>見せるタブ</b></span>' +
+        STAFF_TABS.map(function(x){
+          return '<button class="btn sm' + (tabs[x.id] !== false ? " primary" : "") + '" data-act="site-tabon" data-id="' +
+            h(t.id) + '" data-v="' + x.id + '">' + h(x.label) + "</button>"; }).join("") + "</div>" +
+    "</div></div>" +
+
+    '<div class="sec-head"><h2 style="font-size:15px">名簿</h2>' +
+      '<div class="btn-row"><button class="btn sm primary" data-act="new-staff">＋ スタッフ</button></div></div>' +
+    '<div class="panel tbl-scroll"><table class="data"><thead><tr>' +
+      "<th>名前</th><th>役割</th><th>鍵</th><th>暗証番号</th><th>最終ログイン</th><th></th></tr></thead><tbody>" +
+    (S.staff.length
+      ? S.staff.map(function(s){
+          return '<tr' + (s.active ? "" : ' class="paid"') + ">" +
+            '<td data-label="名前"><span>' + h(s.name) + (s.active ? "" : '<span class="chip">停止中</span>') + "</span></td>" +
+            '<td data-label="役割"><span>' + (s.role === "manager" ? '<span class="chip brass">店長</span>' : "スタッフ") + "</span></td>" +
+            '<td data-label="鍵"><span>' + (s.keyHolder ? '<span class="chip ok">持っている</span>' : "—") + "</span></td>" +
+            '<td data-label="暗証番号"><span>' + (s.pinSet ? '<span class="chip ok">発行済み</span>' : '<span class="chip bad">未発行</span>') + "</span></td>" +
+            '<td data-label="最終ログイン"><span style="font-size:12.5px;color:var(--muted)">' +
+              (s.lastLoginAt ? h(jstDay(s.lastLoginAt).slice(5).replace("-", "/") + " " + jstHM(s.lastLoginAt)) : "—") + "</span></td>" +
+            '<td class="acts">' +
+              '<button class="btn sm" data-act="set-pin" data-id="' + h(s.id) + '">暗証番号</button> ' +
+              '<button class="btn sm ghost" data-act="edit-staff" data-id="' + h(s.id) + '">編集</button></td></tr>'; }).join("")
+      : '<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--muted)">まだスタッフがいません</td></tr>') +
+    "</tbody></table></div>";
+}
+function modalSite(t){
+  t = t || {};
+  showModal(t.id ? "拠点を編集" : "拠点を追加",
+    '<div class="fields">' +
+    '<label class="f">拠点名<input type="text" id="si_name" maxlength="30" value="' + h(t.name || "") + '" placeholder="例：ダイア"></label>' +
+    '<label class="f">入り口コード<input type="text" id="si_code" maxlength="24" value="' + h(t.code || "") + '" placeholder="例：dia-2331" autocomplete="off"></label>' +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">半角の英小文字・数字・ハイフンだけ。' +
+      "このコードがそのまま入り口 URL になります。推測されにくい文字を混ぜてください。</p>" +
+    '<label class="f">メモ<input type="text" id="si_note" maxlength="80" value="' + h(t.note || "") + '"></label></div>',
+    (t.id ? '<button class="btn danger left" data-act="del-site" data-id="' + h(t.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-site" data-id="' + h(t.id || "") + '">保存</button>');
+}
+function modalStaff(s){
+  s = s || {};
+  showModal(s.id ? "スタッフを編集" : "スタッフを追加",
+    '<div class="fields">' +
+    '<label class="f">名前<input type="text" id="sf_name" maxlength="30" value="' + h(s.name || "") + '" placeholder="入り口で選ぶ名前"></label>' +
+    '<div class="fields two">' +
+      '<label class="f">役割<select id="sf_role">' +
+        '<option value="staff"' + (s.role === "manager" ? "" : " selected") + ">スタッフ</option>" +
+        '<option value="manager"' + (s.role === "manager" ? " selected" : "") + ">店長（打刻の修正・名簿の編集ができる）</option>" +
+      "</select></label>" +
+      '<label class="f">状態<select id="sf_active">' +
+        '<option value="1"' + (s.id && !s.active ? "" : " selected") + ">在籍</option>" +
+        '<option value="0"' + (s.id && !s.active ? " selected" : "") + ">停止（ログインできなくなる）</option>" +
+      "</select></label></div>" +
+    '<label class="f"><span style="display:flex;align-items:center;gap:8px">' +
+      '<input type="checkbox" id="sf_key" style="width:auto"' + (s.keyHolder ? " checked" : "") + ">鍵を持っている</span></label>" +
+    '<label class="f">鍵のメモ<input type="text" id="sf_keynote" maxlength="60" value="' + h(s.keyNote || "") + '" placeholder="例：スペア1本・裏口も"></label></div>',
+    (s.id ? '<button class="btn danger left" data-act="del-staff" data-id="' + h(s.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-staff" data-id="' + h(s.id || "") + '">保存</button>');
+}
+function modalPin(s){
+  showModal(h(s.name) + " の暗証番号",
+    '<div class="fields">' +
+    '<label class="f">新しい暗証番号（4桁）<input type="text" id="pn_pin" inputmode="numeric" maxlength="4" ' +
+      'pattern="[0-9]*" autocomplete="off" placeholder="0000"></label>' +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">保存すると、いまの暗証番号は使えなくなります。' +
+      "決めた番号は本人に口頭か LINE で伝えてください。ここでも他の画面でも、あとから番号を見ることはできません。</p></div>",
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-pin" data-id="' + h(s.id) + '">保存</button>');
+}
+function modalDuty(date){
+  const d = S.keyDuty[date] || {};
+  showModal(Number(date.slice(5, 7)) + "/" + Number(date.slice(8, 10)) + " の鍵の担当",
+    '<div class="fields"><div class="fields two">' +
+      '<label class="f">開ける人<select id="ky_open">' + staffOptions(d.open_staff, "— 未定 —") + "</select></label>" +
+      '<label class="f">閉める人<select id="ky_close">' + staffOptions(d.close_staff, "— 未定 —") + "</select></label></div>" +
+    '<label class="f">メモ<input type="text" id="ky_note" maxlength="60" value="' + h(d.note || "") + '"></label></div>',
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-duty" data-date="' + date + '">保存</button>');
+}
+function modalHolders(){
+  showModal("鍵を持っている人",
+    '<div class="fields">' + S.staff.filter(s => s.active).map(function(s){
+      return '<label class="f" style="flex-direction:row;align-items:center;gap:10px">' +
+        '<input type="checkbox" data-holder="' + h(s.id) + '" style="width:auto"' + (s.keyHolder ? " checked" : "") + ">" +
+        '<span style="flex:1">' + h(s.name) + "</span>" +
+        '<input type="text" data-holdernote="' + h(s.id) + '" maxlength="60" placeholder="メモ" value="' +
+          h(s.keyNote || "") + '" style="flex:1 1 120px"></label>'; }).join("") +
+      (S.staff.filter(s => s.active).length ? "" : '<p class="empty" style="border:0">名簿にスタッフがいません</p>') + "</div>",
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-holders">保存</button>');
+}
+function modalPunch(staffId, date, rec){
+  const at = rec ? isoToJstInput(rec.punchedAt) : date + "T" + jstHM(new Date().toISOString());
+  showModal(rec ? "打刻を直す" : staffName(staffId) + " の打刻を追加",
+    '<div class="fields"><div class="fields two">' +
+      '<label class="f">区分<select id="pu_kind">' +
+        '<option value="in"' + (rec && rec.kind === "out" ? "" : " selected") + ">出勤</option>" +
+        '<option value="out"' + (rec && rec.kind === "out" ? " selected" : "") + ">退勤</option></select></label>" +
+      '<label class="f">日時<input type="datetime-local" id="pu_at" value="' + h(at) + '"></label></div>' +
+    '<label class="f">メモ<input type="text" id="pu_note" maxlength="60" value="' + h((rec || {}).note || "") + '" placeholder="打刻し忘れ など"></label></div>',
+    (rec ? '<button class="btn danger left" data-act="del-punch" data-id="' + h(rec.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-punch" data-id="' + h(rec ? rec.id : "") + '" data-who="' + h(staffId) + '">保存</button>');
 }
 
 /* ============================ view: 店舗 ============================ */
@@ -1179,6 +1804,8 @@ async function saveShopFromModal(id){
 document.addEventListener("click", async function(ev){
   const tabBtn = ev.target.closest("[data-tab]");
   if (tabBtn){ S.tab = tabBtn.dataset.tab; ls("prime.tab", S.tab); render(); return; }
+  const sTabBtn = ev.target.closest("[data-stab]");
+  if (sTabBtn){ S.siteTab = sTabBtn.dataset.stab; ls("prime.siteTab", S.siteTab); render(); return; }
   const btn = ev.target.closest("[data-act]");
   if (!btn){ if (ev.target.dataset && ev.target.dataset.scrim) closeModal(); return; }
   const a = btn.dataset.act, id = btn.dataset.id;
@@ -1247,6 +1874,166 @@ document.addEventListener("click", async function(ev){
           ? { status: "unpaid", paid_at: null, paid_on: null, paid_by: null }
           : { status: "paid", paid_at: nowIso(), paid_on: today(), paid_by: S.me.id }).eq("id", id));
         break;
+      }
+
+      /* ---- 拠点・スタッフ ---- */
+      case "staff-signin": await staffSignIn(); return;
+      case "signout": await sb.auth.signOut(); return;
+      case "pick-site": {
+        S.siteId = id; ls("prime.siteId", id);
+        await loadSite(id);
+        // 拠点によって見せているタブが違うので、非表示のタブに残らないようにする。
+        const open = siteTabs();
+        if (S.siteTab !== "admin" && !open.some(t => t.id === S.siteTab)){
+          S.siteTab = (open[0] || {}).id || "admin"; ls("prime.siteTab", S.siteTab);
+        }
+        render(); return;
+      }
+      case "site-tab": S.siteTab = btn.dataset.v; ls("prime.siteTab", btn.dataset.v); render(); return;
+      case "site-day": {
+        const d = new Date(S.siteDay + "T00:00:00");
+        const delta = Number(btn.dataset.delta);
+        S.siteDay = delta ? ymd(new Date(d.getFullYear(), d.getMonth(), d.getDate() + delta)) : today();
+        // 別の月に移ったら、その月ぶんを読み直す。
+        if (S.siteDay.slice(0, 7) !== S.siteMonth){ S.siteMonth = S.siteDay.slice(0, 7); await loadSite(S.siteId); }
+        render(); return;
+      }
+      case "site-month":
+        S.siteMonth = shiftMonthStr(S.siteMonth, Number(btn.dataset.delta));
+        await loadSite(S.siteId); render(); return;
+
+      case "punch": {
+        await run(sb.from("punches").insert({ site_id: S.siteId, staff_id: staffMeId(),
+          kind: btn.dataset.v, punched_at: nowIso() }),
+          btn.dataset.v === "in" ? "出勤しました" : "お疲れさまでした");
+        break;
+      }
+      case "add-punch": modalPunch(id, btn.dataset.date, null); break;
+      case "fix-punch": {
+        const rec = S.punches.find(x => x.id === id);
+        if (rec) modalPunch(rec.staffId, jstDay(rec.punchedAt), rec);
+        break;
+      }
+      case "save-punch": {
+        const at = jstInputToIso(valOf("pu_at"));
+        if (!at){ toast("日時を入れてください"); break; }
+        const body = { kind: valOf("pu_kind"), punched_at: at, note: valOf("pu_note") };
+        if (id) await run(sb.from("punches").update(body).eq("id", id), "直しました");
+        else await run(sb.from("punches").insert(Object.assign({ site_id: S.siteId, staff_id: btn.dataset.who }, body)), "追加しました");
+        closeModal(); break;
+      }
+      case "del-punch": await run(sb.from("punches").delete().eq("id", id), "削除しました"); closeModal(); break;
+
+      case "key-report":
+        await run(sb.from("key_events").insert({ site_id: S.siteId, staff_id: staffMeId(),
+          kind: btn.dataset.v, happened_at: nowIso() }),
+          btn.dataset.v === "open" ? "開けたことを記録しました" : "閉めたことを記録しました");
+        break;
+      case "edit-duty": modalDuty(btn.dataset.date); break;
+      case "save-duty": {
+        const date = btn.dataset.date;
+        await run(sb.from("key_duty").upsert({ site_id: S.siteId, date: date,
+          open_staff: valOf("ky_open") || null, close_staff: valOf("ky_close") || null,
+          note: valOf("ky_note"), updated_at: nowIso() }, { onConflict: "site_id,date" }), "保存しました");
+        closeModal(); break;
+      }
+      case "edit-holders": modalHolders(); break;
+      case "save-holders": {
+        const rows = Array.prototype.map.call(document.querySelectorAll("[data-holder]"), function(c){
+          return { id: c.dataset.holder, on: c.checked,
+                   note: (document.querySelector('[data-holdernote="' + c.dataset.holder + '"]') || {}).value || "" };
+        });
+        for (const r of rows){
+          const cur = staffOf(r.id) || {};
+          if (cur.keyHolder === r.on && (cur.keyNote || "") === r.note) continue;
+          await run(sb.from("staff").update({ key_holder: r.on, key_note: r.note, updated_at: nowIso() }).eq("id", r.id));
+        }
+        toast("保存しました"); closeModal(); break;
+      }
+
+      case "todo-filter": S.todoFilter = btn.dataset.f; render(); return;
+      case "new-todo": modalTodo(null); break;
+      case "edit-todo": modalTodo(S.todos.find(x => x.id === id)); break;
+      case "save-todo": {
+        const title = valOf("td_title");
+        if (!title){ toast("やることを入力してください"); break; }
+        const body = { title: title, detail: valOf("td_detail"), assignee: valOf("td_assignee") || null,
+          due: valOf("td_due") || null, done_memo: valOf("td_memo"), updated_at: nowIso() };
+        if (id) await run(sb.from("staff_todos").update(body).eq("id", id), "保存しました");
+        else await run(sb.from("staff_todos").insert(Object.assign({ site_id: S.siteId, created_by: staffMeId() }, body)), "追加しました");
+        closeModal(); break;
+      }
+      case "del-todo": await run(sb.from("staff_todos").delete().eq("id", id), "削除しました"); closeModal(); break;
+      case "toggle-todo": {
+        const t = S.todos.find(x => x.id === id) || {};
+        await run(sb.from("staff_todos").update(t.status === "done"
+          ? { status: "open", done_at: null, done_by: null, updated_at: nowIso() }
+          : { status: "done", done_at: nowIso(), done_by: staffMeId(), updated_at: nowIso() }).eq("id", id));
+        break;
+      }
+
+      case "edit-shift": modalShift(id, btn.dataset.date); break;
+      case "save-shift":
+        await run(sb.from("staff_shifts").upsert({ site_id: S.siteId, staff_id: id, date: btn.dataset.date,
+          kind: valOf("sh_kind"), from_time: valOf("sh_from"), to_time: valOf("sh_to"),
+          note: valOf("sh_note"), updated_at: nowIso() }, { onConflict: "staff_id,date" }), "保存しました");
+        closeModal(); break;
+      case "clear-shift":
+        await run(sb.from("staff_shifts").delete().eq("staff_id", id).eq("date", btn.dataset.date), "空にしました");
+        closeModal(); break;
+
+      case "new-site": modalSite(null); break;
+      case "edit-site": modalSite(site(id)); break;
+      case "save-site": {
+        const name = valOf("si_name"), code = valOf("si_code").toLowerCase().trim();
+        if (!name){ toast("拠点名を入力してください"); break; }
+        if (!/^[a-z0-9-]{2,24}$/.test(code)){ toast("入り口コードは半角の英小文字・数字・ハイフンで2〜24文字です"); break; }
+        const body = { name: name, code: code, note: valOf("si_note"), updated_at: nowIso() };
+        if (id) await run(sb.from("sites").update(body).eq("id", id), "保存しました");
+        else await run(sb.from("sites").insert(Object.assign({ sort_order: S.sites.length + 1 }, body)), "追加しました");
+        closeModal(); break;
+      }
+      case "del-site":
+        await run(sb.from("sites").delete().eq("id", id), "拠点を削除しました");
+        S.siteId = ""; closeModal(); break;
+      case "site-open": {
+        const t = site(id) || {};
+        await run(sb.from("sites").update({ open: !t.open, updated_at: nowIso() }).eq("id", id),
+          t.open ? "入り口を停止しました" : "入り口を公開しました");
+        break;
+      }
+      case "site-tabon": {
+        const t = site(id) || {};
+        const tabs = Object.assign({}, t.tabs || {});
+        tabs[btn.dataset.v] = tabs[btn.dataset.v] === false;
+        await run(sb.from("sites").update({ tabs: tabs, updated_at: nowIso() }).eq("id", id));
+        break;
+      }
+      case "copy-site-url": {
+        const t = site(id) || {};
+        copy(location.origin + location.pathname + "?s=" + t.code, "入り口の URL");
+        break;
+      }
+      case "new-staff": modalStaff(null); break;
+      case "edit-staff": modalStaff(staffOf(id)); break;
+      case "save-staff": {
+        const name = valOf("sf_name");
+        if (!name){ toast("名前を入力してください"); break; }
+        const keyBox = el("sf_key");
+        const body = { name: name, role: valOf("sf_role"), active: valOf("sf_active") === "1",
+          key_holder: !!(keyBox && keyBox.checked), key_note: valOf("sf_keynote"), updated_at: nowIso() };
+        if (id) await run(sb.from("staff").update(body).eq("id", id), "保存しました");
+        else await run(sb.from("staff").insert(Object.assign({ site_id: S.siteId, sort_order: S.staff.length + 1 }, body)),
+          "追加しました。続けて暗証番号を発行してください");
+        closeModal(); break;
+      }
+      case "del-staff": await run(sb.from("staff").delete().eq("id", id), "削除しました"); closeModal(); break;
+      case "set-pin": modalPin(staffOf(id)); break;
+      case "save-pin": {
+        const pin = valOf("pn_pin").trim();
+        if (!/^[0-9]{4}$/.test(pin)){ toast("暗証番号は数字4桁です"); break; }
+        await run(sb.rpc("staff_set_pin", { p_staff: id, p_pin: pin }), "暗証番号を設定しました");
+        closeModal(); break;
       }
 
       case "new-vault": modalVault(null); break;
@@ -1324,12 +2111,13 @@ document.addEventListener("click", async function(ev){
         await run(sb.from("allowed_emails").delete().eq("email", id), "削除しました"); break;
     }
   } catch(e){ /* run() already surfaced it */ }
-  if (S.screen === "app") { try { await loadAll(); } catch(e){} render(); }
+  if (S.screen === "app"){ try { await loadAll(); } catch(e){} render(); }
+  else if (S.screen === "staff"){ try { await loadSite(S.siteId); } catch(e){} render(); }
 });
 document.addEventListener("input", function(ev){
   const t = ev.target;
   if (!t || !t.id) return;
-  if (/^(au_|pf_)/.test(t.id)) S.form[t.id] = t.value;
+  if (/^(au_|pf_|st_)/.test(t.id)) S.form[t.id] = t.value;
   if (t.id === "v_q"){
     S.vaultQ = t.value;
     const box = el("vaultList");
@@ -1338,6 +2126,7 @@ document.addEventListener("input", function(ev){
 });
 document.addEventListener("change", function(ev){
   const t = ev.target;
+  if (t && /^st_/.test(t.id)) S.form[t.id] = t.value;
   if (t && t.id === "v_group"){
     S.vaultGroup = t.value; ls("prime.vaultGroup", t.value);
     const box = el("vaultList");
@@ -1358,6 +2147,9 @@ render = function(){
   const f = document.activeElement, v = el("view");
   if (f && v && v.contains(f) && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && S.screen === "app"){
     renderDoor(); renderHere(); renderTabs(); return;
+  }
+  if (f && v && v.contains(f) && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && S.screen === "staff"){
+    renderStaffBar(); renderStaffTabs(); return;
   }
   _render();
 };
