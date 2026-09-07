@@ -122,9 +122,34 @@ async function run(promise, okMsg){
 }
 
 /* ============================ clipboard ============================ */
-async function copy(text, what){
-  try { await navigator.clipboard.writeText(text); toast((what || "") + "をコピーしました"); }
-  catch(e){ toast("コピーできませんでした。長押しで選択してください。"); }
+// LINE などのアプリ内ブラウザでは navigator.clipboard が無い / 拒否されることがある。
+// 使えなかったときに黙って失敗しないよう、古い execCommand に必ず落とす。
+function copyFallback(text){
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, text.length); // iOS は select() だけでは範囲が決まらない
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch(e){ ok = false; }
+  document.body.removeChild(ta);
+  return ok;
+}
+function copy(text, what){
+  const value = String(text == null ? "" : text);
+  const done = ok => toast(ok ? (what || "") + "をコピーしました"
+                              : "コピーできませんでした。長押しで選択してください。");
+  // 空をコピーして「コピーしました」と出すと、貼れない理由が分からなくなる。
+  if (!value){ toast("コピーする内容がありません"); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(value).then(function(){ done(true); },
+                                              function(){ done(copyFallback(value)); });
+    return;
+  }
+  done(copyFallback(value));
 }
 
 /* ============================ data ============================ */
@@ -1423,7 +1448,7 @@ function vaultCell(v, key){
   if (key === "login_id" || key === "password"){
     const shown = S.reveal[v.id];
     return '<span class="secret"><code>' + (shown ? h(raw || "—") : "••••••••") + "</code>" +
-      (shown && raw ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="' + key + '">複製</button>' : "") +
+      (shown && raw ? '<button class="btn sm ghost" data-act="copy-v" data-id="' + h(v.id) + '" data-k="' + key + '">コピー</button>' : "") +
       "</span>";
   }
   return raw ? h(raw) : "—";
@@ -1782,11 +1807,7 @@ async function saveVaultFromModal(id){
 }
 function revealOne(id){
   if (S.reveal[id]) delete S.reveal[id];
-  else {
-    const v = S.vault.find(x => x.id === id);
-    if (!v) return;
-    S.reveal[id] = { loginId: v.login_id, password: v.password };
-  }
+  else if (S.vault.some(x => x.id === id)) S.reveal[id] = true;
   render();
 }
 
@@ -2048,8 +2069,9 @@ document.addEventListener("click", async function(ev){
         break;
       }
       case "copy-v": {
-        const r = S.reveal[id];
-        if (r) copy(r[btn.dataset.k] || "", btn.dataset.k === "password" ? "パスワード" : "ID");
+        // 表示中の行の値をそのまま読む。列名は data-k と同じなので取り違えようがない。
+        const v = S.vault.find(x => x.id === id);
+        if (v) copy(v[btn.dataset.k], btn.dataset.k === "password" ? "パスワード" : "ID");
         break;
       }
       case "use-recruit": { const n = el("d_url"); if (n) n.value = recruitUrl(); break; }
