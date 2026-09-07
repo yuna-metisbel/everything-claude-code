@@ -39,15 +39,18 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 マイグレーションは Supabase プロジェクト側に記録されている。拠点まわりで入れたものは
 次の6件。
 
-| バージョン     | 名前                           | 内容                                                                             |
-|----------------|--------------------------------|----------------------------------------------------------------------------------|
-| 20260907123310 | `staff_sites_core`             | `sites` `staff` `punches` `key_events` `key_duty` `staff_todos` `staff_shifts`   |
-| 20260907131336 | `staff_sites_rls`              | RLS と `staff_me()` `staff_site()` `staff_is_manager()`、`may_join()` の絞り込み |
-| 20260907132700 | `staff_pin_and_gate`           | 暗証番号の設定・照合・入り口の照会、失敗回数の記録                               |
-| 20260907155503 | `staff_auth_lookup`            | 認証ユーザーの拾い直し                                                           |
-| 20260907165706 | `staff_pin_set_flag`           | ハッシュは読めないので、発行済みかどうかだけを別列で持つ                         |
-| 20260907171420 | `staff_pin_hash_column_grants` | `pin_hash` を列単位の権限でクライアントから隠す                                  |
+| バージョン     | 名前                            | 内容                                                                             |
+|----------------|---------------------------------|----------------------------------------------------------------------------------|
+| 20260907123310 | `staff_sites_core`              | `sites` `staff` `punches` `key_events` `key_duty` `staff_todos` `staff_shifts`   |
+| 20260907131336 | `staff_sites_rls`               | RLS と `staff_me()` `staff_site()` `staff_is_manager()`、`may_join()` の絞り込み |
+| 20260907132700 | `staff_pin_and_gate`            | 暗証番号の設定・照合・入り口の照会、失敗回数の記録                               |
+| 20260907155503 | `staff_auth_lookup`             | 認証ユーザーの拾い直し                                                           |
+| 20260907165706 | `staff_pin_set_flag`            | ハッシュは読めないので、発行済みかどうかだけを別列で持つ                         |
+| 20260907171420 | `staff_pin_hash_column_grants`  | `pin_hash` を列単位の権限でクライアントから隠す                                  |
+| 20260907183702 | `merge_staff_todos_into_tasks`  | 拠点の TODO を `tasks` に統合し、`staff_todos` を削除                            |
+| 20260907191500 | `staff_self_signup_visible_pin` | 本人による登録と、本部が4桁を確認できる `pin` 列                                 |
 
-最後の1件は落とし穴の修正。Supabase は `public` の全テーブルに表単位の権限を配るので、
-表単位の権限をいったん剥がしてから見せてよい列だけを grant し直さないと、列単位の
-`revoke` は効かない。
+`staff_pin_hash_column_grants` は落とし穴の修正。Supabase は `public` の全テーブルに
+表単位の権限を配るので、表単位の権限をいったん剥がしてから見せてよい列だけを
+grant し直さないと、列単位の `revoke` は効かない。この教訓は後から足した `pin` 列にも
+効いていて、表単位の権限が剥がれているおかげで既定では誰の権限も付かない。

@@ -91,7 +91,7 @@ const S = {
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
-  siteCode: "", gate: null, staffMe: null,
+  siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
   siteDay: today(), siteMonth: today().slice(0, 7), taskSite: ls("prime.taskSite") || "all",
   staff: [], punches: [], keyEvents: [], keyDuty: {}, sshifts: {}
@@ -408,8 +408,8 @@ function renderStaffBar(){
     '<div class="wrap staff-bar"><span class="mark">PRIME</span>' +
     '<span class="staff-site">' + h(t.name || "") + "</span>" +
     '<span class="spacer" style="flex:1"></span>' +
-    '<span class="staff-me">' + h(S.staffMe ? S.staffMe.name : "") +
-      (S.staffMe && S.staffMe.role === "manager" ? '<span class="chip brass">店長</span>' : "") + "</span>" +
+    '<button class="staff-me" data-act="my-pin">' + h(S.staffMe ? S.staffMe.name : "") +
+      (S.staffMe && S.staffMe.role === "manager" ? '<span class="chip brass">店長</span>' : "") + "</button>" +
     '<button class="btn sm ghost" data-act="theme" aria-label="' + h(themeLabel()) + '">' + themeGlyph() + "</button>" +
     '<button class="btn sm ghost" data-act="signout">出る</button></div>';
 }
@@ -974,6 +974,26 @@ async function staffSignIn(){
   const pin = (S.form.st_pin || "").trim();
   if (!staffId){ S.authErr = "名前を選んでください。"; render(); return; }
   if (!/^[0-9]{4}$/.test(pin)){ S.authErr = "暗証番号は数字4桁です。"; render(); return; }
+  await staffLogin(staffId, pin);
+}
+// 自分で登録する。名前が空いていれば、その場で登録してそのままログインする。
+async function staffRegister(){
+  const name = (S.form.st_name || "").trim();
+  const pin = (S.form.st_newpin || "").trim();
+  const pin2 = (S.form.st_newpin2 || "").trim();
+  if (!name){ S.authErr = "名前を入力してください。"; render(); return; }
+  if (!/^[0-9]{4}$/.test(pin)){ S.authErr = "暗証番号は数字4桁です。"; render(); return; }
+  if (pin !== pin2){ S.authErr = "確認用の暗証番号が一致しません。"; render(); return; }
+  S.busy = true; S.authErr = ""; render();
+  const r = await sb.rpc("staff_register", { p_code: S.siteCode, p_name: name, p_pin: pin });
+  if (r.error || !r.data || !r.data.ok){
+    S.busy = false;
+    S.authErr = (r.data && r.data.error) || "登録できませんでした。";
+    render(); return;
+  }
+  await staffLogin(r.data.staffId, pin);
+}
+async function staffLogin(staffId, pin){
   S.busy = true; S.authErr = ""; render();
   let out = null;
   try {
@@ -986,11 +1006,16 @@ async function staffSignIn(){
       const body = out.error && out.error.context ? await out.error.context.json() : null;
       if (body && body.error) msg = body.error;
     } catch(e){ /* 本文が読めないときは既定の文言 */ }
-    S.busy = false; S.authErr = msg; S.form.st_pin = ""; render(); return;
+    S.busy = false; S.authErr = msg;
+    S.form.st_pin = ""; S.form.st_newpin = ""; S.form.st_newpin2 = "";
+    render(); return;
   }
   const v = await sb.auth.verifyOtp({ token_hash: out.data.tokenHash, type: "email" });
   S.busy = false;
   if (v.error){ S.authErr = "ログインできませんでした。もう一度お試しください。"; render(); return; }
+  // onAuthStateChange の発火を待たずに自分で入れておく。順番に依存すると、
+  // 認証は通っているのに入り口の画面に戻ってしまうことがある。
+  if (v.data && v.data.user) S.user = v.data.user;
   S.form = {};
   await refresh();
 }
@@ -1004,25 +1029,50 @@ function viewSiteGate(){
       "</div></div>";
   }
   const list = g.staff || [];
+  const up = S.gateMode === "up";
+  const canSignUp = g.signup !== false;
+  // 名簿が空のうちは、いきなり登録の画面から始める。
+  const showUp = canSignUp && (up || !list.length);
   return '<div class="gate"><div class="gate-card">' +
     '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">' + h(g.name) + "</span></div>" +
     "<h1>" + h(g.name) + " スタッフ</h1>" +
-    '<p class="lead">名前を選んで、本部から聞いた暗証番号（4桁）を入れてください。</p>' +
-    (list.length
-      ? '<div class="fields">' +
-        '<label class="f">名前<select id="st_who">' +
-          '<option value="">— 選んでください —</option>' +
-          list.map(function(s){
-            return '<option value="' + h(s.id) + '"' + (S.form.st_who === s.id ? " selected" : "") + (s.hasPin ? "" : " disabled") + ">" +
-              h(s.name) + (s.hasPin ? "" : "（暗証番号 未発行）") + "</option>"; }).join("") +
-          "</select></label>" +
-        '<label class="f">暗証番号<input type="password" id="st_pin" inputmode="numeric" autocomplete="off" ' +
-          'maxlength="4" pattern="[0-9]*" placeholder="4桁" value="' + h(S.form.st_pin || "") + '"></label>' +
+    (showUp
+      ? '<p class="lead">名前と、自分で決めた暗証番号（4桁）を登録してください。<br>' +
+          "次からはその2つで入れます。</p>" +
+        '<div class="fields">' +
+          '<label class="f">名前<input type="text" id="st_name" maxlength="30" autocomplete="off" ' +
+            'placeholder="みんなが分かる呼び名" value="' + h(S.form.st_name || "") + '"></label>' +
+          '<div class="fields two">' +
+            '<label class="f">暗証番号（4桁）<input type="password" id="st_newpin" inputmode="numeric" autocomplete="off" ' +
+              'maxlength="4" pattern="[0-9]*" value="' + h(S.form.st_newpin || "") + '"></label>' +
+            '<label class="f">確認<input type="password" id="st_newpin2" inputmode="numeric" autocomplete="off" ' +
+              'maxlength="4" pattern="[0-9]*" value="' + h(S.form.st_newpin2 || "") + '"></label></div>' +
+        "</div>" +
+        (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
+        '<button class="btn primary" style="width:100%" data-act="staff-signup"' + (S.busy ? " disabled" : "") + ">" +
+          (S.busy ? "登録中…" : "登録して入る") + "</button>" +
+        '<p style="font-size:11.5px;color:var(--muted);line-height:1.7;margin-top:10px">' +
+          "暗証番号は本部が確認できます。他のサービスで使っているものは避けてください。</p>" +
+        (list.length
+          ? '<p class="swap">登録済みの方は <button data-act="gate-mode" data-v="in">ログイン</button></p>'
+          : "")
+      : '<p class="lead">名前を選んで、自分で決めた暗証番号（4桁）を入れてください。</p>' +
+        '<div class="fields">' +
+          '<label class="f">名前<select id="st_who">' +
+            '<option value="">— 選んでください —</option>' +
+            list.map(function(s){
+              return '<option value="' + h(s.id) + '"' + (S.form.st_who === s.id ? " selected" : "") + (s.hasPin ? "" : " disabled") + ">" +
+                h(s.name) + (s.hasPin ? "" : "（暗証番号 未設定）") + "</option>"; }).join("") +
+            "</select></label>" +
+          '<label class="f">暗証番号<input type="password" id="st_pin" inputmode="numeric" autocomplete="off" ' +
+            'maxlength="4" pattern="[0-9]*" placeholder="4桁" value="' + h(S.form.st_pin || "") + '"></label>' +
         "</div>" +
         (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
         '<button class="btn primary" style="width:100%" data-act="staff-signin"' + (S.busy ? " disabled" : "") + ">" +
-          (S.busy ? "確認中…" : "入る") + "</button>"
-      : '<p class="empty" style="border:0">まだ名簿にスタッフが登録されていません。本部に連絡してください。</p>') +
+          (S.busy ? "確認中…" : "入る") + "</button>" +
+        (canSignUp
+          ? '<p class="swap">はじめての方は <button data-act="gate-mode" data-v="up">名前を登録</button></p>'
+          : '<p class="swap" style="color:var(--muted)">新規の登録はいま止まっています。本部に連絡してください。</p>')) +
     "</div></div>";
 }
 
@@ -1250,6 +1300,12 @@ function viewSiteAdmin(){
         '<button class="btn sm' + (t.open ? " primary" : "") + '" data-act="site-open" data-id="' + h(t.id) + '">' +
           (t.open ? "公開中" : "停止中") + "</button></div>" +
       '<div class="row" style="align-items:center;gap:10px">' +
+        '<span style="flex:1;font-size:13.5px"><b>スタッフの新規登録を受け付ける</b>' +
+          '<div style="font-size:12px;color:var(--muted)">スタッフが自分で名前と暗証番号を登録できます。' +
+          "全員そろったら止めてください</div></span>" +
+        '<button class="btn sm' + (t.staff_signup !== false ? " primary" : "") + '" data-act="site-signup" data-id="' + h(t.id) + '">' +
+          (t.staff_signup !== false ? "受付中" : "停止中") + "</button></div>" +
+      '<div class="row" style="align-items:center;gap:10px">' +
         '<span style="flex:1;font-size:13.5px;word-break:break-all">' + h(url) + "</span>" +
         '<button class="btn sm ghost" data-act="copy-site-url" data-id="' + h(t.id) + '">コピー</button></div>' +
       '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">' +
@@ -1269,7 +1325,14 @@ function viewSiteAdmin(){
             '<td data-label="名前"><span>' + h(s.name) + (s.active ? "" : '<span class="chip">停止中</span>') + "</span></td>" +
             '<td data-label="役割"><span>' + (s.role === "manager" ? '<span class="chip brass">店長</span>' : "スタッフ") + "</span></td>" +
             '<td data-label="鍵"><span>' + (s.keyHolder ? '<span class="chip ok">持っている</span>' : "—") + "</span></td>" +
-            '<td data-label="暗証番号"><span>' + (s.pinSet ? '<span class="chip ok">発行済み</span>' : '<span class="chip bad">未発行</span>') + "</span></td>" +
+            '<td data-label="暗証番号"><span class="secret">' +
+              (s.pinSet
+                ? (S.pinShown[s.id]
+                    ? '<code class="num">' + h(S.pinShown[s.id]) + "</code>" +
+                      '<button class="btn sm ghost" data-act="hide-pin" data-id="' + h(s.id) + '">隠す</button>'
+                    : "<code>••••</code>" +
+                      '<button class="btn sm ghost" data-act="show-pin" data-id="' + h(s.id) + '">表示</button>')
+                : '<span class="chip bad">未設定</span>') + "</span></td>" +
             '<td data-label="最終ログイン"><span style="font-size:12.5px;color:var(--muted)">' +
               (s.lastLoginAt ? h(jstDay(s.lastLoginAt).slice(5).replace("-", "/") + " " + jstHM(s.lastLoginAt)) : "—") + "</span></td>" +
             '<td class="acts">' +
@@ -1312,13 +1375,17 @@ function modalStaff(s){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-staff" data-id="' + h(s.id || "") + '">保存</button>');
 }
-function modalPin(s){
-  showModal(h(s.name) + " の暗証番号",
+function modalPin(s, self){
+  showModal(self ? "暗証番号を変える" : h(s.name) + " の暗証番号",
     '<div class="fields">' +
-    '<label class="f">新しい暗証番号（4桁）<input type="text" id="pn_pin" inputmode="numeric" maxlength="4" ' +
-      'pattern="[0-9]*" autocomplete="off" placeholder="0000"></label>' +
-    '<p style="font-size:12px;color:var(--muted);line-height:1.7">保存すると、いまの暗証番号は使えなくなります。' +
-      "決めた番号は本人に口頭か LINE で伝えてください。ここでも他の画面でも、あとから番号を見ることはできません。</p></div>",
+    '<label class="f">新しい暗証番号（4桁）<input type="password" id="pn_pin" inputmode="numeric" maxlength="4" ' +
+      'pattern="[0-9]*" autocomplete="off"></label>' +
+    '<label class="f">確認<input type="password" id="pn_pin2" inputmode="numeric" maxlength="4" ' +
+      'pattern="[0-9]*" autocomplete="off"></label>' +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
+      (self
+        ? "保存すると、いまの暗証番号は使えなくなります。本部はこの番号を確認できるので、他のサービスで使っているものは避けてください。"
+        : "保存すると、いまの暗証番号は使えなくなります。決めた番号は本人に伝えてください。") + "</p></div>",
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-pin" data-id="' + h(s.id) + '">保存</button>');
 }
@@ -1944,6 +2011,22 @@ document.addEventListener("click", async function(ev){
 
       /* ---- 拠点・スタッフ ---- */
       case "staff-signin": await staffSignIn(); return;
+      case "staff-signup": await staffRegister(); return;
+      case "gate-mode": S.gateMode = btn.dataset.v; S.authErr = ""; render(); return;
+      case "my-pin": modalPin(S.staffMe, true); break;
+      case "show-pin": {
+        const r = await sb.rpc("staff_pin_of", { p_staff: id });
+        if (r.error || !r.data){ toast("暗証番号を取得できませんでした"); break; }
+        S.pinShown[id] = r.data; render(); return;
+      }
+      case "hide-pin": delete S.pinShown[id]; render(); return;
+      case "site-signup": {
+        const t = site(id) || {};
+        const on = t.staff_signup !== false;
+        await run(sb.from("sites").update({ staff_signup: !on, updated_at: nowIso() }).eq("id", id),
+          on ? "新規登録を止めました" : "新規登録を受け付けます");
+        break;
+      }
       case "signout": await sb.auth.signOut(); return;
       case "pick-site": {
         S.siteId = id; ls("prime.siteId", id);
@@ -2077,7 +2160,9 @@ document.addEventListener("click", async function(ev){
       case "save-pin": {
         const pin = valOf("pn_pin").trim();
         if (!/^[0-9]{4}$/.test(pin)){ toast("暗証番号は数字4桁です"); break; }
-        await run(sb.rpc("staff_set_pin", { p_staff: id, p_pin: pin }), "暗証番号を設定しました");
+        if (pin !== valOf("pn_pin2").trim()){ toast("確認用の暗証番号が一致しません"); break; }
+        await run(sb.rpc("staff_set_pin", { p_staff: id, p_pin: pin }), "暗証番号を変えました");
+        delete S.pinShown[id];
         closeModal(); break;
       }
 
