@@ -76,6 +76,8 @@ const VAULT_COLS = [
   ["note",      "メモ"]
 ];
 const VAULT_GROUPS = [["media","媒体別"],["shop","店舗別"],["cast_name","キャスト別"],["","まとめない"]];
+// Categories the office actually books expenses under; free text is still allowed.
+const EXPENSE_CATEGORIES = ["広告・媒体掲載料","家賃","水道光熱費","通信費","備品・消耗品","交通費","外注費","接待交際費","講習・研修","その他"];
 const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエス魂","リフナビ","メンズエステ求人","エステの達人","X (旧Twitter)","公式LINE","Instagram","Googleビジネス","予約システム","勤怠システム"];
 
 /* ============================ state ============================ */
@@ -86,7 +88,7 @@ const S = {
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
   theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
-  taskFilter: "all", payFilter: "unpaid", reveal: {}, draftColor: PALETTE[0],
+  taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: ""
 };
 const member = id => S.members.find(m => m.id === id) || null;
@@ -125,6 +127,7 @@ const normMember = r => ({ id:r.id, name:r.name, color:r.color, present:r.presen
 const normTask   = r => ({ id:r.id, title:r.title, detail:r.detail, assignee:r.assignee, status:r.status,
                            due:r.due, createdBy:r.created_by, createdAt:r.created_at, takenAt:r.taken_at, doneAt:r.done_at });
 const normPay    = r => ({ id:r.id, title:r.title, payee:r.payee, amount:Number(r.amount), due:r.due, method:r.method,
+                           category:r.category, paidOn:r.paid_on,
                            assignee:r.assignee, status:r.status, note:r.note, paidAt:r.paid_at, createdAt:r.created_at });
 const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:r.plan, done:r.done,
                            ngFrom:r.ng_from, ngTo:r.ng_to, note:r.note,
@@ -625,17 +628,44 @@ function viewTasks(){
 }
 
 /* ============================ view: 支払い ============================ */
+function shiftMonthStr(ym, delta){
+  if (!delta) return today().slice(0, 7);
+  const p = ym.split("-").map(Number);
+  const d = new Date(p[0], p[1] - 1 + delta, 1);
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1);
+}
+const paidDate = p => p.paidOn || (p.paidAt || "").slice(0, 10) || "";
+// Expenses are read back a month at a time for the books, so total by category.
+function expenseBreakdown(ym){
+  const rows = S.payments.filter(p => p.status === "paid" && paidDate(p).slice(0, 7) === ym);
+  const byCat = {}, order = [];
+  rows.forEach(function(p){
+    const c = (p.category || "").trim() || "未分類";
+    if (!byCat[c]){ byCat[c] = { name: c, sum: 0, n: 0 }; order.push(byCat[c]); }
+    byCat[c].sum += Number(p.amount || 0);
+    byCat[c].n += 1;
+  });
+  order.sort((a, b) => b.sum - a.sum);
+  return { rows: rows, cats: order, total: rows.reduce((a, p) => a + Number(p.amount || 0), 0) };
+}
 function viewPay(){
   const up = unpaid();
   const overdue = up.filter(p => { const n = daysUntil(p.due); return n !== null && n < 0; });
   const sum = up.reduce((a, p) => a + Number(p.amount || 0), 0);
-  const thisMonth = S.payments.filter(p => p.status === "paid" && (p.paidAt || "").slice(0, 7) === today().slice(0, 7));
+  const thisMonth = S.payments.filter(p => p.status === "paid" && paidDate(p).slice(0, 7) === today().slice(0, 7));
   const paidSum = thisMonth.reduce((a, p) => a + Number(p.amount || 0), 0);
-  const list = S.payments.filter(p => S.payFilter === "paid" ? p.status === "paid" : S.payFilter === "all" ? true : p.status !== "paid")
-    .sort((a,b) => (a.status === "paid" ? 1 : 0) - (b.status === "paid" ? 1 : 0) || (a.due || "9999").localeCompare(b.due || "9999"));
+  const showingPaid = S.payFilter === "paid";
+  const brk = showingPaid ? expenseBreakdown(S.payMonth) : null;
+  const list = (showingPaid ? brk.rows
+      : S.payments.filter(p => S.payFilter === "all" ? true : p.status !== "paid"))
+    .sort(showingPaid
+      ? (a,b) => paidDate(b).localeCompare(paidDate(a))
+      : (a,b) => (a.status === "paid" ? 1 : 0) - (b.status === "paid" ? 1 : 0) || (a.due || "9999").localeCompare(b.due || "9999"));
   const chips = [["unpaid","未払い"],["paid","支払済"],["all","すべて"]];
   return '<section class="sec"><div class="sec-head"><h2>支払い管理</h2>' +
-    '<div class="spacer"></div><button class="btn primary" data-act="new-pay">＋ 支払いを登録</button></div>' +
+    '<div class="btn-row">' +
+      '<button class="btn" data-act="new-expense">＋ 経費を記録</button>' +
+      '<button class="btn primary" data-act="new-pay">＋ 支払い予定</button></div></div>' +
     '<div class="tiles" style="margin-bottom:16px">' +
       '<div class="tile"><span class="lab">未払い合計</span><span class="val ' + (sum ? "warn" : "ok") + '">' + h(yen(sum)) + '</span><span class="sub">' + up.length + " 件</span></div>" +
       '<div class="tile"><span class="lab">期限超過</span><span class="val ' + (overdue.length ? "bad" : "ok") + '">' + overdue.length + '</span><span class="sub">' +
@@ -643,20 +673,45 @@ function viewPay(){
       '<div class="tile"><span class="lab">今月の支払済</span><span class="val">' + h(yen(paidSum)) + '</span><span class="sub">' + thisMonth.length + " 件</span></div></div>" +
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
     chips.map(c => '<button class="btn sm' + (S.payFilter === c[0] ? " primary" : "") + '" data-act="pay-filter" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
+    (showingPaid
+      ? '<div class="sec-head" style="margin-bottom:8px"><h2 style="font-size:15px">' +
+          h(S.payMonth.slice(0,4) + "年" + Number(S.payMonth.slice(5,7)) + "月の経費") + "</h2>" +
+        '<span class="chip brass num">' + h(yen(brk.total)) + "</span>" +
+        '<div class="btn-row">' +
+          '<button class="btn sm" data-act="pay-month" data-delta="-1">← 前月</button>' +
+          '<button class="btn sm" data-act="pay-month" data-delta="0">今月</button>' +
+          '<button class="btn sm" data-act="pay-month" data-delta="1">翌月 →</button></div></div>' +
+        (brk.cats.length
+          ? '<div class="panel" style="margin-bottom:14px"><div class="rows" style="border-top:0">' +
+            brk.cats.map(function(c){
+              return '<div class="row" style="align-items:center;gap:10px">' +
+                '<span style="flex:1;font-size:13.5px">' + h(c.name) + "</span>" +
+                '<span style="font-size:11.5px;color:var(--muted)">' + c.n + "件</span>" +
+                '<span class="num" style="font-weight:600">' + h(yen(c.sum)) + "</span></div>";
+            }).join("") + "</div></div>"
+          : "")
+      : "") +
     '<div class="panel tbl-scroll"><table class="data"><thead><tr>' +
-    "<th>期日</th><th>名目</th><th>支払先</th><th class=\"r\">金額</th><th>方法</th><th>担当</th><th></th></tr></thead><tbody>" +
+    "<th>" + (showingPaid ? "支払日" : "期日") + "</th><th>名目</th><th>支払先</th><th class=\"r\">金額</th><th>方法</th><th>" +
+      (showingPaid ? "区分" : "担当") + "</th><th></th></tr></thead><tbody>" +
     (list.length ? list.map(p =>
-      '<tr class="' + (p.status === "paid" ? "paid" : "") + '">' +
-        '<td data-label="期日"><span>' + (p.status === "paid" ? '<span class="chip ok">済 ' + h(md((p.paidAt || "").slice(0,10) || p.due || "")) + "</span>" : (dueChip(p.due) || '<span class="chip">未定</span>')) + "</span></td>" +
+      '<tr class="' + (!showingPaid && p.status === "paid" ? "paid" : "") + '">' +
+        '<td data-label="' + (showingPaid ? "支払日" : "期日") + '"><span>' +
+          (p.status === "paid" ? '<span class="chip ok">' + h(md(paidDate(p)) || "済") + "</span>"
+                               : (dueChip(p.due) || '<span class="chip">未定</span>')) + "</span></td>" +
         '<td data-label="名目"><span>' + h(p.title) + (p.note ? '<div style="font-size:11.5px;color:var(--muted)">' + h(p.note) + "</div>" : "") + "</span></td>" +
         '<td data-label="支払先"><span>' + h(p.payee || "—") + "</span></td>" +
         '<td class="r num" data-label="金額" style="font-weight:600"><span>' + h(yen(p.amount)) + "</span></td>" +
         '<td data-label="方法"><span>' + h(p.method || "—") + "</span></td>" +
-        '<td data-label="担当"><span>' + (p.assignee ? whoChip(p.assignee) : '<span class="chip brass">未定</span>') + "</span></td>" +
+        '<td data-label="' + (showingPaid ? "区分" : "担当") + '"><span>' +
+          (showingPaid
+            ? (p.category ? '<span class="chip">' + h(p.category) + "</span>" : '<span class="chip">未分類</span>')
+            : (p.assignee ? whoChip(p.assignee) : '<span class="chip brass">未定</span>')) + "</span></td>" +
         '<td class="acts" style="white-space:nowrap;text-align:right">' +
           '<button class="btn sm" data-act="toggle-pay" data-id="' + h(p.id) + '">' + (p.status === "paid" ? "未払いに戻す" : "支払った") + "</button> " +
           '<button class="btn sm ghost" data-act="edit-pay" data-id="' + h(p.id) + '">編集</button></td></tr>').join("")
-      : '<tr><td colspan="7" style="text-align:center;padding:22px;color:var(--muted)">該当する支払いはありません</td></tr>') +
+      : '<tr><td colspan="7" style="text-align:center;padding:22px;color:var(--muted)">' +
+        (showingPaid ? "この月の記録はありません" : "該当する支払いはありません") + "</td></tr>") +
     "</tbody></table></div></section>";
 }
 
@@ -951,22 +1006,30 @@ function modalTask(t){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-task" data-id="' + h(t.id || "") + '">保存</button>');
 }
-function modalPay(p){
+function modalPay(p, asExpense){
   p = p || {};
-  showModal(p.id ? "支払いを編集" : "支払いを登録",
+  const paid = asExpense || p.status === "paid";
+  showModal(p.id ? (paid ? "経費メモを編集" : "支払いを編集") : (paid ? "経費を記録" : "支払いを登録"),
     '<div class="fields"><div class="fields two">' +
       '<label class="f">名目<input type="text" id="p_title" maxlength="60" value="' + h(p.title || "") + '" placeholder="例：事務所家賃"></label>' +
       '<label class="f">支払先<input type="text" id="p_payee" maxlength="40" value="' + h(p.payee || "") + '" placeholder="例：◯◯不動産"></label></div>' +
     '<div class="fields two">' +
       '<label class="f">金額（円）<input type="number" id="p_amount" min="0" step="1" inputmode="numeric" value="' + h(p.amount != null ? p.amount : "") + '"></label>' +
-      '<label class="f">期日<input type="date" id="p_due" value="' + h(p.due || "") + '"></label></div>' +
+      '<label class="f">' + (paid ? "支払った日" : "期日") +
+        (paid ? '<input type="date" id="p_paidon" value="' + h(p.paidOn || today()) + '">'
+              : '<input type="date" id="p_due" value="' + h(p.due || "") + '">') + "</label></div>" +
     '<div class="fields two">' +
       '<label class="f">支払方法<input type="text" id="p_method" maxlength="30" value="' + h(p.method || "") + '" placeholder="例：口座振替 / カード / 現金"></label>' +
-      '<label class="f">担当<select id="p_assignee">' + memberOptions(p.assignee, "— 未定 —") + "</select></label></div>" +
-    '<label class="f">メモ<input type="text" id="p_note" maxlength="80" value="' + h(p.note || "") + '"></label></div>',
+      '<label class="f">' + (paid ? "立て替えた人" : "担当") + '<select id="p_assignee">' + memberOptions(p.assignee, "— 未定 —") + "</select></label></div>" +
+    '<label class="f">経費の区分<input type="text" id="p_category" list="dl_cat" maxlength="30" value="' + h(p.category || "") + '" placeholder="例：備品・消耗品"></label>' +
+    '<datalist id="dl_cat">' + EXPENSE_CATEGORIES.map(function(c){ return '<option value="' + h(c) + '"></option>'; }).join("") + "</datalist>" +
+    '<div class="presets">' + EXPENSE_CATEGORIES.map(function(c){
+      return '<button type="button" class="preset" data-act="pay-cat" data-v="' + h(c) + '">' + h(c) + "</button>"; }).join("") + "</div>" +
+    '<label class="f">メモ<input type="text" id="p_note" maxlength="80" value="' + h(p.note || "") + '" placeholder="' +
+      (paid ? "レシートの有無、何に使ったかなど" : "") + '"></label></div>',
     (p.id ? '<button class="btn danger left" data-act="del-pay" data-id="' + h(p.id) + '">削除</button>' : "") +
     '<button class="btn" data-act="close-modal">やめる</button>' +
-    '<button class="btn primary" data-act="save-pay" data-id="' + h(p.id || "") + '">保存</button>');
+    '<button class="btn primary" data-act="save-pay" data-id="' + h(p.id || "") + '" data-paid="' + (paid ? "1" : "") + '">保存</button>');
 }
 function vaultSuggest(key, extra){
   const seen = {};
@@ -1060,13 +1123,26 @@ async function saveTaskFromModal(id){
   }
   closeModal();
 }
-async function savePayFromModal(id){
+async function savePayFromModal(id, paid){
   const title = valOf("p_title");
   if (!title){ toast("名目を入力してください"); return; }
   const body = { title: title, payee: valOf("p_payee"), amount: Number(valOf("p_amount") || 0),
-    due: valOf("p_due") || null, method: valOf("p_method"), assignee: valOf("p_assignee") || null, note: valOf("p_note") };
+    method: valOf("p_method"), assignee: valOf("p_assignee") || null,
+    category: valOf("p_category"), note: valOf("p_note") };
+  if (paid){
+    body.status = "paid";
+    body.paid_on = valOf("p_paidon") || today();
+    body.paid_at = new Date(body.paid_on + "T12:00:00").toISOString();
+    body.paid_by = S.me.id;
+    body.due = null;
+  } else {
+    body.due = valOf("p_due") || null;
+  }
   if (id) await run(sb.from("payments").update(body).eq("id", id), "保存しました");
-  else { body.status = "unpaid"; await run(sb.from("payments").insert(body), "登録しました"); }
+  else {
+    if (!paid) body.status = "unpaid";
+    await run(sb.from("payments").insert(body), paid ? "経費を記録しました" : "登録しました");
+  }
   closeModal();
 }
 async function saveVaultFromModal(id){
@@ -1159,14 +1235,17 @@ document.addEventListener("click", async function(ev){
 
       case "pay-filter": S.payFilter = btn.dataset.f; render(); break;
       case "new-pay": modalPay(null); break;
+      case "new-expense": modalPay(null, true); break;
+      case "pay-cat": { const n = el("p_category"); if (n){ n.value = btn.dataset.v; } break; }
+      case "pay-month": S.payMonth = shiftMonthStr(S.payMonth, Number(btn.dataset.delta)); render(); break;
       case "edit-pay": modalPay(S.payments.find(p => p.id === id)); break;
-      case "save-pay": await savePayFromModal(id); break;
+      case "save-pay": await savePayFromModal(id, btn.dataset.paid === "1"); break;
       case "del-pay": await run(sb.from("payments").delete().eq("id", id), "削除しました"); closeModal(); break;
       case "toggle-pay": {
         const p = S.payments.find(x => x.id === id) || {};
         await run(sb.from("payments").update(p.status === "paid"
-          ? { status: "unpaid", paid_at: null, paid_by: null }
-          : { status: "paid", paid_at: nowIso(), paid_by: S.me.id }).eq("id", id));
+          ? { status: "unpaid", paid_at: null, paid_on: null, paid_by: null }
+          : { status: "paid", paid_at: nowIso(), paid_on: today(), paid_by: S.me.id }).eq("id", id));
         break;
       }
 

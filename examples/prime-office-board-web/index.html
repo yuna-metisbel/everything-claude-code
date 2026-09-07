@@ -157,6 +157,8 @@ main{padding:22px 0 80px}
 .sec-head h2{font-family:var(--serif); font-size:17px; letter-spacing:.04em}
 .sec-head .hint{font-size:12px; color:var(--muted)}
 .sec-head .spacer{margin-left:auto}
+/* Keeps a pair of buttons together: side by side on desktop, one shared row on phones. */
+.btn-row{display:flex; gap:8px; flex-wrap:nowrap; margin-left:auto}
 .eyebrow{
   font-size:10.5px; letter-spacing:.18em; text-transform:uppercase;
   color:var(--muted); font-weight:700; font-family:var(--mono);
@@ -442,6 +444,8 @@ tr.paid td:not(.acts){opacity:.55}
   /* comfortable touch targets */
   .btn{padding:8px 13px; font-size:14px}
   .btn.sm{padding:6px 11px; font-size:13px}
+  .sec-head .btn-row{flex:1 1 100%; margin-left:0}
+  .sec-head .btn-row .btn{flex:1 1 0; text-align:center; min-width:0}
   textarea, input, select{font-size:16px; padding:9px 10px}
   .tick{width:26px; height:26px}
   .cell{height:48px}
