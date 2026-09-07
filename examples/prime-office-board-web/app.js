@@ -126,7 +126,7 @@ const normTask   = r => ({ id:r.id, title:r.title, detail:r.detail, assignee:r.a
                            due:r.due, createdBy:r.created_by, createdAt:r.created_at, takenAt:r.taken_at, doneAt:r.done_at });
 const normPay    = r => ({ id:r.id, title:r.title, payee:r.payee, amount:Number(r.amount), due:r.due, method:r.method,
                            assignee:r.assignee, status:r.status, note:r.note, paidAt:r.paid_at, createdAt:r.created_at });
-const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:r.plan,
+const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:r.plan, done:r.done,
                            ngFrom:r.ng_from, ngTo:r.ng_to, note:r.note,
                            from:r.from_time, to:r.to_time, url:r.link_url });
 
@@ -445,7 +445,8 @@ function todayRow(m){
         ((d.from || d.to) ? '<span class="chip"><span class="num">' + h(d.from || "--:--") + "〜" + h(d.to || "--:--") + "</span></span>" : "") +
         (m.present ? '<span class="chip ok"><span class="dot"></span>在席</span>' : "") + "</div>" +
     "</div><div>" +
-      '<div class="today-plan' + (d.plan ? "" : " blank") + '">' + (d.plan ? h(d.plan) : "今日の動きは未記入") + "</div>" + ng +
+      '<div class="today-plan' + (d.plan ? "" : " blank") + '">' + (d.plan ? h(d.plan) : "今日の動きは未記入") + "</div>" +
+      (d.done ? '<div class="today-done"><span class="done-tag">やったこと</span>' + h(d.done) + "</div>" : "") + ng +
       (d.url ? '<div style="margin-top:4px"><a href="' + h(d.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">関連リンクを開く ↗</a></div>' : "") +
       '<div style="margin-top:7px"><button class="btn sm" data-act="edit-day" data-id="' + h(m.id) + '" data-date="' + today() + '">' +
         (isMe ? "自分の今日を書く" : "この日を編集") + "</button></div>" +
@@ -532,6 +533,7 @@ function viewSched(){
       const date = ym + "-" + pad(d), day = dayOf(m.id, date) || {};
       const K = KINDS[day.kind || ""];
       const marks = ((day.ngFrom || day.ngTo) ? '<span class="m ngm"></span>' : "") +
+        (day.done ? '<span class="m donem"></span>' : "") +
         ((day.plan || day.note) ? '<span class="m notem"></span>' : "") +
         (day.url ? '<span class="m linkm"></span>' : "");
       r += '<td class="day ' + K.cls + (date === t ? " today-col" : "") + '">' +
@@ -568,6 +570,7 @@ function viewSched(){
       '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>休み</span>' +
       '<span><i style="background:var(--bad);border-radius:50%"></i>連絡がつかない時間帯あり</span>' +
       '<span><i style="background:var(--brass);border-radius:50%"></i>予定メモあり</span>' +
+      '<span><i style="background:var(--ok);border-radius:50%"></i>やったこと記録あり</span>' +
       '<span><i style="background:var(--cool);border-radius:50%"></i>関連リンクあり</span>' +
       '<span style="margin-left:auto">マスを押すと編集できます</span></div></section>' +
     '<section class="sec"><div class="sec-head"><h2>連絡がつかない時間帯（今月）</h2></div>' +
@@ -925,7 +928,8 @@ function modalDay(memberId, date){
     '<label class="f">関連リンク（面接・撮影の詳細など）' +
       '<input type="url" id="d_url" value="' + h(d.url || "") + '" placeholder="' + h(recruitUrl() || "https://") + '"></label>' +
     (recruitUrl() ? '<button type="button" class="btn sm" data-act="use-recruit">求人パイプのURLを入れる</button>' : "") +
-    '<label class="f">今日1日の動き（全員が見られます）<textarea id="d_plan" placeholder="例：13時まで在宅で写真の差し替え、15時から事務所、夕方に面接1件">' + h(d.plan || "") + "</textarea></label>" +
+    '<label class="f">今日1日の動き（これからの予定）<textarea id="d_plan" placeholder="例：13時まで在宅で写真の差し替え、15時から事務所、夕方に面接1件">' + h(d.plan || "") + "</textarea></label>" +
+    '<label class="f">やったこと（終わってから記録）<textarea id="d_done" placeholder="例：ヘブンの写真2名分差し替え完了、面接1件（体験入店へ）、備品発注">' + h(d.done || "") + "</textarea></label>" +
     '<div class="fields two">' +
       '<label class="f">連絡がつかない時間帯（開始）<input type="time" id="d_ngf" value="' + h(d.ngFrom || "") + '"></label>' +
       '<label class="f">同（終了）<input type="time" id="d_ngt" value="' + h(d.ngTo || "") + '"></label></div>' +
@@ -1035,7 +1039,7 @@ function modalAllowed(){
 /* ============================ actions ============================ */
 async function saveDay(memberId, date, day){
   await run(sb.from("schedule").upsert({
-    member_id: memberId, date: date, kind: day.kind || "", plan: day.plan || "",
+    member_id: memberId, date: date, kind: day.kind || "", plan: day.plan || "", done: day.done || "",
     ng_from: day.ngFrom || "", ng_to: day.ngTo || "", note: day.note || "",
     from_time: day.from || "", to_time: day.to || "", link_url: day.url || "",
     updated_by: S.me.id, updated_at: nowIso()
@@ -1127,11 +1131,11 @@ document.addEventListener("click", async function(ev){
       case "edit-day": modalDay(id, btn.dataset.date); break;
       case "save-day":
         await saveDay(id, btn.dataset.date, { kind: valOf("d_kind"), plan: valOf("d_plan"),
-          ngFrom: valOf("d_ngf"), ngTo: valOf("d_ngt"), note: valOf("d_note"),
+          done: valOf("d_done"), ngFrom: valOf("d_ngf"), ngTo: valOf("d_ngt"), note: valOf("d_note"),
           from: valOf("d_from"), to: valOf("d_to"), url: valOf("d_url") });
         toast("保存しました"); closeModal(); break;
       case "clear-day":
-        await saveDay(id, btn.dataset.date, { kind:"", plan:"", ngFrom:"", ngTo:"", note:"", from:"", to:"", url:"" });
+        await saveDay(id, btn.dataset.date, { kind:"", plan:"", done:"", ngFrom:"", ngTo:"", note:"", from:"", to:"", url:"" });
         toast("空にしました"); closeModal(); break;
 
       case "task-filter": S.taskFilter = btn.dataset.f; render(); break;
