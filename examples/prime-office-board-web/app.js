@@ -93,8 +93,8 @@ const S = {
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
   siteCode: "", gate: null, staffMe: null,
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
-  siteDay: today(), siteMonth: today().slice(0, 7), todoFilter: "open",
-  staff: [], punches: [], keyEvents: [], keyDuty: {}, todos: [], sshifts: {}
+  siteDay: today(), siteMonth: today().slice(0, 7), taskSite: ls("prime.taskSite") || "all",
+  staff: [], punches: [], keyEvents: [], keyDuty: {}, sshifts: {}
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
@@ -155,7 +155,9 @@ function copy(text, what){
 /* ============================ data ============================ */
 const normMember = r => ({ id:r.id, name:r.name, color:r.color, present:r.present, presentAt:r.present_at });
 const normTask   = r => ({ id:r.id, title:r.title, detail:r.detail, assignee:r.assignee, status:r.status,
-                           due:r.due, createdBy:r.created_by, createdAt:r.created_at, takenAt:r.taken_at, doneAt:r.done_at });
+                           due:r.due, createdBy:r.created_by, createdAt:r.created_at, takenAt:r.taken_at, doneAt:r.done_at,
+                           siteId:r.site_id, staffAssignee:r.staff_assignee, staffCreatedBy:r.staff_created_by,
+                           staffDoneBy:r.staff_done_by, doneMemo:r.done_memo, doneBy:r.done_by });
 const normPay    = r => ({ id:r.id, title:r.title, payee:r.payee, amount:Number(r.amount), due:r.due, method:r.method,
                            category:r.category, paidOn:r.paid_on,
                            assignee:r.assignee, status:r.status, note:r.note, paidAt:r.paid_at, createdAt:r.created_at });
@@ -166,7 +168,7 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
@@ -177,7 +179,8 @@ async function loadAll(){
     sb.from("notices").select("*").order("created_at", { ascending: false }),
     sb.from("allowed_emails").select("*").order("email"),
     sb.from("board_settings").select("*").eq("id", 1).maybeSingle(),
-    sb.from("sites").select("*").order("sort_order").order("name")
+    sb.from("sites").select("*").order("sort_order").order("name"),
+    sb.from("staff").select(STAFF_COLS).order("sort_order").order("name")
   ]);
   if (mem.data) S.members = mem.data.map(normMember);
   if (off.data) S.office = { doorOpen: off.data.door_open, updatedBy: off.data.updated_by, updatedAt: off.data.updated_at };
@@ -193,15 +196,23 @@ async function loadAll(){
   if (S.settings) S.mode = S.settings.signup_mode;
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
   S.sites = sit.data || [];
+  S.staff = (stf.data || []).map(normStaff);
   if (!site(S.siteId)) S.siteId = S.sites.length ? S.sites[0].id : "";
   await loadSite(S.siteId);
 }
 
 // スタッフとして入っているときは、自分の拠点ぶんだけを読む。
 async function loadStaffAll(){
-  const r = await sb.from("sites").select("*").eq("id", S.staffMe.siteId);
-  S.sites = r.data || [];
+  const [sit, stf, tsk] = await Promise.all([
+    sb.from("sites").select("*").eq("id", S.staffMe.siteId),
+    sb.from("staff").select(STAFF_COLS).eq("site_id", S.staffMe.siteId).order("sort_order").order("name"),
+    sb.from("tasks").select("*").eq("site_id", S.staffMe.siteId)
+  ]);
+  S.sites = sit.data || [];
+  S.staff = (stf.data || []).map(normStaff);
+  S.tasks = (tsk.data || []).map(normTask);
   S.siteId = S.staffMe.siteId;
+  S.staffMe = S.staff.find(x => x.id === S.staffMe.id) || S.staffMe;
   await loadSite(S.siteId);
 }
 
@@ -213,7 +224,7 @@ function scheduleReload(){
 function subscribeLive(){
   const ch = sb.channel("board");
   ["members","office","schedule","tasks","payments","vault","shops","notices","allowed_emails","board_settings",
-   "sites","staff","punches","key_events","key_duty","staff_todos","staff_shifts"].forEach(t => {
+   "sites","staff","punches","key_events","key_duty","staff_shifts"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -339,8 +350,25 @@ const TABS = [
 ];
 
 
-const openTasks = () => S.tasks.filter(t => t.status !== "done");
+// 本部のタスクと拠点のタスクは同じもの。site_id が null なら本部、値があればその拠点。
+const hqTasks = () => S.tasks.filter(t => !t.siteId);
+const openTasks = () => hqTasks().filter(t => t.status !== "done");
 const wantedTasks = () => openTasks().filter(t => !t.assignee);
+// 担当は本部メンバーか拠点スタッフのどちらか。認証の系統が別なので列が2つある。
+const taskHasOwner = t => !!(t.assignee || t.staffAssignee);
+const taskIsMine = t => (!!S.me && t.assignee === S.me.id) ||
+                        (!!staffMeId() && t.staffAssignee === staffMeId());
+function taskOwnerChip(t){
+  if (t.assignee) return whoChip(t.assignee);
+  if (t.staffAssignee) return '<span class="chip">' + h(staffName(t.staffAssignee)) + "</span>";
+  return '<span class="chip brass">募集中</span>';
+}
+function taskDoneByName(t){
+  if (t.doneBy) return (member(t.doneBy) || {}).name || "";
+  if (t.staffDoneBy) return staffName(t.staffDoneBy);
+  return "";
+}
+const taskSiteName = t => (t.siteId ? ((site(t.siteId) || {}).name || "拠点") : "本部");
 const unpaid = () => S.payments.filter(p => p.status !== "paid");
 
 function render(){
@@ -356,7 +384,7 @@ function render(){
   if (staff){
     renderStaffBar(); renderStaffTabs();
     v.innerHTML = S.siteTab === "key" ? viewKey()
-      : S.siteTab === "todo"  ? viewTodo()
+      : S.siteTab === "todo"  ? viewTasks()
       : S.siteTab === "shift" ? viewShift()
       : viewAtt();
     if (S.siteTab === "shift") scrollShiftToToday();
@@ -681,41 +709,61 @@ function viewSched(){
 /* ============================ view: タスク ============================ */
 function taskRow(t, compact){
   const done = t.status === "done";
-  const mine = S.me && t.assignee === S.me.id;
-  return '<div class="t-row' + (done ? " done" : "") + (!t.assignee && !done ? " wanted" : "") + '">' +
+  const owned = taskHasOwner(t), mine = taskIsMine(t);
+  const by = (member(t.createdBy) || {}).name || (t.staffCreatedBy ? staffName(t.staffCreatedBy) : "");
+  const doneBy = taskDoneByName(t);
+  return '<div class="t-row' + (done ? " done" : "") + (!owned && !done ? " wanted" : "") + '">' +
     '<button class="tick' + (done ? " on" : "") + '" data-act="toggle-task" data-id="' + h(t.id) + '" aria-label="完了切り替え">' + (done ? "✓" : "") + "</button>" +
     '<div><div class="t-title">' + h(t.title) + "</div>" +
       (t.detail ? '<div class="t-detail">' + h(t.detail) + "</div>" : "") +
-      '<div class="t-meta">' + whoChip(t.assignee) + dueChip(t.due, done) +
+      // 終わった人が次の人のために残すメモ。終わっても畳まない。
+      (t.doneMemo ? '<div class="today-done">' + h(t.doneMemo) + "</div>" : "") +
+      '<div class="t-meta">' +
+        // 本部から見るときだけ、どこの仕事かを出す。スタッフ側は自分の拠点しか出ない。
+        (isHq() ? '<span class="chip' + (t.siteId ? "" : " cool") + '">' + h(taskSiteName(t)) + "</span>" : "") +
+        taskOwnerChip(t) + dueChip(t.due, done) +
         (t.status === "doing" ? '<span class="chip cool">進行中</span>' : "") +
-        '<span style="font-size:11px;color:var(--muted)">' + h((member(t.createdBy) || {}).name || "") +
+        (done && doneBy ? '<span class="done-tag">' + h(doneBy) + " が完了</span>" : "") +
+        '<span style="font-size:11px;color:var(--muted)">' + h(by) +
         (t.createdAt ? " が " + h(stamp(t.createdAt)) + " に登録" : "") + "</span></div></div>" +
     (compact ? "" : '<div class="t-acts">' +
-      (!done && !t.assignee ? '<button class="btn sm primary" data-act="take" data-id="' + h(t.id) + '">引き受ける</button>' : "") +
+      (!done && !owned ? '<button class="btn sm primary" data-act="take" data-id="' + h(t.id) + '">引き受ける</button>' : "") +
       (!done && mine && t.status !== "doing" ? '<button class="btn sm" data-act="start" data-id="' + h(t.id) + '">着手</button>' : "") +
-      (!done && t.assignee && !mine ? '<button class="btn sm" data-act="take" data-id="' + h(t.id) + '">代わる</button>' : "") +
-      (!done && t.assignee ? '<button class="btn sm ghost" data-act="release" data-id="' + h(t.id) + '">手放す</button>' : "") +
+      (!done && owned && !mine ? '<button class="btn sm" data-act="take" data-id="' + h(t.id) + '">代わる</button>' : "") +
+      (!done && owned ? '<button class="btn sm ghost" data-act="release" data-id="' + h(t.id) + '">手放す</button>' : "") +
       '<button class="btn sm ghost" data-act="edit-task" data-id="' + h(t.id) + '">編集</button>' +
     "</div>") + "</div>";
 }
 function viewTasks(){
-  const f = S.taskFilter, myId = S.me ? S.me.id : null;
-  const all = S.tasks.slice().sort((a,b) => {
-    const rank = t => t.status === "done" ? 2 : t.assignee ? 1 : 0;
+  const f = S.taskFilter, hq = isHq();
+  // 本部は全拠点ぶんを1つの画面で見て、置き場所で絞り込む。スタッフは自分の拠点だけ。
+  const scoped = hq
+    ? (S.taskSite === "all" ? S.tasks
+       : S.taskSite === "hq" ? S.tasks.filter(t => !t.siteId)
+       : S.tasks.filter(t => t.siteId === S.taskSite))
+    : S.tasks.filter(t => t.siteId === S.siteId);
+  const all = scoped.slice().sort((a,b) => {
+    const rank = t => t.status === "done" ? 2 : taskHasOwner(t) ? 1 : 0;
     return rank(a) - rank(b) || (a.due || "9999").localeCompare(b.due || "9999") || (b.createdAt || "").localeCompare(a.createdAt || "");
   });
   const list = all.filter(t =>
-    f === "wanted" ? (!t.assignee && t.status !== "done")
-    : f === "mine" ? (t.assignee === myId && t.status !== "done")
+    f === "wanted" ? (!taskHasOwner(t) && t.status !== "done")
+    : f === "mine" ? (taskIsMine(t) && t.status !== "done")
     : f === "done" ? t.status === "done"
     : t.status !== "done");
   const chips = [["all","未完了"],["wanted","募集中"],["mine","自分の分"],["done","完了"]];
-  return '<section class="sec"><div class="sec-head"><h2>作業とその期限</h2>' +
+  const scopes = [["all","すべて"],["hq","本部"]].concat(S.sites.map(x => [x.id, x.name]));
+  return '<section class="sec"><div class="sec-head"><h2>やること</h2>' +
     '<span class="hint">担当を空にすると「募集中」になり、手が空いた人が引き受けられます。</span>' +
-    '<div class="spacer"></div><button class="btn primary" data-act="new-task">＋ 作業を登録</button></div>' +
+    '<div class="btn-row"><button class="btn primary" data-act="new-task">＋ 登録</button></div></div>' +
+    (hq && S.sites.length
+      ? '<div class="site-switch">' + scopes.map(c =>
+          '<button class="btn sm' + (S.taskSite === c[0] ? " primary" : "") + '" data-act="task-site" data-v="' + h(c[0]) + '">' +
+          h(c[1]) + "</button>").join("") + "</div>"
+      : "") +
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
     chips.map(c => '<button class="btn sm' + (f === c[0] ? " primary" : "") + '" data-act="task-filter" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
-    '<div class="panel">' + (list.length ? list.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">該当する作業はありません</div>') + "</div></section>";
+    '<div class="panel">' + (list.length ? list.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">該当するものはありません</div>') + "</div></section>";
 }
 
 /* ============================ view: 支払い ============================ */
@@ -812,7 +860,7 @@ function viewPay(){
 const STAFF_TABS = [
   { id:"att",   label:"勤怠",   short:"勤怠" },
   { id:"key",   label:"鍵",     short:"鍵" },
-  { id:"todo",  label:"TODO",   short:"TODO" },
+  { id:"todo",  label:"やること", short:"やる事" },
   { id:"shift", label:"シフト", short:"シフト" }
 ];
 const SHIFT_KINDS = [
@@ -866,6 +914,8 @@ const myOnDuty = () => onDutyNow().find(p => p.staffId === staffMeId()) || null;
 const site = id => S.sites.find(x => x.id === id) || null;
 const curSite = () => site(S.siteId);
 const staffOf = id => S.staff.find(x => x.id === id) || null;
+// S.staff は見える拠点ぶん全部が入っている。拠点ごとの画面はここを通す。
+const siteStaff = () => S.staff.filter(x => x.siteId === S.siteId);
 const staffName = id => (staffOf(id) || {}).name || "—";
 // 本部として見ているのか、スタッフとして入っているのか。
 const isHq = () => !!S.me;
@@ -884,9 +934,6 @@ const normPunch  = r => ({ id:r.id, siteId:r.site_id, staffId:r.staff_id, kind:r
                            punchedAt:r.punched_at, note:r.note });
 const normKeyEv  = r => ({ id:r.id, siteId:r.site_id, staffId:r.staff_id, kind:r.kind,
                            happenedAt:r.happened_at, note:r.note });
-const normTodo   = r => ({ id:r.id, siteId:r.site_id, title:r.title, detail:r.detail, assignee:r.assignee,
-                           due:r.due, status:r.status, doneBy:r.done_by, doneAt:r.done_at,
-                           doneMemo:r.done_memo, createdBy:r.created_by, createdAt:r.created_at });
 const normSShift = r => ({ siteId:r.site_id, staffId:r.staff_id, date:r.date, kind:r.kind,
                            from:r.from_time, to:r.to_time, note:r.note });
 
@@ -894,27 +941,22 @@ const normSShift = r => ({ siteId:r.site_id, staffId:r.staff_id, date:r.date, ki
 const STAFF_COLS = "id,site_id,name,role,key_holder,key_note,active,sort_order,pin_set,last_login_at";
 
 async function loadSite(siteId){
-  if (!siteId){ S.staff = []; S.punches = []; S.keyEvents = []; S.keyDuty = {}; S.todos = []; S.sshifts = {}; return; }
+  if (!siteId){ S.punches = []; S.keyEvents = []; S.keyDuty = {}; S.sshifts = {}; return; }
   const m = S.siteMonth;
   const from = m + "-01", to = m + "-" + pad(daysInMonth(m));
   // 夜勤が前後の日にはみ出すので、打刻だけは前後1日ぶん広く取る。
   const fromIso = new Date(Date.parse(from + "T00:00:00+09:00") - 26 * 3600000).toISOString();
   const toIso   = new Date(Date.parse(to + "T23:59:59+09:00") + 26 * 3600000).toISOString();
-  const [stf, pch, kev, kdt, tdo, shf] = await Promise.all([
-    sb.from("staff").select(STAFF_COLS).eq("site_id", siteId).order("sort_order").order("name"),
+  const [pch, kev, kdt, shf] = await Promise.all([
     sb.from("punches").select("*").eq("site_id", siteId).gte("punched_at", fromIso).lte("punched_at", toIso),
     sb.from("key_events").select("*").eq("site_id", siteId).order("happened_at", { ascending: false }).limit(60),
     sb.from("key_duty").select("*").eq("site_id", siteId).gte("date", from).lte("date", to),
-    sb.from("staff_todos").select("*").eq("site_id", siteId).order("created_at", { ascending: false }).limit(300),
     sb.from("staff_shifts").select("*").eq("site_id", siteId).gte("date", from).lte("date", to)
   ]);
-  S.staff = (stf.data || []).map(normStaff);
   S.punches = (pch.data || []).map(normPunch);
   S.keyEvents = (kev.data || []).map(normKeyEv);
   S.keyDuty = {}; (kdt.data || []).forEach(function(r){ S.keyDuty[r.date] = r; });
-  S.todos = (tdo.data || []).map(normTodo);
   S.sshifts = {}; (shf.data || []).forEach(function(r){ S.sshifts[r.staff_id + "|" + r.date] = normSShift(r); });
-  if (S.staffMe) S.staffMe = S.staff.find(x => x.id === S.staffMe.id) || S.staffMe;
 }
 
 /* ---------------------------- スタッフの入り口 ---------------------------- */
@@ -990,7 +1032,7 @@ function viewAtt(){
   const rows = shiftsOnDay(day);
   const seen = {}; rows.forEach(function(r){ seen[r.staffId] = 1; });
   const blanks = canManageSite()
-    ? S.staff.filter(s => s.active && !seen[s.id]).map(s => ({ staffId: s.id, inRec: null, outRec: null, day: day }))
+    ? siteStaff().filter(s => s.active && !seen[s.id]).map(s => ({ staffId: s.id, inRec: null, outRec: null, day: day }))
     : [];
   const on = onDutyNow();
   const mine = myOnDuty();
@@ -1046,7 +1088,7 @@ function viewAtt(){
 function viewKey(){
   const day = S.siteDay;
   const duty = S.keyDuty[day] || {};
-  const holders = S.staff.filter(s => s.active && s.keyHolder);
+  const holders = siteStaff().filter(s => s.active && s.keyHolder);
   const last = kind => S.keyEvents.filter(e => e.kind === kind)[0] || null;
   const lastOpen = last("open"), lastClose = last("close");
   const stateLine = (ev, word) => ev
@@ -1103,65 +1145,16 @@ function viewKey(){
 }
 
 /* ---------------------------- TODO ---------------------------- */
-function viewTodo(){
-  const f = S.todoFilter;
-  const list = S.todos.filter(t => f === "all" ? true : f === "done" ? t.status === "done" : t.status !== "done")
-    .sort(function(a, b){
-      if (a.status !== b.status) return a.status === "done" ? 1 : -1;
-      return (a.due || "9999").localeCompare(b.due || "9999") || b.createdAt.localeCompare(a.createdAt);
-    });
-  const chips = [["open","やること"],["done","終わったこと"],["all","すべて"]];
-  return '<section class="sec"><div class="sec-head"><h2>TODO</h2>' +
-    '<div class="btn-row"><button class="btn primary" data-act="new-todo">＋ 追加</button></div></div>' +
-    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
-    chips.map(c => '<button class="btn sm' + (f === c[0] ? " primary" : "") + '" data-act="todo-filter" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
-    '<div class="panel">' + (list.length ? list.map(todoRow).join("") : '<div class="empty">該当するものはありません</div>') + "</div></section>";
-}
-function todoRow(t){
-  const done = t.status === "done";
-  const late = !done && t.due && daysUntil(t.due) !== null && daysUntil(t.due) < 0;
-  return '<div class="row todo-row' + (done ? " is-done" : "") + '">' +
-    '<button class="tick' + (done ? " on" : "") + '" data-act="toggle-todo" data-id="' + h(t.id) + '" aria-label="終わった"></button>' +
-    '<div style="flex:1;min-width:0">' +
-      '<div style="font-size:14px' + (done ? ";text-decoration:line-through;color:var(--muted)" : "") + '">' + h(t.title) + "</div>" +
-      (t.detail ? '<div style="font-size:12px;color:var(--muted);white-space:pre-wrap">' + h(t.detail) + "</div>" : "") +
-      // 終わった人が残したメモ。次の人が読むためにあるので、終わっても畳まない。
-      (t.doneMemo ? '<div class="today-done">' + h(t.doneMemo) + "</div>" : "") +
-      '<div class="todo-meta">' +
-        (t.assignee ? '<span class="chip">' + h(staffName(t.assignee)) + "</span>" : '<span class="chip brass">担当なし</span>') +
-        (t.due ? '<span class="chip' + (late ? " bad" : "") + ' num">' + h(md(t.due)) + " まで</span>" : "") +
-        (done && t.doneBy ? '<span class="done-tag">' + h(staffName(t.doneBy)) + " が完了</span>" : "") +
-      "</div></div>" +
-    '<button class="btn sm ghost" data-act="edit-todo" data-id="' + h(t.id) + '">編集</button></div>';
-}
-function modalTodo(t){
-  t = t || {};
-  const done = t.status === "done";
-  showModal(t.id ? "TODO を編集" : "TODO を追加",
-    '<div class="fields">' +
-    '<label class="f">やること<input type="text" id="td_title" maxlength="80" value="' + h(t.title || "") + '" placeholder="例：タオルを補充する"></label>' +
-    '<label class="f">詳細<textarea id="td_detail" placeholder="やり方や置き場所など">' + h(t.detail || "") + "</textarea></label>" +
-    '<div class="fields two">' +
-      '<label class="f">担当<select id="td_assignee">' + staffOptions(t.assignee, "— 決めない —") + "</select></label>" +
-      '<label class="f">いつまでに<input type="date" id="td_due" value="' + h(t.due || "") + '"></label></div>' +
-    '<label class="f">終わったときのメモ（共有）<textarea id="td_memo" placeholder="やってみて気づいたこと、次の人に伝えたいこと">' +
-      h(t.doneMemo || "") + "</textarea></label>" +
-    '<p style="font-size:12px;color:var(--muted);line-height:1.7">終わった人がここに書いておくと、' +
-      "次に同じことをする人がそのまま読めます。" + (done ? "" : "「終わった」を押したあとでも書けます。") + "</p></div>",
-    (t.id ? '<button class="btn danger left" data-act="del-todo" data-id="' + h(t.id) + '">削除</button>' : "") +
-    '<button class="btn" data-act="close-modal">やめる</button>' +
-    '<button class="btn primary" data-act="save-todo" data-id="' + h(t.id || "") + '">保存</button>');
-}
 function staffOptions(sel, blank){
   return '<option value="">' + h(blank) + "</option>" +
-    S.staff.filter(s => s.active).map(function(s){
+    siteStaff().filter(s => s.active).map(function(s){
       return '<option value="' + h(s.id) + '"' + (sel === s.id ? " selected" : "") + ">" + h(s.name) + "</option>"; }).join("");
 }
 
 /* ---------------------------- シフト ---------------------------- */
 function viewShift(){
   const m = S.siteMonth, n = daysInMonth(m);
-  const people = S.staff.filter(s => s.active);
+  const people = siteStaff().filter(s => s.active);
   const mine = staffMeId();
   const head = '<tr><th class="name">スタッフ</th>' +
     Array.from({ length: n }, function(_, i){
@@ -1239,7 +1232,7 @@ function viewSites(){
     (sub === "admin" ? viewSiteAdmin()
       : !tabs.some(t => t.id === sub) ? '<div class="panel"><div class="empty">このタブは本部の設定で非表示になっています</div></div>'
       : sub === "key" ? viewKey()
-      : sub === "todo" ? viewTodo()
+      : sub === "todo" ? viewTasks()
       : sub === "shift" ? viewShift()
       : viewAtt()) + "</section>";
 }
@@ -1270,8 +1263,8 @@ function viewSiteAdmin(){
       '<div class="btn-row"><button class="btn sm primary" data-act="new-staff">＋ スタッフ</button></div></div>' +
     '<div class="panel tbl-scroll"><table class="data"><thead><tr>' +
       "<th>名前</th><th>役割</th><th>鍵</th><th>暗証番号</th><th>最終ログイン</th><th></th></tr></thead><tbody>" +
-    (S.staff.length
-      ? S.staff.map(function(s){
+    (siteStaff().length
+      ? siteStaff().map(function(s){
           return '<tr' + (s.active ? "" : ' class="paid"') + ">" +
             '<td data-label="名前"><span>' + h(s.name) + (s.active ? "" : '<span class="chip">停止中</span>') + "</span></td>" +
             '<td data-label="役割"><span>' + (s.role === "manager" ? '<span class="chip brass">店長</span>' : "スタッフ") + "</span></td>" +
@@ -1341,13 +1334,13 @@ function modalDuty(date){
 }
 function modalHolders(){
   showModal("鍵を持っている人",
-    '<div class="fields">' + S.staff.filter(s => s.active).map(function(s){
+    '<div class="fields">' + siteStaff().filter(s => s.active).map(function(s){
       return '<label class="f" style="flex-direction:row;align-items:center;gap:10px">' +
         '<input type="checkbox" data-holder="' + h(s.id) + '" style="width:auto"' + (s.keyHolder ? " checked" : "") + ">" +
         '<span style="flex:1">' + h(s.name) + "</span>" +
         '<input type="text" data-holdernote="' + h(s.id) + '" maxlength="60" placeholder="メモ" value="' +
           h(s.keyNote || "") + '" style="flex:1 1 120px"></label>'; }).join("") +
-      (S.staff.filter(s => s.active).length ? "" : '<p class="empty" style="border:0">名簿にスタッフがいません</p>') + "</div>",
+      (siteStaff().filter(s => s.active).length ? "" : '<p class="empty" style="border:0">名簿にスタッフがいません</p>') + "</div>",
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-holders">保存</button>');
 }
@@ -1643,15 +1636,48 @@ function modalDay(memberId, date){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-day" data-id="' + h(memberId) + '" data-date="' + date + '">保存</button>');
 }
+// 担当は「本部メンバー」と「拠点スタッフ」の2系統あるので、1つの選択肢にまとめて
+// 値の頭で見分ける（m: 本部 / s: スタッフ）。
+function taskAssigneeOptions(t){
+  const cur = t.assignee ? "m:" + t.assignee : t.staffAssignee ? "s:" + t.staffAssignee : "";
+  let out = '<option value=""' + (cur ? "" : " selected") + ">— 募集中（誰か手が空いた人）—</option>";
+  if (isHq() && S.members.length){
+    out += '<optgroup label="本部">' + S.members.map(function(m){
+      return '<option value="m:' + h(m.id) + '"' + (cur === "m:" + m.id ? " selected" : "") + ">" + h(m.name) + "</option>";
+    }).join("") + "</optgroup>";
+  }
+  S.sites.forEach(function(t2){
+    const people = S.staff.filter(x => x.siteId === t2.id && x.active);
+    if (!people.length) return;
+    out += '<optgroup label="' + h(t2.name) + '">' + people.map(function(x){
+      return '<option value="s:' + h(x.id) + '"' + (cur === "s:" + x.id ? " selected" : "") + ">" + h(x.name) + "</option>";
+    }).join("") + "</optgroup>";
+  });
+  return out;
+}
 function modalTask(t){
   t = t || {};
-  showModal(t.id ? "作業を編集" : "作業を登録",
+  const isNew = !t.id;
+  // 新規のとき、スタッフ側は自分の拠点で固定。本部は置き場所を選ぶ。
+  const scope = t.siteId || (isHq() ? "" : S.siteId);
+  showModal(t.id ? "編集" : "やることを登録",
     '<div class="fields">' +
     '<label class="f">やること<input type="text" id="t_title" maxlength="80" value="' + h(t.title || "") + '" placeholder="例：新人プロフィールの写真を差し替える"></label>' +
     '<label class="f">詳細・手順<textarea id="t_detail" placeholder="任せる相手が迷わないように書いておくと引き受けてもらいやすいです">' + h(t.detail || "") + "</textarea></label>" +
+    (isHq()
+      ? '<label class="f">置き場所<select id="t_site">' +
+          '<option value=""' + (scope ? "" : " selected") + ">本部</option>" +
+          S.sites.map(function(x){
+            return '<option value="' + h(x.id) + '"' + (scope === x.id ? " selected" : "") + ">" + h(x.name) + "</option>";
+          }).join("") + "</select></label>"
+      : "") +
     '<div class="fields two">' +
-      '<label class="f">担当<select id="t_assignee">' + memberOptions(t.assignee, "— 募集中（誰か手が空いた人）—") + "</select></label>" +
-      '<label class="f">いつまでに<input type="date" id="t_due" value="' + h(t.due || "") + '"></label></div></div>',
+      '<label class="f">担当<select id="t_assignee">' + taskAssigneeOptions(t) + "</select></label>" +
+      '<label class="f">いつまでに<input type="date" id="t_due" value="' + h(t.due || "") + '"></label></div>' +
+    '<label class="f">終わったときのメモ（共有）<textarea id="t_memo" placeholder="やってみて気づいたこと、次の人に伝えたいこと">' +
+      h(t.doneMemo || "") + "</textarea></label>" +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">終わった人がここに書いておくと、' +
+      "次に同じことをする人がそのまま読めます。「完了」にしたあとでも書けます。</p></div>",
     (t.id ? '<button class="btn danger left" data-act="del-task" data-id="' + h(t.id) + '">削除</button>' : "") +
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-task" data-id="' + h(t.id || "") + '">保存</button>');
@@ -1758,17 +1784,31 @@ async function saveDay(memberId, date, day){
     updated_by: S.me.id, updated_at: nowIso()
   }, { onConflict: "member_id,date" }));
 }
+// 担当の選択肢は "m:<id>"（本部）か "s:<id>"（拠点スタッフ）。
+function splitAssignee(v){
+  const raw = String(v || "");
+  if (raw.slice(0, 2) === "m:") return { assignee: raw.slice(2), staff_assignee: null };
+  if (raw.slice(0, 2) === "s:") return { assignee: null, staff_assignee: raw.slice(2) };
+  return { assignee: null, staff_assignee: null };
+}
 async function saveTaskFromModal(id){
   const title = valOf("t_title");
   if (!title){ toast("やることを入力してください"); return; }
-  const body = { title: title, detail: valOf("t_detail"), assignee: valOf("t_assignee") || null, due: valOf("t_due") || null };
+  const who = splitAssignee(valOf("t_assignee"));
+  const siteBox = el("t_site");
+  const body = { title: title, detail: valOf("t_detail"), due: valOf("t_due") || null,
+    done_memo: valOf("t_memo"), assignee: who.assignee, staff_assignee: who.staff_assignee };
+  if (siteBox) body.site_id = siteBox.value || null;
+  else if (!isHq()) body.site_id = S.siteId;
   if (id){
     const cur = S.tasks.find(t => t.id === id) || {};
-    if (body.assignee && body.assignee !== cur.assignee) body.taken_at = nowIso();
+    const owner = who.assignee || who.staff_assignee;
+    if (owner && owner !== (cur.assignee || cur.staffAssignee)) body.taken_at = nowIso();
     await run(sb.from("tasks").update(body).eq("id", id), "保存しました");
   } else {
-    body.status = "open"; body.created_by = S.me.id;
-    if (body.assignee) body.taken_at = nowIso();
+    body.status = "open";
+    if (isHq()) body.created_by = S.me.id; else body.staff_created_by = staffMeId();
+    if (who.assignee || who.staff_assignee) body.taken_at = nowIso();
     await run(sb.from("tasks").insert(body), "登録しました");
   }
   closeModal();
@@ -1866,20 +1906,25 @@ document.addEventListener("click", async function(ev){
       case "new-task": modalTask(null); break;
       case "edit-task": modalTask(S.tasks.find(t => t.id === id)); break;
       case "save-task": await saveTaskFromModal(id); break;
+      case "task-site": S.taskSite = btn.dataset.v; ls("prime.taskSite", S.taskSite); render(); return;
       case "del-task": await run(sb.from("tasks").delete().eq("id", id), "削除しました"); closeModal(); break;
       case "toggle-task": {
         const t = S.tasks.find(x => x.id === id) || {};
         await run(sb.from("tasks").update(t.status === "done"
-          ? { status: t.assignee ? "doing" : "open", done_at: null, done_by: null }
-          : { status: "done", done_at: nowIso(), done_by: S.me.id }).eq("id", id));
+          ? { status: taskHasOwner(t) ? "doing" : "open", done_at: null, done_by: null, staff_done_by: null }
+          : { status: "done", done_at: nowIso(),
+              done_by: isHq() ? S.me.id : null, staff_done_by: isHq() ? null : staffMeId() }).eq("id", id));
         break;
       }
       case "take":
-        await run(sb.from("tasks").update({ assignee: S.me.id, taken_at: nowIso(), status: "doing" }).eq("id", id), "引き受けました");
+        await run(sb.from("tasks").update({
+          assignee: isHq() ? S.me.id : null, staff_assignee: isHq() ? null : staffMeId(),
+          taken_at: nowIso(), status: "doing" }).eq("id", id), "引き受けました");
         break;
       case "start": await run(sb.from("tasks").update({ status: "doing" }).eq("id", id)); break;
       case "release":
-        await run(sb.from("tasks").update({ assignee: null, status: "open" }).eq("id", id), "募集中に戻しました"); break;
+        await run(sb.from("tasks").update({ assignee: null, staff_assignee: null, status: "open" }).eq("id", id),
+          "募集中に戻しました"); break;
 
       case "pay-filter": S.payFilter = btn.dataset.f; render(); break;
       case "new-pay": modalPay(null); break;
@@ -1972,27 +2017,6 @@ document.addEventListener("click", async function(ev){
         toast("保存しました"); closeModal(); break;
       }
 
-      case "todo-filter": S.todoFilter = btn.dataset.f; render(); return;
-      case "new-todo": modalTodo(null); break;
-      case "edit-todo": modalTodo(S.todos.find(x => x.id === id)); break;
-      case "save-todo": {
-        const title = valOf("td_title");
-        if (!title){ toast("やることを入力してください"); break; }
-        const body = { title: title, detail: valOf("td_detail"), assignee: valOf("td_assignee") || null,
-          due: valOf("td_due") || null, done_memo: valOf("td_memo"), updated_at: nowIso() };
-        if (id) await run(sb.from("staff_todos").update(body).eq("id", id), "保存しました");
-        else await run(sb.from("staff_todos").insert(Object.assign({ site_id: S.siteId, created_by: staffMeId() }, body)), "追加しました");
-        closeModal(); break;
-      }
-      case "del-todo": await run(sb.from("staff_todos").delete().eq("id", id), "削除しました"); closeModal(); break;
-      case "toggle-todo": {
-        const t = S.todos.find(x => x.id === id) || {};
-        await run(sb.from("staff_todos").update(t.status === "done"
-          ? { status: "open", done_at: null, done_by: null, updated_at: nowIso() }
-          : { status: "done", done_at: nowIso(), done_by: staffMeId(), updated_at: nowIso() }).eq("id", id));
-        break;
-      }
-
       case "edit-shift": modalShift(id, btn.dataset.date); break;
       case "save-shift":
         await run(sb.from("staff_shifts").upsert({ site_id: S.siteId, staff_id: id, date: btn.dataset.date,
@@ -2044,7 +2068,7 @@ document.addEventListener("click", async function(ev){
         const body = { name: name, role: valOf("sf_role"), active: valOf("sf_active") === "1",
           key_holder: !!(keyBox && keyBox.checked), key_note: valOf("sf_keynote"), updated_at: nowIso() };
         if (id) await run(sb.from("staff").update(body).eq("id", id), "保存しました");
-        else await run(sb.from("staff").insert(Object.assign({ site_id: S.siteId, sort_order: S.staff.length + 1 }, body)),
+        else await run(sb.from("staff").insert(Object.assign({ site_id: S.siteId, sort_order: siteStaff().length + 1 }, body)),
           "追加しました。続けて暗証番号を発行してください");
         closeModal(); break;
       }
@@ -2134,7 +2158,7 @@ document.addEventListener("click", async function(ev){
     }
   } catch(e){ /* run() already surfaced it */ }
   if (S.screen === "app"){ try { await loadAll(); } catch(e){} render(); }
-  else if (S.screen === "staff"){ try { await loadSite(S.siteId); } catch(e){} render(); }
+  else if (S.screen === "staff"){ try { await loadStaffAll(); } catch(e){} render(); }
 });
 document.addEventListener("input", function(ev){
   const t = ev.target;
