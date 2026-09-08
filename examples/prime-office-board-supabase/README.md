@@ -47,8 +47,11 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 | 20260907155503 | `staff_auth_lookup`             | 認証ユーザーの拾い直し                                                           |
 | 20260907165706 | `staff_pin_set_flag`            | ハッシュは読めないので、発行済みかどうかだけを別列で持つ                         |
 | 20260907171420 | `staff_pin_hash_column_grants`  | `pin_hash` を列単位の権限でクライアントから隠す                                  |
-| 20260907183702 | `merge_staff_todos_into_tasks`  | 拠点の TODO を `tasks` に統合し、`staff_todos` を削除                            |
-| 20260907191500 | `staff_self_signup_visible_pin` | 本人による登録と、本部が4桁を確認できる `pin` 列                                 |
+| 20260907205641 | `merge_staff_todos_into_tasks`  | 拠点の TODO を `tasks` に統合し、`staff_todos` を削除                            |
+| 20260907210534 | `staff_self_signup_visible_pin` | 本人による登録と、本部が4桁を確認できる `pin` 列                                 |
+| 20260908121740 | `shops_kind_listing_profile`    | 掲載用プロフィールを `shops.kind` で店舗と分ける                                 |
+| 20260908162619 | `shops_phone`                   | 店舗の電話番号。■ ブロックとは別に持つ                                           |
+| 20260908162727 | `personal_notes`                | 自分だけのやること・メモ `notes` と、1件ごとの公開範囲                           |
 
 `staff_pin_hash_column_grants` は落とし穴の修正。Supabase は `public` の全テーブルに
 表単位の権限を配るので、表単位の権限をいったん剥がしてから見せてよい列だけを

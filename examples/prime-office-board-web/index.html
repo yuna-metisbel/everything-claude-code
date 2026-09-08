@@ -289,6 +289,13 @@ table.cal .cell .k{font-size:10.5px; letter-spacing:-.02em}
 .t-acts{display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end}
 .tick{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line-strong);background:transparent;margin-top:2px;flex:none;display:grid;place-items:center;padding:0}
 .tick.on{background:var(--ok); border-color:var(--ok); color:#fff; font-size:11px}
+.tick.memo{border-style:dashed; color:var(--muted); font-size:11px; line-height:1}
+.tick:disabled{opacity:.45}
+.pick-list{display:flex; flex-wrap:wrap; gap:8px; margin-top:6px}
+.pick{display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--line);
+      border-radius:999px; font-size:13px; background:var(--surface)}
+.pick input{margin:0}
+.pick:has(input:checked){border-color:var(--brass-line); background:var(--brass-soft)}
 .wanted{border-left:3px solid var(--brass)}
 
 /* table */

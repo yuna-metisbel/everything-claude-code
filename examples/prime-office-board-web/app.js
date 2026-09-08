@@ -91,6 +91,7 @@ const S = {
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
   shopKind: ls("prime.shopKind") || "shop",
+  notes: [], noteSide: ls("prime.noteSide") || "team",
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
   siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
@@ -162,6 +163,9 @@ const normTask   = r => ({ id:r.id, title:r.title, detail:r.detail, assignee:r.a
 const normPay    = r => ({ id:r.id, title:r.title, payee:r.payee, amount:Number(r.amount), due:r.due, method:r.method,
                            category:r.category, paidOn:r.paid_on,
                            assignee:r.assignee, status:r.status, note:r.note, paidAt:r.paid_at, createdAt:r.created_at });
+const normNote   = r => ({ id:r.id, owner:r.owner, kind:r.kind, title:r.title, body:r.body, status:r.status,
+                           due:r.due, share:r.share, sharedWith:r.shared_with || [],
+                           createdAt:r.created_at });
 const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:r.plan, done:r.done,
                            ngFrom:r.ng_from, ngTo:r.ng_to, note:r.note,
                            from:r.from_time, to:r.to_time, url:r.link_url });
@@ -169,7 +173,7 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf, nte] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
@@ -181,7 +185,8 @@ async function loadAll(){
     sb.from("allowed_emails").select("*").order("email"),
     sb.from("board_settings").select("*").eq("id", 1).maybeSingle(),
     sb.from("sites").select("*").order("sort_order").order("name"),
-    sb.from("staff").select(STAFF_COLS).order("sort_order").order("name")
+    sb.from("staff").select(STAFF_COLS).order("sort_order").order("name"),
+    sb.from("notes").select("*").order("created_at", { ascending: false })
   ]);
   if (mem.data) S.members = mem.data.map(normMember);
   if (off.data) S.office = { doorOpen: off.data.door_open, updatedBy: off.data.updated_by, updatedAt: off.data.updated_at };
@@ -191,6 +196,8 @@ async function loadAll(){
   if (pay.data) S.payments = pay.data.map(normPay);
   if (vlt.data) S.vault = vlt.data;
   if (shp.data) S.shops = shp.data;
+  // 見えないものは RLS がそもそも返さない。ここに来た時点で読んでよいものだけ。
+  S.notes = (nte.data || []).map(normNote);
   if (ntc.data) S.notices = ntc.data;
   S.allowed = alw.data || [];
   S.settings = bst.data || null;
@@ -225,7 +232,7 @@ function scheduleReload(){
 function subscribeLive(){
   const ch = sb.channel("board");
   ["members","office","schedule","tasks","payments","vault","shops","notices","allowed_emails","board_settings",
-   "sites","staff","punches","key_events","key_duty","staff_shifts"].forEach(t => {
+   "sites","staff","punches","key_events","key_duty","staff_shifts","notes"].forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
   ch.subscribe();
@@ -371,6 +378,33 @@ function taskDoneByName(t){
 }
 const taskSiteName = t => (t.siteId ? ((site(t.siteId) || {}).name || "拠点") : "本部");
 const unpaid = () => S.payments.filter(p => p.status !== "paid");
+
+/* ---- 自分だけの持ち物 ----
+   tasks はチーム全員が読める前提の表なので、私物はそこに混ぜず notes に分けてある。
+   既定は「自分だけ」で、本人が見せると決めた相手にだけ届く。 */
+const SHARE_KEYS = ["private", "some", "all"];
+const SHARE_LABEL = { private: "自分だけ", some: "選んだ人だけ", all: "本部の全員" };
+const myNotes = () => S.notes.filter(x => S.me && x.owner === S.me.id);
+// 自分のものでない = 誰かが自分に見せてくれたもの（RLS がそれ以外を返さない）
+const notesToMe = () => S.notes.filter(x => !S.me || x.owner !== S.me.id);
+const openMyNotes = () => myNotes().filter(x => x.kind === "task" && x.status !== "done");
+function noteShareChip(x){
+  // 「たかし」だけだと、見せている相手なのか書いた人なのか読めない。必ず向きを添える。
+  if (x.share === "all") return '<span class="chip cool">本部の全員に公開</span>';
+  if (x.share === "some"){
+    const names = (x.sharedWith || []).map(id => (member(id) || {}).name).filter(Boolean);
+    return '<span class="chip cool">' + h(names.length ? names.join("・") + " に公開" : "公開先が未選択") + "</span>";
+  }
+  return '<span class="chip">自分だけ</span>';
+}
+function sortNotes(list){
+  return list.slice().sort(function(a, b){
+    const rank = x => x.status === "done" ? 2 : x.kind === "task" ? 0 : 1;
+    return rank(a) - rank(b) ||
+      (a.due || "9999").localeCompare(b.due || "9999") ||
+      String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+  });
+}
 
 function render(){
   const hq = S.screen === "app", staff = S.screen === "staff";
@@ -632,7 +666,20 @@ function viewHome(){
           (p.payee ? '<span class="chip">' + h(p.payee) + "</span>" : "") + "</div></div>" +
           '<span class="num" style="font-weight:600">' + h(yen(p.amount)) + "</span></div>").join("")
           : '<div class="empty">未払いはありません</div>') + "</div></div></section>" +
+      homeNotes() +
     "</div></div>";
+}
+
+// 自分用はホームにも小さく出しておく。タブを開かないと思い出せないものは書かれない。
+function homeNotes(){
+  const mine = sortNotes(openMyNotes()).slice(0, 4);
+  const shared = sortNotes(notesToMe().filter(x => x.status !== "done")).slice(0, 3);
+  const rows = mine.map(function(x){ return noteRow(x, false); })
+    .concat(shared.map(function(x){ return noteRow(x, true); }));
+  return '<section class="sec"><div class="sec-head"><h2>自分用</h2><div class="spacer"></div>' +
+    '<button class="btn sm primary" data-act="new-note">＋ 追加</button></div>' +
+    '<div class="panel">' + (rows.length ? rows.join("")
+      : '<div class="empty">自分だけのやること・メモはありません</div>') + "</div></section>";
 }
 
 /* ============================ view: スケジュール ============================ */
@@ -735,7 +782,52 @@ function taskRow(t, compact){
       '<button class="btn sm ghost" data-act="edit-task" data-id="' + h(t.id) + '">編集</button>' +
     "</div>") + "</div>";
 }
+function noteRow(x, fromOther){
+  const done = x.status === "done", isTask = x.kind === "task";
+  return '<div class="t-row' + (done ? " done" : "") + '">' +
+    (isTask
+      ? '<button class="tick' + (done ? " on" : "") + '"' + (fromOther ? " disabled" : "") +
+        ' data-act="toggle-note" data-id="' + h(x.id) + '" aria-label="完了切り替え">' + (done ? "✓" : "") + "</button>"
+      : '<span class="tick memo" aria-hidden="true">✎</span>') +
+    '<div><div class="t-title">' + h(x.title) + "</div>" +
+      (x.body ? '<div class="t-detail">' + h(x.body) + "</div>" : "") +
+      '<div class="t-meta">' +
+        (fromOther
+          ? '<span class="chip brass">' + h((member(x.owner) || {}).name || "") + " から</span>"
+          : noteShareChip(x)) +
+        (isTask ? dueChip(x.due, done) : '<span class="chip">メモ</span>') +
+        '<span style="font-size:11px;color:var(--muted)">' +
+          (x.createdAt ? h(stamp(x.createdAt)) + " に作成" : "") + "</span></div></div>" +
+    // 見せてもらっている側は読むだけ。書き換えも削除も持ち主にしかできない。
+    (fromOther ? "" : '<div class="t-acts"><button class="btn sm ghost" data-act="edit-note" data-id="' +
+      h(x.id) + '">編集</button></div>') + "</div>";
+}
+function taskSideSwitch(){
+  if (!isHq()) return "";
+  const sides = [["team", "みんなの", S.tasks.length], ["mine", "自分用", myNotes().length + notesToMe().length]];
+  return '<div class="site-switch">' + sides.map(function(c){
+    return '<button class="btn sm' + (S.noteSide === c[0] ? " primary" : "") + '" data-act="note-side" data-v="' +
+      c[0] + '">' + c[1] + (c[2] ? " " + c[2] : "") + "</button>"; }).join("") + "</div>";
+}
+function viewNotes(){
+  const mine = sortNotes(myNotes()), shared = sortNotes(notesToMe());
+  return '<section class="sec"><div class="sec-head"><h2>自分用</h2>' +
+    '<span class="hint">既定では自分にしか見えません。1件ずつ、誰に見せるかを選べます。</span>' +
+    '<div class="btn-row"><button class="btn primary" data-act="new-note">＋ 追加</button></div></div>' +
+    taskSideSwitch() +
+    '<div class="panel">' +
+    (mine.length ? mine.map(function(x){ return noteRow(x, false); }).join("")
+      : '<div class="empty">まだありません。やることでもメモでも、まず自分だけの場所に書けます。</div>') +
+    "</div>" +
+    (shared.length
+      ? '<div class="sec-head" style="margin-top:22px"><h2>見せてもらっているもの</h2>' +
+        '<span class="hint">相手が公開先に自分を入れたものです。読むだけで、書き換えはできません。</span></div>' +
+        '<div class="panel">' + shared.map(function(x){ return noteRow(x, true); }).join("") + "</div>"
+      : "") +
+    "</section>";
+}
 function viewTasks(){
+  if (isHq() && S.noteSide === "mine") return viewNotes();
   const f = S.taskFilter, hq = isHq();
   // 本部は全拠点ぶんを1つの画面で見て、置き場所で絞り込む。スタッフは自分の拠点だけ。
   const scoped = hq
@@ -757,6 +849,7 @@ function viewTasks(){
   return '<section class="sec"><div class="sec-head"><h2>やること</h2>' +
     '<span class="hint">担当を空にすると「募集中」になり、手が空いた人が引き受けられます。</span>' +
     '<div class="btn-row"><button class="btn primary" data-act="new-task">＋ 登録</button></div></div>' +
+    taskSideSwitch() +
     (hq && S.sites.length
       ? '<div class="site-switch">' + scopes.map(c =>
           '<button class="btn sm' + (S.taskSite === c[0] ? " primary" : "") + '" data-act="task-site" data-v="' + h(c[0]) + '">' +
@@ -1481,6 +1574,9 @@ const SHOP_KINDS = [
   ["cast", "掲載用プロフィール", "＋ プロフィールを追加", "媒体に載せるプロフィール。そのままコピーして貼れる形で置いておく場所です。"]
 ];
 const shopKind = () => (S.shopKind === "cast" ? "cast" : "shop");
+// 表示は入力どおり、発信は数字だけ。ハイフンや全角が混じっていても掛けられるように。
+const telHref = v => String(v || "").replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+                                    .replace(/[^0-9+]/g, "");
 const kindOf = sp => (sp.kind || "shop");
 function viewShops(){
   const kind = shopKind();
@@ -1498,6 +1594,8 @@ function viewShops(){
       return '<div class="shop">' +
         '<div class="shop-head"><h3>' + h(sp.name) + "</h3>" +
         (sp.url ? '<a href="' + h(sp.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">サイト ↗</a>' : "") +
+        // 電話は掛けるためのものなので、そのまま発信できるようにしておく。
+        (sp.phone ? '<a href="tel:' + h(telHref(sp.phone)) + '" style="font-size:12.5px">☎ ' + h(sp.phone) + "</a>" : "") +
         '<div class="spacer"></div>' +
         '<button class="btn sm" data-act="copy-shop" data-id="' + h(sp.id) + '">まとめてコピー</button> ' +
         '<button class="btn sm ghost" data-act="edit-shop" data-id="' + h(sp.id) + '">編集</button></div>' +
@@ -1762,6 +1860,36 @@ function modalTask(t){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-task" data-id="' + h(t.id || "") + '">保存</button>');
 }
+function modalNote(x){
+  x = x || {};
+  const kind = x.kind || "task", share = x.share || "private", picked = x.sharedWith || [];
+  const others = S.members.filter(m => !S.me || m.id !== S.me.id);
+  showModal(x.id ? "自分用を編集" : "自分用に追加",
+    '<div class="fields"><div class="fields two">' +
+      '<label class="f">種類<select id="n_kind">' +
+        '<option value="task"' + (kind === "task" ? " selected" : "") + ">やること（チェックできる）</option>" +
+        '<option value="memo"' + (kind === "memo" ? " selected" : "") + ">メモ</option></select></label>" +
+      '<label class="f">いつまでに<input type="date" id="n_due" value="' + h(x.due || "") + '"></label></div>' +
+    '<label class="f">見出し<input type="text" id="n_title" maxlength="80" value="' + h(x.title || "") +
+      '" placeholder="例：領収書をまとめる"></label>' +
+    '<label class="f">中身<textarea id="n_body" placeholder="自分用の覚書。あとから見せる相手を変えられます。">' +
+      h(x.body || "") + "</textarea></label>" +
+    '<label class="f">見せる相手<select id="n_share">' +
+      SHARE_KEYS.map(k => '<option value="' + k + '"' + (share === k ? " selected" : "") + ">" +
+        SHARE_LABEL[k] + "</option>").join("") + "</select></label>" +
+    '<div class="f" id="n_who"' + (share === "some" ? "" : " hidden") + ">見せる人を選ぶ" +
+      '<div class="pick-list">' + (others.length
+        ? others.map(m => '<label class="pick"><input type="checkbox" data-who="' + h(m.id) + '"' +
+            (picked.indexOf(m.id) >= 0 ? " checked" : "") + '><span class="pip" style="background:' +
+            h(m.color) + '"></span>' + h(m.name) + "</label>").join("")
+        : '<span style="font-size:12px;color:var(--muted)">ほかにメンバーがいません</span>') + "</div></div>" +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
+      "はじめは自分だけに見えます。見せる相手を選んでも、相手は読めるだけで、" +
+      "書き換えたり消したりはできません。あとから「自分だけ」に戻せます。</p></div>",
+    (x.id ? '<button class="btn danger left" data-act="del-note" data-id="' + h(x.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-note" data-id="' + h(x.id || "") + '">保存</button>');
+}
 function modalPay(p, asExpense){
   p = p || {};
   const paid = asExpense || p.status === "paid";
@@ -1834,6 +1962,9 @@ function modalShop(sp){
       (isCast
         ? "1行目の <strong>■店名</strong> にはその子の名前を入れてください。見出しの数や順番は自由です。</p>"
         : "見出しの数や順番は店舗ごとに自由です。</p>") +
+    (isCast ? "" :
+      '<label class="f">電話番号<input type="tel" id="s_phone" inputmode="tel" placeholder="例：06-1234-5678" value="' +
+      h(sp.phone || "") + '"></label>') +
     '<label class="f">並び順<input type="number" id="s_sort" value="' +
       h(sp.sort_order != null ? sp.sort_order : (S.shops.filter(x => (x.kind || "shop") === kind).length + 1)) + '"></label>' +
     "</div>",
@@ -1940,12 +2071,29 @@ function revealOne(id){
   render();
 }
 
+async function saveNoteFromModal(id){
+  const title = valOf("n_title");
+  if (!title){ toast("見出しを入れてください"); return; }
+  const share = valOf("n_share") || "private";
+  // 「選んだ人だけ」以外に切り替えたときは、選択を残さず空に戻す。
+  const who = share === "some"
+    ? Array.prototype.slice.call(document.querySelectorAll("#n_who input[data-who]"))
+        .filter(c => c.checked).map(c => c.dataset.who)
+    : [];
+  const body = { kind: valOf("n_kind") || "task", title: title, body: valOf("n_body"),
+    due: valOf("n_due") || null, share: share, shared_with: who };
+  if (id) await run(sb.from("notes").update(body).eq("id", id), "保存しました");
+  else await run(sb.from("notes").insert(Object.assign({ owner: S.me.id }, body)), "登録しました");
+  closeModal();
+}
 async function saveShopFromModal(id){
   const parsed = parseShopText(valOf("s_paste"));
   if (!parsed.name){ toast("「■店名」の行を入れてください"); return; }
   const body = { name: parsed.name, url: parsed.url, sections: parsed.sections,
     kind: valOf("s_kind") || "shop",
     sort_order: Number(valOf("s_sort") || 0), updated_by: S.me.id, updated_at: nowIso() };
+  // 掲載用プロフィールの編集では欄そのものが無い。触っていない番号を消さないよう、あるときだけ入れる。
+  if (el("s_phone")) body.phone = valOf("s_phone");
   if (id) await run(sb.from("shops").update(body).eq("id", id), "保存しました");
   else await run(sb.from("shops").insert(body), "登録しました");
   closeModal();
@@ -1993,6 +2141,16 @@ document.addEventListener("click", async function(ev){
         toast("空にしました"); closeModal(); break;
 
       case "task-filter": S.taskFilter = btn.dataset.f; render(); break;
+      case "note-side": S.noteSide = btn.dataset.v; ls("prime.noteSide", S.noteSide); render(); break;
+      case "new-note": modalNote(null); break;
+      case "edit-note": modalNote(S.notes.find(x => x.id === id)); break;
+      case "save-note": await saveNoteFromModal(id); break;
+      case "del-note": await run(sb.from("notes").delete().eq("id", id), "削除しました"); closeModal(); break;
+      case "toggle-note": {
+        const x = S.notes.find(v => v.id === id);
+        if (x) await run(sb.from("notes").update({ status: x.status === "done" ? "open" : "done" }).eq("id", id));
+        break;
+      }
       case "new-task": modalTask(null); break;
       case "edit-task": modalTask(S.tasks.find(t => t.id === id)); break;
       case "save-task": await saveTaskFromModal(id); break;
@@ -2282,6 +2440,10 @@ document.addEventListener("input", function(ev){
 document.addEventListener("change", function(ev){
   const t = ev.target;
   if (t && /^st_/.test(t.id)) S.form[t.id] = t.value;
+  if (t && t.id === "n_share"){
+    const box = el("n_who");
+    if (box) box.hidden = t.value !== "some";
+  }
   if (t && t.id === "v_group"){
     S.vaultGroup = t.value; ls("prime.vaultGroup", t.value);
     const box = el("vaultList");
