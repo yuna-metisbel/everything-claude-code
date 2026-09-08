@@ -90,6 +90,7 @@ const S = {
   theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
+  shopKind: ls("prime.shopKind") || "shop",
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
   siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
@@ -1475,11 +1476,23 @@ function parseShopText(text){
   });
   return { name: name, url: url, sections: kept };
 }
+const SHOP_KINDS = [
+  ["shop", "店舗", "＋ 店舗を追加", "応募の問い合わせにそのまま答えられるように、条件をまとめておく場所です。"],
+  ["cast", "掲載用プロフィール", "＋ プロフィールを追加", "媒体に載せるプロフィール。そのままコピーして貼れる形で置いておく場所です。"]
+];
+const shopKind = () => (S.shopKind === "cast" ? "cast" : "shop");
+const kindOf = sp => (sp.kind || "shop");
 function viewShops(){
-  const list = S.shops;
-  return '<section class="sec"><div class="sec-head"><h2>店舗の詳細</h2>' +
-    '<span class="hint">応募の問い合わせにそのまま答えられるように、条件をまとめておく場所です。</span>' +
-    '<div class="spacer"></div><button class="btn primary" data-act="new-shop">＋ 店舗を追加</button></div>' +
+  const kind = shopKind();
+  const meta = SHOP_KINDS.find(k => k[0] === kind);
+  const list = S.shops.filter(sp => kindOf(sp) === kind);
+  return '<section class="sec"><div class="sec-head"><h2>' + h(meta[1]) + "</h2>" +
+    '<span class="hint">' + h(meta[3]) + "</span>" +
+    '<div class="btn-row"><button class="btn primary" data-act="new-shop">' + h(meta[2]) + "</button></div></div>" +
+    '<div class="site-switch">' + SHOP_KINDS.map(function(k){
+      const n = S.shops.filter(sp => kindOf(sp) === k[0]).length;
+      return '<button class="btn sm' + (kind === k[0] ? " primary" : "") + '" data-act="shop-kind" data-v="' + k[0] + '">' +
+        h(k[1]) + (n ? " " + n : "") + "</button>"; }).join("") + "</div>" +
     '<div class="panel">' +
     (list.length ? list.map(function(sp){
       return '<div class="shop">' +
@@ -1497,7 +1510,7 @@ function viewShops(){
             }).join("")
           : '<dd class="blank" style="grid-column:1 / -1">項目がありません。「編集」から貼り付けてください。</dd>') +
         "</dl></div>";
-    }).join("") : '<div class="empty">まだ登録がありません。「店舗を追加」から登録してください。</div>') +
+    }).join("") : '<div class="empty">まだ登録がありません。上のボタンから登録してください。</div>') +
     "</div></section>";
 }
 
@@ -1802,18 +1815,27 @@ function modalVault(v){
     '<button class="btn primary" data-act="save-vault" data-id="' + h(v.id || "") + '">保存</button>');
 }
 const SHOP_PLACEHOLDER = "\u25a0店名：\n\u25a0営業時間：15:00〜3:00\n\u25a0最寄り駅：\n日本橋\n\u25a0女子給\n70分6,000〜\n90分8,000〜";
+const CAST_PLACEHOLDER = "\u25a0店名：はるか\n\u25a0キャッチコピー\nモデル級の美しさ\n\u25a0年齢\n25歳\n\u25a0身長\n170cm\n\u25a0サイズ\nB:93 W:56 H:88";
 function modalShop(sp){
   sp = sp || {};
-  showModal(sp.id ? "店舗を編集" : "店舗を追加",
+  // 新規は、いま開いている種別で作る。編集は元の種別を保つ。
+  const kind = sp.id ? (sp.kind || "shop") : shopKind();
+  const isCast = kind === "cast";
+  showModal((sp.id ? "編集" : "追加") + "：" + (isCast ? "掲載用プロフィール" : "店舗"),
     '<div class="fields">' +
     '<label class="f">貼り付け（■ の形式そのまま）' +
       '<textarea id="s_paste" rows="16" style="min-height:280px;font-size:13px;line-height:1.7" placeholder="' +
-      h(SHOP_PLACEHOLDER) + '">' + h(sp.id ? shopText(sp) : "") + "</textarea></label>" +
+      h(isCast ? CAST_PLACEHOLDER : SHOP_PLACEHOLDER) + '">' + h(sp.id ? shopText(sp) : "") + "</textarea></label>" +
+    '<input type="hidden" id="s_kind" value="' + h(kind) + '">' +
     '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
-      '求人票をそのまま貼ってください。<strong>■</strong> で始まる行が見出しになります。' +
+      (isCast ? "プロフィールをそのまま貼ってください。" : "求人票をそのまま貼ってください。") +
+      '<strong>■</strong> で始まる行が見出しになります。' +
       '「■店名：〇〇」のように同じ行に書いても、次の行に書いても大丈夫です。<br>' +
-      '見出しの数や順番は店舗ごとに自由です。</p>' +
-    '<label class="f">並び順<input type="number" id="s_sort" value="' + h(sp.sort_order != null ? sp.sort_order : (S.shops.length + 1)) + '"></label>' +
+      (isCast
+        ? "1行目の <strong>■店名</strong> にはその子の名前を入れてください。見出しの数や順番は自由です。</p>"
+        : "見出しの数や順番は店舗ごとに自由です。</p>") +
+    '<label class="f">並び順<input type="number" id="s_sort" value="' +
+      h(sp.sort_order != null ? sp.sort_order : (S.shops.filter(x => (x.kind || "shop") === kind).length + 1)) + '"></label>' +
     "</div>",
     (sp.id ? '<button class="btn danger left" data-act="del-shop" data-id="' + h(sp.id) + '">削除</button>' : "") +
     '<button class="btn" data-act="close-modal">やめる</button>' +
@@ -1922,6 +1944,7 @@ async function saveShopFromModal(id){
   const parsed = parseShopText(valOf("s_paste"));
   if (!parsed.name){ toast("「■店名」の行を入れてください"); return; }
   const body = { name: parsed.name, url: parsed.url, sections: parsed.sections,
+    kind: valOf("s_kind") || "shop",
     sort_order: Number(valOf("s_sort") || 0), updated_by: S.me.id, updated_at: nowIso() };
   if (id) await run(sb.from("shops").update(body).eq("id", id), "保存しました");
   else await run(sb.from("shops").insert(body), "登録しました");
@@ -2222,6 +2245,7 @@ document.addEventListener("click", async function(ev){
       case "edit-notice": modalNotice(S.notices.find(x => x.id === id)); break;
       case "save-notice": await saveNoticeFromModal(id); break;
       case "del-notice": await run(sb.from("notices").delete().eq("id", id), "削除しました"); closeModal(); break;
+      case "shop-kind": S.shopKind = btn.dataset.v; ls("prime.shopKind", S.shopKind); render(); return;
       case "new-shop": modalShop(null); break;
       case "edit-shop": modalShop(S.shops.find(x => x.id === id)); break;
       case "save-shop": await saveShopFromModal(id); break;
