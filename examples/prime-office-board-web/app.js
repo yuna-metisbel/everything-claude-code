@@ -60,12 +60,15 @@ const PALETTE = ["#9C6C1F","#3E6497","#2C7A5B","#A63244","#6B4E8F","#B0670F","#2
 // from rather than whether they clocked in.
 const KINDS = {
   office: { label:"事務所",   cell:"事務所", cls:"k-office", chip:"brass" },
+  // 半分は在宅で半分は事務所、という日。どちらか一方を選ばせると、
+  // 選ばなかった側の時間が予定から消えてしまう。
+  both:   { label:"事務所＋在宅", cell:"事＋在", cls:"k-both", chip:"brass" },
   home:   { label:"在宅",     cell:"在宅",   cls:"k-home",   chip:"cool" },
   out:    { label:"外仕事",   cell:"外",     cls:"k-out",    chip:"warn" },
   off:    { label:"休み",     cell:"休",     cls:"k-off",    chip:"bad" },
   "":     { label:"未定",     cell:"",       cls:"",         chip:"" }
 };
-const KIND_ORDER = ["", "office", "home", "out", "off"];
+const KIND_ORDER = ["", "office", "both", "home", "out", "off"];
 const VAULT_COLS = [
   ["media",     "媒体"],
   ["shop",      "店舗"],
@@ -735,6 +738,7 @@ function viewSched(){
     "</tbody></table></div>" +
     '<div class="legend">' +
       '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>事務所</span>' +
+      '<span><i class="k-both-sw" style="border:1px solid var(--line)"></i>事務所＋在宅</span>' +
       '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>在宅</span>' +
       '<span><i style="background:var(--warn-soft);border:1px solid var(--line)"></i>外仕事</span>' +
       '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>休み</span>' +

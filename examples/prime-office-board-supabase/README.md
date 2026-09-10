@@ -52,6 +52,7 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 | 20260908121740 | `shops_kind_listing_profile`    | 掲載用プロフィールを `shops.kind` で店舗と分ける                                 |
 | 20260908162619 | `shops_phone`                   | 店舗の電話番号。■ ブロックとは別に持つ                                           |
 | 20260908162727 | `personal_notes`                | 自分だけのやること・メモ `notes` と、1件ごとの公開範囲                           |
+| 20260910125750 | `schedule_kind_both`            | 「事務所＋在宅」の区分を `schedule.kind` に追加                                  |
 
 `staff_pin_hash_column_grants` は落とし穴の修正。Supabase は `public` の全テーブルに
 表単位の権限を配るので、表単位の権限をいったん剥がしてから見せてよい列だけを
