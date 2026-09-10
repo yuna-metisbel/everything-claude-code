@@ -923,10 +923,18 @@ function viewPay(){
   const up = unpaid();
   const overdue = up.filter(p => { const n = daysUntil(p.due); return n !== null && n < 0; });
   const sum = up.reduce((a, p) => a + Number(p.amount || 0), 0);
-  const thisMonth = S.payments.filter(p => p.status === "paid" && paidDate(p).slice(0, 7) === today().slice(0, 7));
-  const paidSum = thisMonth.reduce((a, p) => a + Number(p.amount || 0), 0);
   const showingPaid = S.payFilter === "paid";
   const brk = showingPaid ? expenseBreakdown(S.payMonth) : null;
+  // 数え方が下の一覧とずれていると、金額と件数が合っていないように見える。
+  // 絞り込みに合わせて数える範囲を変え、どの範囲なのかを見出しにも書く。
+  const monthLabel = ym => Number(ym.slice(5, 7)) + "月の支払済";
+  const paidRows = showingPaid ? brk.rows
+    : S.payFilter === "all" ? S.payments.filter(p => p.status === "paid")
+    : S.payments.filter(p => p.status === "paid" && paidDate(p).slice(0, 7) === today().slice(0, 7));
+  const paidLabel = showingPaid ? monthLabel(S.payMonth)
+    : S.payFilter === "all" ? "支払済 合計"
+    : monthLabel(today());
+  const paidSum = paidRows.reduce((a, p) => a + Number(p.amount || 0), 0);
   const list = (showingPaid ? brk.rows
       : S.payments.filter(p => S.payFilter === "all" ? true : p.status !== "paid"))
     .sort(showingPaid
@@ -941,7 +949,8 @@ function viewPay(){
       '<div class="tile"><span class="lab">未払い合計</span><span class="val ' + (sum ? "warn" : "ok") + '">' + h(yen(sum)) + '</span><span class="sub">' + up.length + " 件</span></div>" +
       '<div class="tile"><span class="lab">期限超過</span><span class="val ' + (overdue.length ? "bad" : "ok") + '">' + overdue.length + '</span><span class="sub">' +
         (overdue.length ? h(overdue.map(p => p.title).slice(0, 2).join("、")) : "なし") + "</span></div>" +
-      '<div class="tile"><span class="lab">今月の支払済</span><span class="val">' + h(yen(paidSum)) + '</span><span class="sub">' + thisMonth.length + " 件</span></div></div>" +
+      '<div class="tile"><span class="lab">' + h(paidLabel) + '</span><span class="val">' + h(yen(paidSum)) +
+        '</span><span class="sub">' + paidRows.length + " 件</span></div></div>" +
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
     chips.map(c => '<button class="btn sm' + (S.payFilter === c[0] ? " primary" : "") + '" data-act="pay-filter" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
     (showingPaid
