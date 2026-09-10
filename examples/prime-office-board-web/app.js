@@ -79,6 +79,40 @@ const VAULT_COLS = [
   ["note",      "メモ"]
 ];
 const VAULT_GROUPS = [["media","媒体別"],["shop","店舗別"],["cast_name","キャスト別"],["","まとめない"]];
+// 同じ媒体はいつも同じ色になるように、名前そのものから色を決める。
+// 並び順から決めると、1件足しただけで全部の色が入れ替わって覚え直しになる。
+const GROUP_COLORS = 8;
+function groupColor(name){
+  const s = String(name || "").trim();
+  if (!s) return 0; // 未設定は色を付けない
+  let n = 0;
+  for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) % 1000003;
+  return (n % GROUP_COLORS) + 1;
+}
+// 名前から決めた色がすでに使われていたら、次の空きにずらす。
+// 違うものが同じ色で並ぶと、色を付けた意味がなくなるため。
+function assignColors(names){
+  const out = {}, taken = {};
+  names.forEach(function(name){
+    const want = groupColor(name);
+    if (!want) return;
+    let c = want;
+    for (let i = 0; i < GROUP_COLORS && taken[c]; i++) c = (c % GROUP_COLORS) + 1;
+    taken[c] = true;
+    out[name] = c;
+  });
+  return out;
+}
+// Set は array-like ではないので slice では取り出せない。Array.from を使う。
+const uniqNames = key => Array.from(
+  new Set(S.vault.map(v => String(v[key] || "").trim()).filter(Boolean))
+).sort((a, b) => a.localeCompare(b, "ja"));
+// 媒体の色は一覧全体で1回だけ決める。検索で絞っても、まとめ方を変えても同じ色でいてほしい。
+let mediaColors = {};
+const colorDot = name => {
+  const c = mediaColors[String(name || "").trim()] || 0;
+  return c ? '<span class="g-dot g' + c + '"></span>' : "";
+};
 // Categories the office actually books expenses under; free text is still allowed.
 const EXPENSE_CATEGORIES = ["広告・媒体掲載料","家賃","水道光熱費","通信費","備品・消耗品","交通費","外注費","接待交際費","講習・研修","その他"];
 const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエス魂","リフナビ","メンズエステ求人","エステの達人","X (旧Twitter)","公式LINE","Instagram","Googleビジネス","予約システム","勤怠システム"];
@@ -1620,6 +1654,8 @@ function viewShops(){
 function vaultCell(v, key){
   const raw = (v[key] || "").trim();
   if (key === "url") return raw ? '<a href="' + h(raw) + '" target="_blank" rel="noopener noreferrer">開く ↗</a>' : "—";
+  // まとめ方を変えても、媒体の色は同じままにしておく。目で追う手がかりになる。
+  if (key === "media") return raw ? colorDot(raw) + h(raw) : "—";
   if (key === "login_id" || key === "password"){
     const shown = S.reveal[v.id];
     return '<span class="secret"><code>' + (shown ? h(raw || "—") : "••••••••") + "</code>" +
@@ -1643,6 +1679,10 @@ function renderVaultList(){
   }
   const groupKey = S.vaultGroup;
   const cols = VAULT_COLS.filter(function(c){ return c[0] !== groupKey; });
+  mediaColors = assignColors(uniqNames("media"));
+  // まとめ方が媒体なら媒体の色をそのまま使い、店舗・キャストならその軸で色を決める。
+  const groupColors = !groupKey ? {}
+    : groupKey === "media" ? mediaColors : assignColors(uniqNames(groupKey));
 
   const buckets = [];
   const index = {};
@@ -1664,11 +1704,14 @@ function renderVaultList(){
       return String(x.media || "").localeCompare(String(y.media || ""), "ja") ||
              String(x.cast_name || "").localeCompare(String(y.cast_name || ""), "ja");
     });
+    const gc = groupKey ? (groupColors[String(g.name || "").trim()] || 0) : 0;
+    const gcls = gc ? " gc g" + gc : "";
     return (groupKey
-      ? '<div class="grp-head"><span class="grp-name">' + h(g.name || blank) + "</span>" +
+      ? '<div class="grp-head' + gcls + '">' + (gc ? '<span class="g-dot g' + gc + '"></span>' : "") +
+        '<span class="grp-name">' + h(g.name || blank) + "</span>" +
         '<span class="chip">' + g.items.length + "件</span></div>"
       : "") +
-      '<div class="panel tbl-scroll" style="margin-bottom:14px"><table class="data data-wide"><thead><tr>' +
+      '<div class="panel tbl-scroll' + (gc ? " gp g" + gc : "") + '" style="margin-bottom:14px"><table class="data data-wide"><thead><tr>' +
       cols.map(function(c){ return "<th>" + h(c[1]) + "</th>"; }).join("") + "<th></th></tr></thead><tbody>" +
       g.items.map(function(v){
         return "<tr>" + cols.map(function(c){

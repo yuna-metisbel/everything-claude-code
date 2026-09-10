@@ -29,6 +29,11 @@ img{max-width:100%}
   --warn:#B0670F; --warn-soft:#FAEAD3;
   --bad:#A63244; --bad-soft:#F8E0E3;
   --cool:#3E6497; --cool-soft:#E4EAF5;
+  /* 媒体・店舗・キャストを見分けるための8色。強い色は点と線、薄い色は帯の地に使う */
+  --g1:#9C6C1F; --g1s:#F5E8CC; --g2:#3E6497; --g2s:#E4EAF5;
+  --g3:#2C7A5B; --g3s:#DFF0E7; --g4:#A63244; --g4s:#F8E0E3;
+  --g5:#6B4A93; --g5s:#EBE3F5; --g6:#1F7A80; --g6s:#D9EFF0;
+  --g7:#B0670F; --g7s:#FAEAD3; --g8:#A63A78; --g8s:#F8E1EF;
   --shadow:0 1px 2px rgba(27,22,28,.05), 0 14px 34px -22px rgba(27,22,28,.45);
   --r:4px;
   --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
@@ -46,6 +51,10 @@ img{max-width:100%}
     --warn:#E09A4B; --warn-soft:#3A2A15;
     --bad:#E2717F; --bad-soft:#3A1B21;
     --cool:#83A6D8; --cool-soft:#1B2432;
+    --g1:#D5A54D; --g1s:#3B2E19; --g2:#83A6D8; --g2s:#1B2432;
+    --g3:#5CB88D; --g3s:#17342A; --g4:#E2717F; --g4s:#3A1B21;
+    --g5:#B197E0; --g5s:#261E38; --g6:#5FC2C8; --g6s:#123033;
+    --g7:#E09A4B; --g7s:#3A2A15; --g8:#E28ABC; --g8s:#38182C;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 36px -22px rgba(0,0,0,.9);
   }
 }
@@ -59,6 +68,10 @@ img{max-width:100%}
   --warn:#E09A4B; --warn-soft:#3A2A15;
   --bad:#E2717F; --bad-soft:#3A1B21;
   --cool:#83A6D8; --cool-soft:#1B2432;
+  --g1:#D5A54D; --g1s:#3B2E19; --g2:#83A6D8; --g2s:#1B2432;
+  --g3:#5CB88D; --g3s:#17342A; --g4:#E2717F; --g4s:#3A1B21;
+  --g5:#B197E0; --g5s:#261E38; --g6:#5FC2C8; --g6s:#123033;
+  --g7:#E09A4B; --g7s:#3A2A15; --g8:#E28ABC; --g8s:#38182C;
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 36px -22px rgba(0,0,0,.9);
 }
 
@@ -375,6 +388,21 @@ tr.paid td:not(.acts){opacity:.55}
   border-bottom:1px solid var(--line-strong); padding-bottom:5px;
 }
 .grp-name{font-family:var(--serif); font-size:15px; font-weight:700}
+.g1{--g:var(--g1); --gs:var(--g1s)} .g2{--g:var(--g2); --gs:var(--g2s)}
+.g3{--g:var(--g3); --gs:var(--g3s)} .g4{--g:var(--g4); --gs:var(--g4s)}
+.g5{--g:var(--g5); --gs:var(--g5s)} .g6{--g:var(--g6); --gs:var(--g6s)}
+.g7{--g:var(--g7); --gs:var(--g7s)} .g8{--g:var(--g8); --gs:var(--g8s)}
+.g-dot{
+  display:inline-block; width:9px; height:9px; border-radius:2px; background:var(--g);
+  margin-right:6px; vertical-align:1px; flex:none;
+}
+/* 色を付けた見出しは、下の表と地続きの1つのかたまりに見せる */
+.grp-head.gc{
+  align-items:center; margin-bottom:0; padding:6px 11px 5px;
+  background:var(--gs); border-bottom:2px solid var(--g); border-radius:var(--r) var(--r) 0 0;
+}
+.grp-head.gc .grp-name{color:var(--g)}
+.panel.gp{border-left:3px solid var(--g); border-radius:0 0 var(--r) var(--r)}
 @media (max-width:720px){
   .vault-search{flex:1 1 100%}
   .vault-group{flex:1 1 100%; justify-content:space-between}
