@@ -3,7 +3,7 @@ const globals = require('globals');
 
 module.exports = [
     {
-        ignores: ['.opencode/dist/**', '.cursor/**', 'node_modules/**']
+        ignores: ['.opencode/dist/**', '.cursor/**', 'node_modules/**', 'tools/**/node_modules/**', 'tools/**/dist/**']
     },
     js.configs.recommended,
     {
@@ -29,6 +29,15 @@ module.exports = [
         files: ['**/*.mjs'],
         languageOptions: {
             sourceType: 'module'
+        }
+    },
+    {
+        // tools/six-view renderer code runs in a browser context (Electron renderer)
+        files: ['tools/six-view/src/renderer/**/*.js'],
+        languageOptions: {
+            globals: {
+                ...globals.browser
+            }
         }
     }
 ];

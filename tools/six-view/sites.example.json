@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "defaults": {
+    "zoomFactor": 0.67,
+    "userAgent": ""
+  },
+  "sites": [
+    {
+      "id": "venry",
+      "name": "Venry",
+      "url": "https://venry.example.co.jp/login",
+      "enabled": true,
+      "incognito": false,
+      "zoomFactor": 0,
+      "userAgent": "",
+      "autofill": {
+        "enabled": true,
+        "urlPattern": "login",
+        "usernameSelector": "#login_id",
+        "passwordSelector": "#password",
+        "submitSelector": "button[type=submit]",
+        "autoSubmit": false,
+        "delayMs": 600
+      }
+    },
+    {
+      "id": "esutama",
+      "name": "えすたま",
+      "url": "https://esutama.example.co.jp/admin/login",
+      "enabled": true,
+      "incognito": false,
+      "zoomFactor": 0,
+      "userAgent": "",
+      "autofill": {
+        "enabled": true,
+        "urlPattern": "login",
+        "usernameSelector": "input[name=\"account\"]",
+        "passwordSelector": "input[type=\"password\"]",
+        "submitSelector": "",
+        "autoSubmit": false,
+        "delayMs": 600
+      }
+    },
+    {
+      "id": "ekichika",
+      "name": "えきちか",
+      "url": "https://ekichika.example.co.jp/login",
+      "enabled": true,
+      "incognito": false,
+      "zoomFactor": 0,
+      "userAgent": "",
+      "autofill": {
+        "enabled": false,
+        "urlPattern": "",
+        "usernameSelector": "",
+        "passwordSelector": "",
+        "submitSelector": "",
+        "autoSubmit": false,
+        "delayMs": 600
+      }
+    },
+    {
+      "id": "este-ranking",
+      "name": "エステランキング",
+      "url": "https://este-ranking.example.co.jp/manage/login",
+      "enabled": true,
+      "incognito": false,
+      "zoomFactor": 0,
+      "userAgent": "",
+      "autofill": {
+        "enabled": false,
+        "urlPattern": "",
+        "usernameSelector": "",
+        "passwordSelector": "",
+        "submitSelector": "",
+        "autoSubmit": false,
+        "delayMs": 600
+      }
+    },
+    {
+      "id": "foope",
+      "name": "ふーぺ",
+      "url": "https://foope.example.co.jp/login",
+      "enabled": true,
+      "incognito": false,
+      "zoomFactor": 0,
+      "userAgent": "",
+      "autofill": {
+        "enabled": false,
+        "urlPattern": "",
+        "usernameSelector": "",
+        "passwordSelector": "",
+        "submitSelector": "",
+        "autoSubmit": false,
+        "delayMs": 600
+      }
+    },
+    {
+      "id": "cti",
+      "name": "CTI",
+      "url": "https://cti.example.co.jp/",
+      "enabled": true,
+      "incognito": false,
+      "zoomFactor": 0.75,
+      "userAgent": "",
+      "autofill": {
+        "enabled": false,
+        "urlPattern": "",
+        "usernameSelector": "",
+        "passwordSelector": "",
+        "submitSelector": "",
+        "autoSubmit": false,
+        "delayMs": 600
+      }
+    }
+  ]
+}
