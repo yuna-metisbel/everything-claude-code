@@ -128,8 +128,94 @@ function buildAutofillScript(autofill, credentials) {
 })();`;
 }
 
+/**
+ * Build the JS that inspects a loaded page and reports CSS selectors for its
+ * login form. Lets the user fill the selector fields with one click instead of
+ * digging through developer tools.
+ *
+ * Resolves to `{ ok, usernameSelector, passwordSelector, submitSelector, path }`.
+ */
+function buildDetectScript() {
+  return `(() => {
+  const esc = (value) =>
+    window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&');
+
+  const unique = (selector) => {
+    try { return document.querySelectorAll(selector).length === 1; } catch (_) { return false; }
+  };
+
+  const visible = (el) => {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+
+  // Prefer a stable hook (id, then name); fall back to a structural path.
+  const selectorFor = (el) => {
+    if (!el) return '';
+    if (el.id && unique('#' + esc(el.id))) return '#' + esc(el.id);
+
+    const name = el.getAttribute('name');
+    if (name) {
+      const byName = el.tagName.toLowerCase() + '[name="' + name.replace(/["\\\\]/g, '\\\\$&') + '"]';
+      if (unique(byName)) return byName;
+    }
+
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && parts.length < 6) {
+      let part = node.tagName.toLowerCase();
+      if (node.id && unique('#' + esc(node.id))) {
+        parts.unshift('#' + esc(node.id));
+        break;
+      }
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = [...parent.children].filter((c) => c.tagName === node.tagName);
+        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')';
+      }
+      parts.unshift(part);
+      node = node.parentElement;
+    }
+    const path = parts.join(' > ');
+    return unique(path) ? path : '';
+  };
+
+  const passwords = [...document.querySelectorAll('input[type="password"]')].filter(visible);
+  const passwordEl = passwords[0] || null;
+  if (!passwordEl) {
+    return { ok: false, reason: 'no-password-field', usernameSelector: '', passwordSelector: '', submitSelector: '', path: location.pathname };
+  }
+
+  const scope = passwordEl.form || document;
+  const textTypes = ['text', 'email', 'tel', 'number', ''];
+  const candidates = [...scope.querySelectorAll('input')].filter(
+    (el) => visible(el) && textTypes.includes((el.getAttribute('type') || '').toLowerCase())
+  );
+  // The ID field is normally the last text input before the password field.
+  const before = candidates.filter(
+    (el) => passwordEl.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING
+  );
+  const usernameEl = before[before.length - 1] || candidates[0] || null;
+
+  const submitEl =
+    [...scope.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')].filter(visible)[0] ||
+    null;
+
+  return {
+    ok: true,
+    reason: '',
+    usernameSelector: selectorFor(usernameEl),
+    passwordSelector: selectorFor(passwordEl),
+    submitSelector: selectorFor(submitEl),
+    path: location.pathname,
+  };
+})();`;
+}
+
 module.exports = {
   buildAutofillScript,
+  buildDetectScript,
   jsLiteral,
   matchesUrlPattern,
   shouldAutofill,

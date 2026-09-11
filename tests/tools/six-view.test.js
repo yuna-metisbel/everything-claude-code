@@ -50,12 +50,33 @@ function runTests() {
 
   // --- config schema ---
 
-  if (test('createDefaultConfig ships the six preset sites', () => {
+  if (test('createDefaultConfig ships the six preset sites with their URLs', () => {
     const config = schema.createDefaultConfig();
     assert.strictEqual(config.sites.length, schema.PANE_COUNT);
     assert.deepStrictEqual(
       config.sites.map((site) => site.name),
       ['Venry', 'えすたま', 'えきちか', 'エステランキング', 'ふーぺ', 'CTI']
+    );
+    assert.deepStrictEqual(
+      config.sites.map((site) => site.url),
+      [
+        'https://mrvenrey.jp/',
+        'https://estama.jp/admin/',
+        'https://ranking-deli.jp/admin/login',
+        'https://www.esthe-ranking.jp/login/',
+        'https://www.fuupe.jp/login',
+        'https://prime-office-board.onrender.com/',
+      ]
+    );
+  })) passed++; else failed++;
+
+  if (test('the shipped example config matches the built-in defaults', () => {
+    const example = JSON.parse(fs.readFileSync(path.join(toolRoot, 'sites.example.json'), 'utf8'));
+    const normalized = schema.normalizeConfig(example);
+    const defaults = schema.createDefaultConfig();
+    assert.deepStrictEqual(
+      normalized.sites.map((site) => [site.id, site.url]),
+      defaults.sites.map((site) => [site.id, site.url])
     );
   })) passed++; else failed++;
 
@@ -259,6 +280,15 @@ function runTests() {
     );
     assert.ok(withSubmit.includes('"autoSubmit":true'));
     assert.ok(withSubmit.includes('"submitSelector":"#go"'));
+  })) passed++; else failed++;
+
+  // --- login field detection ---
+
+  if (test('buildDetectScript produces a parseable, self-contained probe', () => {
+    const script = autofill.buildDetectScript();
+    assert.doesNotThrow(() => new Function(`return ${script}`), 'detect script must parse');
+    assert.ok(script.includes('input[type="password"]'), 'must look for a password field');
+    assert.ok(!script.includes('require('), 'must not depend on anything in the page');
   })) passed++; else failed++;
 
   fs.rmSync(tmpDir, { recursive: true, force: true });

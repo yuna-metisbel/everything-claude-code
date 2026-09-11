@@ -11,14 +11,14 @@ const PANE_COUNT = 6;
 
 const CONFIG_VERSION = 1;
 
-/** Sites the tool ships with by default (URLs are filled in by the user). */
+/** Sites the tool ships with, in pane order (top row first). */
 const DEFAULT_SITE_PRESETS = [
-  { id: 'venry', name: 'Venry' },
-  { id: 'esutama', name: 'えすたま' },
-  { id: 'ekichika', name: 'えきちか' },
-  { id: 'este-ranking', name: 'エステランキング' },
-  { id: 'foope', name: 'ふーぺ' },
-  { id: 'cti', name: 'CTI' },
+  { id: 'venry', name: 'Venry', url: 'https://mrvenrey.jp/' },
+  { id: 'esutama', name: 'えすたま', url: 'https://estama.jp/admin/' },
+  { id: 'ekichika', name: 'えきちか', url: 'https://ranking-deli.jp/admin/login' },
+  { id: 'este-ranking', name: 'エステランキング', url: 'https://www.esthe-ranking.jp/login/' },
+  { id: 'foope', name: 'ふーぺ', url: 'https://www.fuupe.jp/login' },
+  { id: 'cti', name: 'CTI', url: 'https://prime-office-board.onrender.com/' },
 ];
 
 const DEFAULT_AUTOFILL = {

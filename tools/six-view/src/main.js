@@ -18,7 +18,7 @@ const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage } = req
 const { loadConfig, saveConfig, configPath } = require('./lib/config-store');
 const { SecretStore } = require('./lib/secret-store');
 const { partitionForSite, resolveUserAgent, resolveZoomFactor } = require('./lib/config-schema');
-const { buildAutofillScript, shouldAutofill } = require('./lib/autofill');
+const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
 const { buildMenu } = require('./menu');
 
 const RUN_ID = Date.now().toString(36);
@@ -212,6 +212,25 @@ async function runAutofill(siteId, options = {}) {
   } catch (err) {
     log(`autofill failed for ${siteId}: ${err.message}`);
     sendToMain('pane:state', { siteId, autofill: 'error' });
+  }
+}
+
+/**
+ * Inspect what a pane currently shows and report selectors for its login form,
+ * so the settings window can fill them in without the user reading any HTML.
+ */
+async function detectLoginFields(siteId) {
+  const pane = panes.get(siteId);
+  if (!pane || !pane.contents || pane.contents.isDestroyed()) {
+    return { ok: false, reason: 'pane-not-loaded' };
+  }
+
+  try {
+    const result = await pane.contents.executeJavaScript(buildDetectScript(), true);
+    return result && typeof result === 'object' ? result : { ok: false, reason: 'no-result' };
+  } catch (err) {
+    log(`login detection failed for ${siteId}: ${err.message}`);
+    return { ok: false, reason: 'script-error' };
   }
 }
 
@@ -443,6 +462,11 @@ function registerIpc() {
     const ok = secrets.clear(payload.siteId);
     sendToMain('app:config-changed', bootstrapPayload());
     return { ok };
+  });
+
+  ipcMain.handle('pane:detect-login', (_event, payload) => {
+    if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    return detectLoginFields(payload.siteId);
   });
 
   ipcMain.handle('pane:command', (_event, payload) => {

@@ -4,21 +4,24 @@
     "zoomFactor": 0.67,
     "userAgent": ""
   },
+  "startup": {
+    "openAtLogin": false
+  },
   "sites": [
     {
       "id": "venry",
       "name": "Venry",
-      "url": "https://venry.example.co.jp/login",
+      "url": "https://mrvenrey.jp/",
       "enabled": true,
       "incognito": false,
       "zoomFactor": 0,
       "userAgent": "",
       "autofill": {
-        "enabled": true,
-        "urlPattern": "login",
-        "usernameSelector": "#login_id",
-        "passwordSelector": "#password",
-        "submitSelector": "button[type=submit]",
+        "enabled": false,
+        "urlPattern": "",
+        "usernameSelector": "",
+        "passwordSelector": "",
+        "submitSelector": "",
         "autoSubmit": false,
         "delayMs": 600
       }
@@ -26,16 +29,16 @@
     {
       "id": "esutama",
       "name": "えすたま",
-      "url": "https://esutama.example.co.jp/admin/login",
+      "url": "https://estama.jp/admin/",
       "enabled": true,
       "incognito": false,
       "zoomFactor": 0,
       "userAgent": "",
       "autofill": {
-        "enabled": true,
-        "urlPattern": "login",
-        "usernameSelector": "input[name=\"account\"]",
-        "passwordSelector": "input[type=\"password\"]",
+        "enabled": false,
+        "urlPattern": "",
+        "usernameSelector": "",
+        "passwordSelector": "",
         "submitSelector": "",
         "autoSubmit": false,
         "delayMs": 600
@@ -44,7 +47,7 @@
     {
       "id": "ekichika",
       "name": "えきちか",
-      "url": "https://ekichika.example.co.jp/login",
+      "url": "https://ranking-deli.jp/admin/login",
       "enabled": true,
       "incognito": false,
       "zoomFactor": 0,
@@ -62,7 +65,7 @@
     {
       "id": "este-ranking",
       "name": "エステランキング",
-      "url": "https://este-ranking.example.co.jp/manage/login",
+      "url": "https://www.esthe-ranking.jp/login/",
       "enabled": true,
       "incognito": false,
       "zoomFactor": 0,
@@ -80,7 +83,7 @@
     {
       "id": "foope",
       "name": "ふーぺ",
-      "url": "https://foope.example.co.jp/login",
+      "url": "https://www.fuupe.jp/login",
       "enabled": true,
       "incognito": false,
       "zoomFactor": 0,
@@ -98,7 +101,7 @@
     {
       "id": "cti",
       "name": "CTI",
-      "url": "https://cti.example.co.jp/",
+      "url": "https://prime-office-board.onrender.com/",
       "enabled": true,
       "incognito": false,
       "zoomFactor": 0.75,

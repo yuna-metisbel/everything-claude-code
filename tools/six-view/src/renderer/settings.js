@@ -82,6 +82,50 @@ function buildSiteCard(site, index, hasCredential) {
     });
   });
 
+  const detectStatus = card.querySelector('.detect-status');
+  card.querySelector('[data-action="detect"]').addEventListener('click', async () => {
+    detectStatus.textContent = '検出中…';
+    const found = await window.sixview.detectLogin(site.id);
+    const problems = {
+      'pane-not-loaded': 'パネルがまだ読み込まれていません。先にそのサイトを表示してください。',
+      'no-password-field': 'パスワード欄が見つかりません。ログイン画面を表示してから試してください。',
+      'script-error': 'ページを読み取れませんでした。',
+      'no-result': 'ページを読み取れませんでした。',
+      'bad-request': 'ページを読み取れませんでした。',
+    };
+
+    if (!found || !found.ok) {
+      detectStatus.textContent = problems[found && found.reason] || '検出できませんでした。';
+      return;
+    }
+
+    const fill = (field, value) => {
+      if (!value) return false;
+      const input = card.querySelector(`[data-field="${field}"]`);
+      writeInput(input, value);
+      setPath(site, field, value);
+      return true;
+    };
+
+    fill('autofill.usernameSelector', found.usernameSelector);
+    fill('autofill.passwordSelector', found.passwordSelector);
+    fill('autofill.submitSelector', found.submitSelector);
+
+    const patternInput = card.querySelector('[data-field="autofill.urlPattern"]');
+    if (!patternInput.value && found.path && found.path !== '/') {
+      writeInput(patternInput, found.path);
+      setPath(site, 'autofill.urlPattern', found.path);
+    }
+
+    const enabled = card.querySelector('[data-field="autofill.enabled"]');
+    enabled.checked = true;
+    setPath(site, 'autofill.enabled', true);
+
+    detectStatus.textContent = found.usernameSelector
+      ? '検出しました。ID / パスワードを保存して「保存して反映」を押してください。'
+      : 'パスワード欄だけ検出しました。ID 欄のセレクタは手入力してください。';
+  });
+
   const usernameInput = card.querySelector('[data-cred="username"]');
   const passwordInput = card.querySelector('[data-cred="password"]');
 

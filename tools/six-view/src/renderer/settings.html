@@ -117,8 +117,13 @@
               <input type="number" data-field="autofill.delayMs" min="0" max="15000" step="100" />
             </label>
           </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="detect">ログイン欄を自動検出</button>
+            <span class="detect-status hint"></span>
+          </div>
           <p class="hint">
-            セレクタはパネル上で右クリック →「検証」で確認できます（開発者ツールは各パネルのメニューからも開けます）。
+            パネルにそのサイトのログイン画面を表示した状態で「自動検出」を押すと、上の3つのセレクタが埋まります。
+            うまくいかないときはパネル上で右クリック →「検証」で入力欄の id / name を確認してください。
           </p>
         </details>
 
