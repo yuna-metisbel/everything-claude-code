@@ -42,7 +42,20 @@ npm install
 npm run dist:mac
 ```
 
-**Windows の場合** — パスを調べる手間を省くため、エクスプローラーから PowerShell を開きます。
+**Windows の場合** — まず ZIP を**展開（解凍）**します。エクスプローラーは ZIP をフォルダのように
+開いて見せますが、展開しないと中身は使えません。パスに `.zip` が入っていたら展開できていない印です
+（`cd : Cannot find path ...` というエラーになります）。
+
+ZIP を右クリック →「**すべて展開**」。または PowerShell に次を貼り付けると、展開からフォルダ移動まで
+一度に済みます（デスクトップに ZIP がある場合）。
+
+```powershell
+cd ([Environment]::GetFolderPath('Desktop'))
+Expand-Archive .\everything-claude-code-claude-dazzling-mayer-stwiza.zip -DestinationPath .\sixview-src -Force
+cd (Get-ChildItem .\sixview-src -Recurse -Directory -Filter six-view | Select-Object -First 1).FullName
+```
+
+手で展開した場合は、パスを調べる手間を省くためエクスプローラーから PowerShell を開きます。
 
 1. エクスプローラーで、展開したフォルダの中の `tools` → `six-view` フォルダを開く
 2. 上のアドレスバー（パスが出ている帯）をクリックして、`powershell` と打って Enter
