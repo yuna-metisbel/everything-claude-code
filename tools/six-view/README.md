@@ -42,13 +42,27 @@ npm install
 npm run dist:mac
 ```
 
-**Windows の場合** — スタートメニューで「PowerShell」を開いて、次を1行ずつ実行します。
+**Windows の場合** — パスを調べる手間を省くため、エクスプローラーから PowerShell を開きます。
+
+1. エクスプローラーで、展開したフォルダの中の `tools` → `six-view` フォルダを開く
+2. 上のアドレスバー（パスが出ている帯）をクリックして、`powershell` と打って Enter
+
+これで、そのフォルダにいる状態の PowerShell が開くので `cd` は不要です。あとは次を1行ずつ実行します。
 
 ```powershell
-cd <ここに tools\six-view フォルダのパス>
 npm install
 npm run dist:win
 ```
+
+パスを直接打ちたい場合は、たいてい次の形になります（`ユーザー名` はご自身のもの）。
+
+```text
+C:\Users\ユーザー名\Downloads\everything-claude-code-claude-dazzling-mayer-stwiza\tools\six-view
+```
+
+ZIP を「すべて展開」すると、**同じ名前のフォルダが二重**になっていることがあります
+（`everything-claude-code-...\everything-claude-code-...\tools\six-view`）。
+その場合は奥の方が正しいパスです。フォルダを開いて `tools` が見える階層が目印です。
 
 `npm install` は数分かかります。終わったら `tools/six-view/dist` フォルダが出来ています。
 
