@@ -4,6 +4,11 @@
   "version": "1.0.0",
   "private": true,
   "description": "6つの業務サイトを3x2の1画面にまとめて開くデスクトップアプリ (Windows / macOS)",
+  "author": "yuna-metisbel",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuna-metisbel/everything-claude-code.git"
+  },
   "main": "src/main.js",
   "license": "MIT",
   "scripts": {
@@ -35,7 +40,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ]
     },
@@ -44,11 +52,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -61,7 +73,9 @@
     "linux": {
       "icon": "assets/icon.png",
       "category": "Network",
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     }
   }
 }
