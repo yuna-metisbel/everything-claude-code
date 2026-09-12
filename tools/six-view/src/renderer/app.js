@@ -172,6 +172,9 @@ function applyState(state) {
 function render(bootstrap) {
   const { config, partitions } = bootstrap;
 
+  grid.style.setProperty('--columns', String(bootstrap.columns || 3));
+  document.querySelector('.brand-mark').textContent = String(config.sites.length);
+
   const messages = [];
   if (bootstrap.configError) messages.push(bootstrap.configError);
   if (!bootstrap.encryptionAvailable) {

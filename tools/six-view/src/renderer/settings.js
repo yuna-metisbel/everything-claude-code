@@ -12,8 +12,47 @@ const sitesRoot = document.getElementById('sites');
 const siteTemplate = document.getElementById('site-template');
 const saveStatus = document.getElementById('save-status');
 
+const MAX_PANES = 12;
+
 let currentConfig = null;
 let encryptionAvailable = false;
+let credentialStatus = {};
+
+/** Copy a pane so a second account on the same site gets its own session. */
+function duplicateSite(site, takenIds) {
+  const copy = JSON.parse(JSON.stringify(site));
+  const used = new Set(takenIds);
+  let suffix = 2;
+  while (used.has(`${site.id}-${suffix}`)) suffix += 1;
+  copy.id = `${site.id}-${suffix}`;
+  copy.name = `${site.name} (${suffix})`;
+  return copy;
+}
+
+/** A blank pane to fill in. */
+function blankSite(takenIds) {
+  const used = new Set(takenIds);
+  let index = used.size + 1;
+  while (used.has(`site-${index}`)) index += 1;
+  return {
+    id: `site-${index}`,
+    name: `サイト ${index}`,
+    url: '',
+    enabled: true,
+    incognito: false,
+    zoomFactor: 0,
+    userAgent: '',
+    autofill: {
+      enabled: false,
+      urlPattern: '',
+      usernameSelector: '',
+      passwordSelector: '',
+      submitSelector: '',
+      autoSubmit: false,
+      delayMs: 600,
+    },
+  };
+}
 
 /** Read `a.b.c` out of an object. */
 function getPath(object, path) {
@@ -71,6 +110,26 @@ function buildSiteCard(site, index, hasCredential) {
   const card = fragment.querySelector('.site');
 
   card.querySelector('.site-index').textContent = String(index + 1);
+
+  card.querySelector('[data-action="duplicate"]').addEventListener('click', () => {
+    if (currentConfig.sites.length >= MAX_PANES) {
+      flash(`パネルは最大 ${MAX_PANES} 個までです。`, true);
+      return;
+    }
+    currentConfig.sites.splice(index + 1, 0, duplicateSite(site, currentConfig.sites.map((s) => s.id)));
+    renderSites();
+    flash('複製しました。表示名を変えて、別アカウントの ID とパスワードを保存してください。');
+  });
+
+  card.querySelector('[data-action="remove"]').addEventListener('click', () => {
+    if (currentConfig.sites.length <= 1) {
+      flash('パネルは 1 つ以上必要です。', true);
+      return;
+    }
+    currentConfig.sites.splice(index, 1);
+    renderSites();
+    flash(`${site.name} を削除しました。「保存して反映」で確定します（保存済みの認証情報も消えます）。`);
+  });
   const title = card.querySelector('.site-title');
   title.textContent = site.name;
 
@@ -164,13 +223,30 @@ function buildSiteCard(site, index, hasCredential) {
   sitesRoot.appendChild(fragment);
 }
 
+/** Redraw the list of pane cards from currentConfig. */
+function renderSites() {
+  sitesRoot.textContent = '';
+  currentConfig.sites.forEach((site, index) => {
+    buildSiteCard(site, index, Boolean(credentialStatus[site.id]));
+  });
+  document.getElementById('pane-count').textContent = `（${currentConfig.sites.length} 画面）`;
+}
+
 function render(bootstrap) {
   currentConfig = bootstrap.config;
   encryptionAvailable = bootstrap.encryptionAvailable;
+  credentialStatus = bootstrap.credentialStatus || {};
 
   document.getElementById('encryption-warning').hidden = encryptionAvailable;
   document.getElementById('config-path').textContent = bootstrap.configPath;
   document.getElementById('config-path').title = bootstrap.configPath;
+
+  const columns = document.getElementById('columns');
+  columns.value = String((currentConfig.layout && currentConfig.layout.columns) || 0);
+  columns.addEventListener('change', () => {
+    if (!currentConfig.layout) currentConfig.layout = {};
+    currentConfig.layout.columns = Number(columns.value);
+  });
 
   const openAtLogin = document.getElementById('open-at-login');
   openAtLogin.checked = Boolean(currentConfig.startup && currentConfig.startup.openAtLogin);
@@ -192,15 +268,23 @@ function render(bootstrap) {
     currentConfig.defaults.userAgent = readInput(defaultUa);
   });
 
-  sitesRoot.textContent = '';
-  currentConfig.sites.forEach((site, index) => {
-    buildSiteCard(site, index, Boolean(bootstrap.credentialStatus[site.id]));
-  });
+  renderSites();
 }
+
+document.getElementById('add-pane').addEventListener('click', () => {
+  if (currentConfig.sites.length >= MAX_PANES) {
+    flash(`パネルは最大 ${MAX_PANES} 個までです。`, true);
+    return;
+  }
+  currentConfig.sites.push(blankSite(currentConfig.sites.map((site) => site.id)));
+  renderSites();
+  document.getElementById('sites').lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 
 document.getElementById('save').addEventListener('click', async () => {
   try {
-    await window.sixview.saveConfig(currentConfig);
+    const saved = await window.sixview.saveConfig(currentConfig);
+    if (saved && saved.credentialStatus) credentialStatus = saved.credentialStatus;
     flash('保存しました。パネルに反映されます。');
   } catch (err) {
     flash(`保存できませんでした: ${err.message}`, true);

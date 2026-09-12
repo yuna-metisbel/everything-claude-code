@@ -6,8 +6,16 @@
  * Kept free of Electron so it can be unit tested with plain Node.
  */
 
-/** Number of panes in the 3 x 2 grid. */
-const PANE_COUNT = 6;
+/** Panes the window ships with; the count is editable in settings. */
+const DEFAULT_PANE_COUNT = 6;
+const MIN_PANES = 1;
+const MAX_PANES = 12;
+
+/**
+ * Columns to use when the layout is left on "auto", chosen so the grid stays
+ * close to the window's own proportions (8 panes read best as 4 across, 2 down).
+ */
+const AUTO_COLUMNS = { 1: 1, 2: 2, 3: 3, 4: 2, 5: 3, 6: 3, 7: 4, 8: 4, 9: 3, 10: 5, 11: 4, 12: 4 };
 
 const CONFIG_VERSION = 1;
 
@@ -128,10 +136,43 @@ function createDefaultSites() {
   return DEFAULT_SITE_PRESETS.map((preset, index) => normalizeSite(preset, index, usedIds));
 }
 
+/**
+ * A blank pane to append. `takenIds` keeps the new id distinct from the panes
+ * already in the config, which is what keeps two accounts on the same site
+ * from sharing a session.
+ */
+function createSite(takenIds = [], seed = {}) {
+  const used = new Set(takenIds);
+  let index = used.size;
+  while (used.has(`site-${index + 1}`)) index += 1;
+  return normalizeSite({ id: `site-${index + 1}`, name: `サイト ${index + 1}`, ...seed }, index, used);
+}
+
+/** Copy a pane for a second account: same site and selectors, its own session. */
+function duplicateSite(site, takenIds = []) {
+  const copy = JSON.parse(JSON.stringify(site));
+  copy.name = `${site.name} (2)`;
+  delete copy.id;
+  const used = new Set(takenIds);
+  let suffix = 2;
+  while (used.has(`${site.id}-${suffix}`)) suffix += 1;
+  copy.id = `${site.id}-${suffix}`;
+  return normalizeSite(copy, takenIds.length, used);
+}
+
+/** Columns for a pane count, honouring an explicit override. */
+function resolveColumns(config) {
+  const explicit = config && config.layout ? Number(config.layout.columns) : 0;
+  const count = config && Array.isArray(config.sites) ? config.sites.length : 0;
+  if (Number.isFinite(explicit) && explicit >= 1 && explicit <= MAX_PANES) return Math.floor(explicit);
+  return AUTO_COLUMNS[count] || Math.ceil(Math.sqrt(Math.max(1, count)));
+}
+
 function createDefaultConfig() {
   return {
     version: CONFIG_VERSION,
     window: { width: 1680, height: 1020, x: null, y: null, maximized: true },
+    layout: { columns: 0 },
     startup: { openAtLogin: false },
     defaults: { zoomFactor: 0.67, userAgent: '' },
     sites: createDefaultSites(),
@@ -154,24 +195,28 @@ function normalizeWindow(raw) {
 
 /**
  * Turn anything loaded from disk into a complete, safe config object.
- * Always returns exactly PANE_COUNT sites.
+ * Keeps between MIN_PANES and MAX_PANES panes; a config with no sites at all
+ * falls back to the shipped defaults rather than opening an empty window.
  */
 function normalizeConfig(raw) {
   const source = isPlainObject(raw) ? raw : {};
-  const rawSites = Array.isArray(source.sites) ? source.sites : [];
+  const rawSites = Array.isArray(source.sites) && source.sites.length > 0 ? source.sites : DEFAULT_SITE_PRESETS;
+  const count = Math.min(MAX_PANES, Math.max(MIN_PANES, rawSites.length));
   const usedIds = new Set();
   const sites = [];
 
-  for (let index = 0; index < PANE_COUNT; index += 1) {
+  for (let index = 0; index < count; index += 1) {
     sites.push(normalizeSite(rawSites[index], index, usedIds));
   }
 
   const defaults = isPlainObject(source.defaults) ? source.defaults : {};
   const startup = isPlainObject(source.startup) ? source.startup : {};
+  const layout = isPlainObject(source.layout) ? source.layout : {};
 
   return {
     version: CONFIG_VERSION,
     window: normalizeWindow(source.window),
+    layout: { columns: clampNumber(Math.floor(Number(layout.columns) || 0), 0, MAX_PANES, 0) },
     startup: { openAtLogin: toBoolean(startup.openAtLogin, false) },
     defaults: {
       zoomFactor: clampNumber(defaults.zoomFactor, 0.25, 2, 0.67),
@@ -204,22 +249,28 @@ function partitionForSite(site, runId = '') {
   return `persist:sixview-${site.id}`;
 }
 
-/** Panes in display order: row 1 = 1,2,3 / row 2 = 4,5,6. */
+/** Panes in display order, filling each row left to right. */
 function paneSlots(config) {
+  const columns = resolveColumns(config);
   return config.sites.map((site, index) => ({
     index,
-    row: Math.floor(index / 3) + 1,
-    column: (index % 3) + 1,
+    row: Math.floor(index / columns) + 1,
+    column: (index % columns) + 1,
     site,
   }));
 }
 
 module.exports = {
-  PANE_COUNT,
+  DEFAULT_PANE_COUNT,
+  MIN_PANES,
+  MAX_PANES,
   CONFIG_VERSION,
   DEFAULT_SITE_PRESETS,
   createDefaultConfig,
   createDefaultSites,
+  createSite,
+  duplicateSite,
+  resolveColumns,
   normalizeConfig,
   normalizeSite,
   normalizeUrl,

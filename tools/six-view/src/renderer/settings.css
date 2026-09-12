@@ -97,6 +97,29 @@ section.card:first-of-type {
   font-weight: 700;
 }
 
+.site-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.pane-count {
+  margin-left: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0f1118;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

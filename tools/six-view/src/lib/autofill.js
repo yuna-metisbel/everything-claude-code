@@ -30,12 +30,14 @@ function matchesUrlPattern(pattern, url) {
   const trimmed = typeof pattern === 'string' ? pattern.trim() : '';
   if (!trimmed) return /^https?:\/\//i.test(url);
 
-  const regexMatch = /^\/(.*)\/([a-z]*)$/is.exec(trimmed);
+  // `/.../flags` is a regex literal - but only when the trailing part is made
+  // of real regex flags, so a plain path like `/admin/login` stays a substring.
+  const regexMatch = /^\/(.*)\/([dgimsuvy]*)$/s.exec(trimmed);
   if (regexMatch) {
     try {
       return new RegExp(regexMatch[1], regexMatch[2]).test(url);
     } catch {
-      return false;
+      // Fall through to substring matching rather than never matching.
     }
   }
 
@@ -71,13 +73,19 @@ function buildAutofillScript(autofill, credentials) {
   const opts = ${jsLiteral(options)};
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const visible = (el) => {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+
   const waitFor = async (selector, timeoutMs) => {
     if (!selector) return null;
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       let el = null;
       try { el = document.querySelector(selector); } catch (_) { return null; }
-      if (el) return el;
+      if (el && visible(el)) return el;
       if (Date.now() > deadline) return null;
       await sleep(120);
     }
@@ -94,37 +102,59 @@ function buildAutofillScript(autofill, credentials) {
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
+  const advance = async (fromEl) => {
+    let button = null;
+    if (opts.submitSelector) button = await waitFor(opts.submitSelector, 1500);
+    if (button) { button.click(); return true; }
+    const form = fromEl && fromEl.form;
+    if (form) {
+      if (typeof form.requestSubmit === 'function') { form.requestSubmit(); } else { form.submit(); }
+      return true;
+    }
+    // Multi-step sign-ins (X, Google, Microsoft) often have no form element.
+    const fallback = [...document.querySelectorAll('button, [role="button"], input[type="submit"]')]
+      .filter(visible)
+      .filter((el) => !el.disabled);
+    if (fallback.length === 1) { fallback[0].click(); return true; }
+    return false;
+  };
+
   if (opts.delayMs) await sleep(opts.delayMs);
 
   const userEl = await waitFor(opts.usernameSelector, 8000);
-  const passEl = await waitFor(opts.passwordSelector, 4000);
+  let passEl = await waitFor(opts.passwordSelector, userEl ? 3000 : 8000);
 
   if (!userEl && !passEl) {
-    return { status: 'skipped', filled: 0, submitted: false, reason: 'no-field' };
+    return { status: 'skipped', filled: 0, submitted: false, twoStep: false, reason: 'no-field' };
   }
 
   let filled = 0;
   if (userEl && opts.username) { userEl.focus(); setValue(userEl, opts.username); filled += 1; }
-  if (passEl && opts.password) { passEl.focus(); setValue(passEl, opts.password); filled += 1; }
 
-  let submitted = false;
-  if (opts.autoSubmit && filled > 0) {
-    await sleep(200);
-    let submitEl = null;
-    if (opts.submitSelector) submitEl = await waitFor(opts.submitSelector, 2000);
-    if (submitEl) {
-      submitEl.click();
-      submitted = true;
-    } else {
-      const form = (passEl && passEl.form) || (userEl && userEl.form);
-      if (form) {
-        if (typeof form.requestSubmit === 'function') { form.requestSubmit(); } else { form.submit(); }
-        submitted = true;
-      }
+  // Two-step sign-in: the password field only appears after the ID is submitted.
+  let twoStep = false;
+  if (!passEl && filled > 0 && opts.passwordSelector && opts.password) {
+    twoStep = true;
+    await sleep(250);
+    const advanced = await advance(userEl);
+    if (!advanced) {
+      return { status: 'partial', filled, submitted: false, twoStep, reason: 'no-next-button' };
+    }
+    passEl = await waitFor(opts.passwordSelector, 12000);
+    if (!passEl) {
+      return { status: 'partial', filled, submitted: false, twoStep, reason: 'no-password-step' };
     }
   }
 
-  return { status: filled > 0 ? 'filled' : 'skipped', filled, submitted, reason: '' };
+  if (passEl && opts.password) { passEl.focus(); setValue(passEl, opts.password); filled += 1; }
+
+  let submitted = false;
+  if (opts.autoSubmit && passEl && opts.password) {
+    await sleep(250);
+    submitted = await advance(passEl);
+  }
+
+  return { status: filled > 0 ? 'filled' : 'skipped', filled, submitted, twoStep, reason: '' };
 })();`;
 }
 
@@ -181,33 +211,59 @@ function buildDetectScript() {
     return unique(path) ? path : '';
   };
 
-  const passwords = [...document.querySelectorAll('input[type="password"]')].filter(visible);
-  const passwordEl = passwords[0] || null;
+  const textTypes = ['text', 'email', 'tel', 'number', ''];
+  const textInputs = (root) =>
+    [...root.querySelectorAll('input')].filter(
+      (el) => visible(el) && textTypes.includes((el.getAttribute('type') || '').toLowerCase())
+    );
+
+  const submitIn = (root) =>
+    [...root.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type]), [role="button"]')]
+      .filter(visible)
+      .filter((el) => !el.disabled)[0] || null;
+
+  const passwordEl = [...document.querySelectorAll('input[type="password"]')].filter(visible)[0] || null;
+
   if (!passwordEl) {
-    return { ok: false, reason: 'no-password-field', usernameSelector: '', passwordSelector: '', submitSelector: '', path: location.pathname };
+    // Step 1 of a two-step sign-in (X, Google, Microsoft): ID field only.
+    const candidates = textInputs(document);
+    const preferred =
+      candidates.find((el) => (el.getAttribute('autocomplete') || '').includes('username')) ||
+      candidates.find((el) => /user|login|account|mail|id/i.test((el.getAttribute('name') || '') + (el.id || ''))) ||
+      candidates.find((el) => (el.getAttribute('type') || '').toLowerCase() === 'email') ||
+      candidates[0] ||
+      null;
+
+    if (!preferred) {
+      return { ok: false, reason: 'no-login-field', usernameSelector: '', passwordSelector: '', submitSelector: '', twoStep: false, path: location.pathname };
+    }
+
+    return {
+      ok: true,
+      reason: '',
+      usernameSelector: selectorFor(preferred),
+      passwordSelector: '',
+      submitSelector: selectorFor(submitIn(preferred.form || document)),
+      twoStep: true,
+      path: location.pathname,
+    };
   }
 
   const scope = passwordEl.form || document;
-  const textTypes = ['text', 'email', 'tel', 'number', ''];
-  const candidates = [...scope.querySelectorAll('input')].filter(
-    (el) => visible(el) && textTypes.includes((el.getAttribute('type') || '').toLowerCase())
-  );
+  const candidates = textInputs(scope);
   // The ID field is normally the last text input before the password field.
   const before = candidates.filter(
     (el) => passwordEl.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING
   );
   const usernameEl = before[before.length - 1] || candidates[0] || null;
 
-  const submitEl =
-    [...scope.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])')].filter(visible)[0] ||
-    null;
-
   return {
     ok: true,
     reason: '',
     usernameSelector: selectorFor(usernameEl),
     passwordSelector: selectorFor(passwordEl),
-    submitSelector: selectorFor(submitEl),
+    submitSelector: selectorFor(submitIn(scope)),
+    twoStep: false,
     path: location.pathname,
   };
 })();`;

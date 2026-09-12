@@ -36,11 +36,33 @@
         </label>
       </div>
       <div class="row">
+        <label class="field narrow">
+          <span>横に並べる数</span>
+          <select id="columns">
+            <option value="0">自動</option>
+            <option value="2">2列</option>
+            <option value="3">3列</option>
+            <option value="4">4列</option>
+            <option value="5">5列</option>
+          </select>
+          <small>自動なら 6画面は3列、8画面は4列になります。</small>
+        </label>
         <label class="check">
           <input type="checkbox" id="open-at-login" />
           <span>パソコンの起動時に SixView を自動で開く</span>
         </label>
         <span id="login-item-note" class="hint" hidden>この OS では自動起動を設定できません。</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>パネル<span id="pane-count" class="pane-count"></span></h2>
+      <div class="row">
+        <button type="button" id="add-pane" class="btn btn-primary">パネルを追加</button>
+        <span class="hint">
+          同じサイトの別アカウントを開きたいときは、そのパネルの「複製」を使ってください。
+          パネルごとにログイン状態が分かれているので、同じサイトに同時に別アカウントでログインできます。
+        </span>
       </div>
     </section>
 
@@ -57,7 +79,14 @@
 
     <template id="site-template">
       <section class="card site">
-        <h2><span class="site-index"></span><span class="site-title"></span></h2>
+        <h2>
+          <span class="site-index"></span>
+          <span class="site-title"></span>
+          <span class="site-actions">
+            <button type="button" class="btn" data-action="duplicate" title="このサイトの別アカウント用にコピー">複製</button>
+            <button type="button" class="btn btn-danger" data-action="remove">削除</button>
+          </span>
+        </h2>
 
         <div class="row">
           <label class="field">

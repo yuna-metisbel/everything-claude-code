@@ -17,7 +17,12 @@ const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage } = req
 
 const { loadConfig, saveConfig, configPath } = require('./lib/config-store');
 const { SecretStore } = require('./lib/secret-store');
-const { partitionForSite, resolveUserAgent, resolveZoomFactor } = require('./lib/config-schema');
+const {
+  partitionForSite,
+  resolveColumns,
+  resolveUserAgent,
+  resolveZoomFactor,
+} = require('./lib/config-schema');
 const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
 const { buildMenu } = require('./menu');
 
@@ -429,6 +434,7 @@ function bootstrapPayload() {
     config,
     partitions: Object.fromEntries(config.sites.map((site) => [site.id, partitionForSite(site, RUN_ID)])),
     zoomFactors: Object.fromEntries(config.sites.map((site) => [site.id, resolveZoomFactor(config, site)])),
+    columns: resolveColumns(config),
     credentialStatus: secrets ? secrets.status(config.sites.map((site) => site.id)) : {},
     encryptionAvailable: Boolean(secrets && secrets.isAvailable()),
     loginItemSupported: process.platform === 'darwin' || process.platform === 'win32',
@@ -441,8 +447,16 @@ function registerIpc() {
   ipcMain.handle('app:bootstrap', () => bootstrapPayload());
 
   ipcMain.handle('config:save', (_event, incoming) => {
+    const previousIds = config.sites.map((site) => site.id);
     config = saveConfig(userDataDir, { ...incoming, window: config.window });
     configError = null;
+
+    // A removed pane should not leave its password behind in the vault.
+    const liveIds = new Set(config.sites.map((site) => site.id));
+    for (const id of previousIds) {
+      if (!liveIds.has(id) && secrets) secrets.clear(id);
+    }
+
     applyLoginItemSetting();
     setupPaneSessions();
     sendToMain('app:config-changed', bootstrapPayload());

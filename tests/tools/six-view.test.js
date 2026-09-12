@@ -52,7 +52,7 @@ function runTests() {
 
   if (test('createDefaultConfig ships the six preset sites with their URLs', () => {
     const config = schema.createDefaultConfig();
-    assert.strictEqual(config.sites.length, schema.PANE_COUNT);
+    assert.strictEqual(config.sites.length, schema.DEFAULT_PANE_COUNT);
     assert.deepStrictEqual(
       config.sites.map((site) => site.name),
       ['Venry', 'えすたま', 'えきちか', 'エステランキング', 'ふーぺ', 'CTI']
@@ -80,14 +80,49 @@ function runTests() {
     );
   })) passed++; else failed++;
 
-  if (test('normalizeConfig always returns exactly six panes', () => {
-    assert.strictEqual(schema.normalizeConfig({}).sites.length, 6);
-    assert.strictEqual(schema.normalizeConfig({ sites: [{ name: 'A' }] }).sites.length, 6);
+  if (test('normalizeConfig keeps the configured pane count within range', () => {
+    assert.strictEqual(schema.normalizeConfig({}).sites.length, 6, 'no sites falls back to the defaults');
+    assert.strictEqual(schema.normalizeConfig(null).sites.length, 6);
+    assert.strictEqual(schema.normalizeConfig({ sites: [] }).sites.length, 6);
+    assert.strictEqual(schema.normalizeConfig({ sites: [{ name: 'A' }] }).sites.length, 1);
+    assert.strictEqual(schema.normalizeConfig({ sites: new Array(8).fill({ name: 'X' }) }).sites.length, 8);
     assert.strictEqual(
       schema.normalizeConfig({ sites: new Array(20).fill({ name: 'X' }) }).sites.length,
-      6
+      schema.MAX_PANES
     );
-    assert.strictEqual(schema.normalizeConfig(null).sites.length, 6);
+  })) passed++; else failed++;
+
+  if (test('resolveColumns picks a sensible grid and honours an override', () => {
+    const withCount = (n, columns) =>
+      schema.normalizeConfig({
+        layout: { columns },
+        sites: new Array(n).fill(0).map((_, i) => ({ name: `P${i}` })),
+      });
+    assert.strictEqual(schema.resolveColumns(withCount(6)), 3, '6 panes read as 3 x 2');
+    assert.strictEqual(schema.resolveColumns(withCount(8)), 4, '8 panes read as 4 x 2');
+    assert.strictEqual(schema.resolveColumns(withCount(4)), 2);
+    assert.strictEqual(schema.resolveColumns(withCount(8, 2)), 2, 'explicit override wins');
+  })) passed++; else failed++;
+
+  if (test('duplicateSite gives the copy its own id, name and session', () => {
+    const config = schema.createDefaultConfig();
+    const original = config.sites[0];
+    const copy = schema.duplicateSite(original, config.sites.map((site) => site.id));
+    assert.notStrictEqual(copy.id, original.id);
+    assert.strictEqual(copy.url, original.url, 'same site');
+    assert.notStrictEqual(
+      schema.partitionForSite(copy),
+      schema.partitionForSite(original),
+      'two accounts on one site must not share a session'
+    );
+  })) passed++; else failed++;
+
+  if (test('createSite appends a pane with an unused id', () => {
+    const config = schema.createDefaultConfig();
+    const ids = config.sites.map((site) => site.id);
+    const added = schema.createSite(ids);
+    assert.ok(!ids.includes(added.id));
+    assert.strictEqual(added.url, '');
   })) passed++; else failed++;
 
   if (test('normalizeConfig gives every pane a unique id', () => {
@@ -140,11 +175,18 @@ function runTests() {
     assert.strictEqual(partitions.size, 6);
   })) passed++; else failed++;
 
-  if (test('paneSlots lays panes out as 3 across, 2 down', () => {
-    const slots = schema.paneSlots(schema.createDefaultConfig());
+  if (test('paneSlots lays panes out row by row', () => {
     assert.deepStrictEqual(
-      slots.map((slot) => `${slot.row}-${slot.column}`),
+      schema.paneSlots(schema.createDefaultConfig()).map((slot) => `${slot.row}-${slot.column}`),
       ['1-1', '1-2', '1-3', '2-1', '2-2', '2-3']
+    );
+
+    const eight = schema.normalizeConfig({
+      sites: new Array(8).fill(0).map((_, i) => ({ name: `P${i}` })),
+    });
+    assert.deepStrictEqual(
+      schema.paneSlots(eight).map((slot) => `${slot.row}-${slot.column}`),
+      ['1-1', '1-2', '1-3', '1-4', '2-1', '2-2', '2-3', '2-4']
     );
   })) passed++; else failed++;
 
@@ -231,6 +273,14 @@ function runTests() {
     assert.strictEqual(autofill.matchesUrlPattern('login', 'https://x.jp/home'), false);
     assert.strictEqual(autofill.matchesUrlPattern('/\\/auth$/i', 'https://x.jp/auth'), true);
     assert.strictEqual(autofill.matchesUrlPattern('/[/', 'https://x.jp/auth'), false);
+    // A path pattern must not be mistaken for a regex literal (its trailing
+    // segment is not a valid flag list), or auto-login would never fire.
+    assert.strictEqual(
+      autofill.matchesUrlPattern('/admin/login', 'https://ranking-deli.jp/admin/login'),
+      true
+    );
+    assert.strictEqual(autofill.matchesUrlPattern('/admin/login', 'https://ranking-deli.jp/home'), false);
+    assert.strictEqual(autofill.matchesUrlPattern('/i/flow/login', 'https://x.com/i/flow/login'), true);
     assert.strictEqual(autofill.matchesUrlPattern('', 'https://x.jp/anything'), true);
     assert.strictEqual(autofill.matchesUrlPattern('', 'about:blank'), false);
   })) passed++; else failed++;
@@ -273,6 +323,16 @@ function runTests() {
     assert.strictEqual(JSON.parse(literal.replace(/\\u2028/g, lineSeparator)), `a${lineSeparator}b`);
   })) passed++; else failed++;
 
+  if (test('buildAutofillScript handles two-step sign-ins', () => {
+    const script = autofill.buildAutofillScript(
+      { usernameSelector: '#u', passwordSelector: '#p', submitSelector: '#next', autoSubmit: true, delayMs: 0 },
+      { username: 'a', password: 'b' }
+    );
+    assert.doesNotThrow(() => new Function(`return ${script}`));
+    assert.ok(script.includes('twoStep'), 'reports whether a second step was used');
+    assert.ok(script.includes('no-password-step'), 'reports when the password step never appears');
+  })) passed++; else failed++;
+
   if (test('buildAutofillScript carries the auto-submit flag through', () => {
     const withSubmit = autofill.buildAutofillScript(
       { usernameSelector: '#u', passwordSelector: '#p', submitSelector: '#go', autoSubmit: true, delayMs: 100 },
@@ -288,6 +348,7 @@ function runTests() {
     const script = autofill.buildDetectScript();
     assert.doesNotThrow(() => new Function(`return ${script}`), 'detect script must parse');
     assert.ok(script.includes('input[type="password"]'), 'must look for a password field');
+    assert.ok(script.includes('twoStep'), 'reports ID-only first steps so the user can detect twice');
     assert.ok(!script.includes('require('), 'must not depend on anything in the page');
   })) passed++; else failed++;
 

@@ -12,7 +12,8 @@ const isMac = process.platform === 'darwin';
 function buildMenu(handlers) {
   const paneItems = handlers.getSites().map((site, index) => ({
     label: `${index + 1}. ${site.name}`,
-    accelerator: `CommandOrControl+${index + 1}`,
+    // Only 1-9 can be typed as an accelerator; later panes are clicked instead.
+    ...(index < 9 ? { accelerator: `CommandOrControl+${index + 1}` } : {}),
     click: () => handlers.onFocusPane(index),
   }));
 
