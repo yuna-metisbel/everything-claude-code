@@ -129,6 +129,8 @@ const S = {
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
   shopKind: ls("prime.shopKind") || "shop",
   notes: [], noteSide: ls("prime.noteSide") || "team",
+  // 読み直しに失敗しているか、変更の通知が繋がっているか
+  stale: false, live: false,
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
   siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
@@ -225,23 +227,32 @@ async function loadAll(){
     sb.from("staff").select(STAFF_COLS).order("sort_order").order("name"),
     sb.from("notes").select("*").order("created_at", { ascending: false })
   ]);
-  if (mem.data) S.members = mem.data.map(normMember);
-  if (off.data) S.office = { doorOpen: off.data.door_open, updatedBy: off.data.updated_by, updatedAt: off.data.updated_at };
-  S.sched = {};
-  (sch.data || []).forEach(r => { S.sched[r.member_id + "|" + r.date] = normDay(r); });
-  if (tsk.data) S.tasks = tsk.data.map(normTask);
-  if (pay.data) S.payments = pay.data.map(normPay);
-  if (vlt.data) S.vault = vlt.data;
-  if (shp.data) S.shops = shp.data;
+  // 取れなかったところは、前に読めていたものを残す。空で上書きすると
+  // 「データが消えた」ように見えるうえ、失敗したこと自体が伝わらない。
+  const parts = [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf, nte];
+  const ok = r => !(r && r.error);
+  S.stale = parts.some(r => !ok(r));
+  if (ok(mem)) S.members = (mem.data || []).map(normMember);
+  if (ok(off) && off.data) S.office = { doorOpen: off.data.door_open, updatedBy: off.data.updated_by, updatedAt: off.data.updated_at };
+  if (ok(sch)){
+    S.sched = {};
+    (sch.data || []).forEach(r => { S.sched[r.member_id + "|" + r.date] = normDay(r); });
+  }
+  if (ok(tsk)) S.tasks = (tsk.data || []).map(normTask);
+  if (ok(pay)) S.payments = (pay.data || []).map(normPay);
+  if (ok(vlt)) S.vault = vlt.data || [];
+  if (ok(shp)) S.shops = shp.data || [];
   // 見えないものは RLS がそもそも返さない。ここに来た時点で読んでよいものだけ。
-  S.notes = (nte.data || []).map(normNote);
-  if (ntc.data) S.notices = ntc.data;
-  S.allowed = alw.data || [];
-  S.settings = bst.data || null;
-  if (S.settings) S.mode = S.settings.signup_mode;
+  if (ok(nte)) S.notes = (nte.data || []).map(normNote);
+  if (ok(ntc)) S.notices = ntc.data || [];
+  if (ok(alw)) S.allowed = alw.data || [];
+  if (ok(bst)){
+    S.settings = bst.data || null;
+    if (S.settings) S.mode = S.settings.signup_mode;
+  }
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
-  S.sites = sit.data || [];
-  S.staff = (stf.data || []).map(normStaff);
+  if (ok(sit)) S.sites = sit.data || [];
+  if (ok(stf)) S.staff = (stf.data || []).map(normStaff);
   if (!site(S.siteId)) S.siteId = S.sites.length ? S.sites[0].id : "";
   await loadSite(S.siteId);
 }
@@ -253,9 +264,12 @@ async function loadStaffAll(){
     sb.from("staff").select(STAFF_COLS).eq("site_id", S.staffMe.siteId).order("sort_order").order("name"),
     sb.from("tasks").select("*").eq("site_id", S.staffMe.siteId)
   ]);
-  S.sites = sit.data || [];
-  S.staff = (stf.data || []).map(normStaff);
-  S.tasks = (tsk.data || []).map(normTask);
+  // 本部側と同じで、取れなかったところは前のままにしておく。
+  const ok = r => !(r && r.error);
+  S.stale = [sit, stf, tsk].some(r => !ok(r));
+  if (ok(sit)) S.sites = sit.data || [];
+  if (ok(stf)) S.staff = (stf.data || []).map(normStaff);
+  if (ok(tsk)) S.tasks = (tsk.data || []).map(normTask);
   S.siteId = S.staffMe.siteId;
   S.staffMe = S.staff.find(x => x.id === S.staffMe.id) || S.staffMe;
   await loadSite(S.siteId);
@@ -264,15 +278,37 @@ async function loadStaffAll(){
 let reloadTimer = null;
 function scheduleReload(){
   clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(() => { loadAll().then(render).catch(() => {}); }, 250);
+  reloadTimer = setTimeout(function(){
+    const load = S.screen === "staff" ? loadStaffAll() : loadAll();
+    load.then(render).catch(function(){ S.stale = true; render(); });
+  }, 250);
 }
+// realtime の配信対象に入っている表だけを並べる。入っていない表を混ぜると
+// その購読が通らず、同じチャンネルに乗せた他の表まで届かなくなる。
+// staff は pin 列があるので配信対象にしていない（下の定期読み直しで追いつく）。
+const LIVE_TABLES = ["members","office","schedule","tasks","payments","vault","shops","notices",
+                     "board_settings","sites","punches","key_events","key_duty","staff_shifts","notes"];
 function subscribeLive(){
   const ch = sb.channel("board");
-  ["members","office","schedule","tasks","payments","vault","shops","notices","allowed_emails","board_settings",
-   "sites","staff","punches","key_events","key_duty","staff_shifts","notes"].forEach(t => {
+  LIVE_TABLES.forEach(t => {
     ch.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleReload);
   });
-  ch.subscribe();
+  // 繋がらなかったことに気づけないと、更新が止まったまま使い続けることになる。
+  ch.subscribe(function(status){
+    S.live = status === "SUBSCRIBED";
+    if (!S.live) scheduleReload();
+  });
+}
+
+// 画面に戻ったときは必ず読み直す。スマホは裏に回っている間に接続が切れるので、
+// 戻ってきた画面が何時間も前のままだった、というのがいちばん起きやすい。
+function watchForStaleness(){
+  const again = () => { if (!document.hidden) scheduleReload(); };
+  document.addEventListener("visibilitychange", again);
+  window.addEventListener("focus", again);
+  window.addEventListener("online", again);
+  // 通知が来なくても置いていかれないよう、開いている間は定期的にも読み直す。
+  setInterval(again, 60000);
 }
 
 /* ============================ auth ============================ */
@@ -289,6 +325,7 @@ async function boot(){
   });
   await refresh();
   subscribeLive();
+  watchForStaleness();
 }
 async function refresh(){
   if (S.user) S.form = {};
@@ -443,10 +480,19 @@ function sortNotes(list){
   });
 }
 
+function renderStale(){
+  const bar = el("staleBar"), show = S.stale && (S.screen === "app" || S.screen === "staff");
+  bar.hidden = !show;
+  if (show){
+    bar.innerHTML = '<span>最新の状態を取れませんでした。表示は前に読めたときのままです。</span>' +
+      '<button class="btn sm" data-act="reload-all">読み直す</button>';
+  }
+}
 function render(){
   const hq = S.screen === "app", staff = S.screen === "staff";
   el("masthead").hidden = !hq;
   el("tabsNav").hidden = !(hq || staff);
+  renderStale();
   const v = el("view");
   if (!S.ready){ v.innerHTML = '<p class="empty" style="border:0">読み込み中…</p>'; return; }
   if (S.screen === "auth"){ v.className = ""; v.innerHTML = viewAuth(); return; }
@@ -1094,10 +1140,12 @@ async function loadSite(siteId){
     sb.from("key_duty").select("*").eq("site_id", siteId).gte("date", from).lte("date", to),
     sb.from("staff_shifts").select("*").eq("site_id", siteId).gte("date", from).lte("date", to)
   ]);
-  S.punches = (pch.data || []).map(normPunch);
-  S.keyEvents = (kev.data || []).map(normKeyEv);
-  S.keyDuty = {}; (kdt.data || []).forEach(function(r){ S.keyDuty[r.date] = r; });
-  S.sshifts = {}; (shf.data || []).forEach(function(r){ S.sshifts[r.staff_id + "|" + r.date] = normSShift(r); });
+  const ok = r => !(r && r.error);
+  if ([pch, kev, kdt, shf].some(r => !ok(r))) S.stale = true;
+  if (ok(pch)) S.punches = (pch.data || []).map(normPunch);
+  if (ok(kev)) S.keyEvents = (kev.data || []).map(normKeyEv);
+  if (ok(kdt)){ S.keyDuty = {}; (kdt.data || []).forEach(function(r){ S.keyDuty[r.date] = r; }); }
+  if (ok(shf)){ S.sshifts = {}; (shf.data || []).forEach(function(r){ S.sshifts[r.staff_id + "|" + r.date] = normSShift(r); }); }
 }
 
 /* ---------------------------- スタッフの入り口 ---------------------------- */
@@ -2205,6 +2253,14 @@ document.addEventListener("click", async function(ev){
       case "toggle-note": {
         const x = S.notes.find(v => v.id === id);
         if (x) await run(sb.from("notes").update({ status: x.status === "done" ? "open" : "done" }).eq("id", id));
+        break;
+      }
+      case "reload-all": {
+        try {
+          if (S.screen === "staff") await loadStaffAll(); else await loadAll();
+        } catch(e){ S.stale = true; }
+        render();
+        toast(S.stale ? "まだ繋がりません。電波の良い場所で試してください。" : "最新の状態にしました");
         break;
       }
       case "new-task": modalTask(null); break;

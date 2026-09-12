@@ -286,6 +286,12 @@ table.cal .cell .k{font-size:10.5px; letter-spacing:-.02em}
 .todo-row{display:flex; gap:10px; align-items:flex-start}
 .todo-meta{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px}
 .legend i{display:inline-block; width:12px; height:12px; border-radius:2px; margin-right:5px; vertical-align:-2px}
+/* 古いものを見せ続けるより、古いと言う。押せば読み直す */
+.stale-bar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:8px 16px; font-size:12.5px; background:var(--warn-soft); color:var(--ink);
+  border-bottom:1px solid var(--line);
+}
 
 /* tiles */
 .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r); overflow:hidden}
@@ -536,6 +542,7 @@ tr.paid td:not(.acts){opacity:.55}
 </div>
 <div id="bannerBox"></div>
 <nav class="tabs" id="tabsNav" hidden><div class="wrap tabs-in" id="tabs" role="tablist"></div></nav>
+<div class="stale-bar" id="staleBar" hidden></div>
 <main class="wrap" id="view"></main>
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
