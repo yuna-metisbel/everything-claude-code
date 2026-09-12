@@ -54,6 +54,7 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 | 20260908162727 | `personal_notes`                | 自分だけのやること・メモ `notes` と、1件ごとの公開範囲                           |
 | 20260910125750 | `schedule_kind_both`            | 「事務所＋在宅」の区分を `schedule.kind` に追加                                  |
 | 20260912123937 | `realtime_for_later_tables`     | あとから足した表を realtime の配信対象に追加（`staff` は除く）                   |
+| 20260912125835 | `staff_can_set_key_holders`     | 鍵の所持者を拠点のスタッフが登録できる `set_key_holder()`                        |
 
 `staff_pin_hash_column_grants` は落とし穴の修正。Supabase は `public` の全テーブルに
 表単位の権限を配るので、表単位の権限をいったん剥がしてから見せてよい列だけを

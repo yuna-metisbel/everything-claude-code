@@ -1360,8 +1360,10 @@ function viewKey(){
       (duty.note ? '<div class="row"><span style="font-size:13px;color:var(--ink-2)">' + h(duty.note) + "</span></div>" : "") +
     "</div></div>" +
 
+    // 誰が鍵を持っているかは、その拠点で働いている人がいちばん分かっている。
+    // 店長役がいない拠点だと誰も登録できなくなるので、スタッフ全員が触れる。
     '<div class="sec-head"><h2>鍵を持っている人</h2>' +
-      (canManageSite() ? '<div class="btn-row"><button class="btn sm" data-act="edit-holders">登録する</button></div>' : "") + "</div>" +
+      '<div class="btn-row"><button class="btn sm" data-act="edit-holders">登録する</button></div></div>' +
     '<div class="panel" style="margin-bottom:16px">' +
       (holders.length
         ? '<div class="rows">' + holders.map(function(s){
@@ -1596,7 +1598,9 @@ function modalHolders(){
         '<span style="flex:1">' + h(s.name) + "</span>" +
         '<input type="text" data-holdernote="' + h(s.id) + '" maxlength="60" placeholder="メモ" value="' +
           h(s.keyNote || "") + '" style="flex:1 1 120px"></label>'; }).join("") +
-      (siteStaff().filter(s => s.active).length ? "" : '<p class="empty" style="border:0">名簿にスタッフがいません</p>') + "</div>",
+      (siteStaff().filter(s => s.active).length ? "" : '<p class="empty" style="border:0">名簿にスタッフがいません</p>') +
+      '<p style="font-size:12px;color:var(--muted);line-height:1.7">鍵を渡した人にチェックを入れてください。' +
+      "メモにはスペアの本数や、どこの鍵かを書いておけます。この拠点の人なら誰でも直せます。</p></div>",
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-holders">保存</button>');
 }
@@ -2385,12 +2389,18 @@ document.addEventListener("click", async function(ev){
           return { id: c.dataset.holder, on: c.checked,
                    note: (document.querySelector('[data-holdernote="' + c.dataset.holder + '"]') || {}).value || "" };
         });
+        // staff 表には暗証番号も役割もあるので、直接は書かない。
+        // 鍵の2列だけを書き換える関数を通す（本部もスタッフも同じ道）。
+        let refused = 0;
         for (const r of rows){
           const cur = staffOf(r.id) || {};
           if (cur.keyHolder === r.on && (cur.keyNote || "") === r.note) continue;
-          await run(sb.from("staff").update({ key_holder: r.on, key_note: r.note, updated_at: nowIso() }).eq("id", r.id));
+          const res = await run(sb.rpc("set_key_holder", { p_staff: r.id, p_on: r.on, p_note: r.note }));
+          if (!res || res.data !== true) refused += 1;
         }
-        toast("保存しました"); closeModal(); break;
+        closeModal();
+        toast(refused ? "一部を保存できませんでした（" + refused + "件）" : "保存しました");
+        break;
       }
 
       case "edit-shift": modalShift(id, btn.dataset.date); break;
