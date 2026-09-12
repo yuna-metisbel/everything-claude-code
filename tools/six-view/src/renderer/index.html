@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>SixView</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">6</span>
+        <span class="brand-name">SixView</span>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" id="login-all" class="btn btn-primary">すべて自動ログイン</button>
+        <button type="button" id="reload-all" class="btn">すべて再読み込み</button>
+        <button type="button" id="open-settings" class="btn">設定</button>
+      </div>
+    </header>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <main id="grid" class="grid"></main>
+
+    <template id="pane-template">
+      <section class="pane">
+        <header class="pane-head">
+          <span class="pane-index"></span>
+          <span class="pane-name"></span>
+          <span class="pane-badge pane-private" hidden>シークレット</span>
+          <span class="pane-status" title="状態"></span>
+          <span class="pane-url"></span>
+          <span class="pane-buttons">
+            <button type="button" class="icon-btn" data-command="back" title="戻る">‹</button>
+            <button type="button" class="icon-btn" data-command="forward" title="進む">›</button>
+            <button type="button" class="icon-btn" data-command="reload" title="再読み込み">⟳</button>
+            <button type="button" class="icon-btn" data-command="home" title="トップページへ">⌂</button>
+            <button type="button" class="icon-btn" data-command="login" title="自動ログイン">🔑</button>
+            <button type="button" class="icon-btn" data-command="zoom-out" title="縮小">−</button>
+            <button type="button" class="icon-btn" data-command="zoom-in" title="拡大">＋</button>
+            <button type="button" class="icon-btn" data-action="maximize" title="このパネルを拡大 / 元に戻す">⤢</button>
+            <button type="button" class="icon-btn" data-command="external" title="既定のブラウザで開く">↗</button>
+            <button type="button" class="icon-btn" data-action="logout" title="ログイン状態を消去">⎋</button>
+          </span>
+        </header>
+        <div class="pane-body">
+          <div class="pane-empty" hidden>
+            <p class="pane-empty-title">URL が未設定です</p>
+            <p class="pane-empty-text">設定画面でこのパネルのログインページ URL を登録してください。</p>
+            <button type="button" class="btn btn-primary" data-action="settings">設定を開く</button>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

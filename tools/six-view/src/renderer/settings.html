@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>SixView 設定</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <header class="head">
+      <h1>SixView 設定</h1>
+      <p class="head-note">
+        6つのパネルに表示するサイトと、自動ログイン用の情報を設定します。パスワードは OS
+        のキーチェーン（macOS Keychain / Windows 資格情報マネージャー）で暗号化して保存されます。
+      </p>
+      <p id="encryption-warning" class="warning" hidden>
+        この環境では OS の安全な保存領域が使えないため、ID/パスワードは保存できません。
+      </p>
+    </header>
+
+    <section class="card">
+      <h2>全体設定</h2>
+      <div class="row">
+        <label class="field">
+          <span>既定の拡大率</span>
+          <input type="number" id="default-zoom" min="0.25" max="2" step="0.05" />
+          <small>6分割は画面が狭いので 0.6〜0.75 がおすすめです。</small>
+        </label>
+        <label class="field grow">
+          <span>既定のユーザーエージェント（空欄で標準）</span>
+          <input type="text" id="default-ua" placeholder="例: Mozilla/5.0 ... Chrome/120.0.0.0 Safari/537.36" />
+          <small>サイトに「対応していないブラウザ」と言われる場合のみ設定します。</small>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field narrow">
+          <span>横に並べる数</span>
+          <select id="columns">
+            <option value="0">自動</option>
+            <option value="2">2列</option>
+            <option value="3">3列</option>
+            <option value="4">4列</option>
+            <option value="5">5列</option>
+          </select>
+          <small>自動なら 6画面は3列、8画面は4列になります。</small>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="open-at-login" />
+          <span>パソコンの起動時に SixView を自動で開く</span>
+        </label>
+        <span id="login-item-note" class="hint" hidden>この OS では自動起動を設定できません。</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>パネル<span id="pane-count" class="pane-count"></span></h2>
+      <div class="row">
+        <label class="field">
+          <span>追加するサイト</span>
+          <select id="preset"></select>
+        </label>
+        <button type="button" id="add-pane" class="btn btn-primary">パネルを追加</button>
+        <span class="hint">
+          同じサイトの別アカウントを開きたいときは、そのパネルの「複製」を使ってください。
+          パネルごとにログイン状態が分かれているので、同じサイトに同時に別アカウントでログインできます。
+        </span>
+      </div>
+    </section>
+
+    <main id="sites"></main>
+
+    <footer class="foot">
+      <span id="config-path" class="config-path"></span>
+      <span class="foot-actions">
+        <span id="save-status" class="save-status"></span>
+        <button type="button" id="close" class="btn">閉じる</button>
+        <button type="button" id="save" class="btn btn-primary">保存して反映</button>
+      </span>
+    </footer>
+
+    <template id="site-template">
+      <section class="card site">
+        <h2>
+          <span class="site-index"></span>
+          <span class="site-title"></span>
+          <span class="site-actions">
+            <button type="button" class="btn" data-action="duplicate" title="このサイトの別アカウント用にコピー">複製</button>
+            <button type="button" class="btn btn-danger" data-action="remove">削除</button>
+          </span>
+        </h2>
+
+        <div class="row">
+          <label class="field">
+            <span>表示名</span>
+            <input type="text" data-field="name" />
+          </label>
+          <label class="field grow">
+            <span>ログインページ URL</span>
+            <input type="text" data-field="url" placeholder="https://example.co.jp/login" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="check">
+            <input type="checkbox" data-field="incognito" />
+            <span>シークレット（毎回ログアウト状態で開く）</span>
+          </label>
+          <label class="field narrow">
+            <span>拡大率（0 で既定）</span>
+            <input type="number" data-field="zoomFactor" min="0" max="2" step="0.05" />
+          </label>
+        </div>
+
+        <details class="sub">
+          <summary>自動ログイン</summary>
+          <div class="row">
+            <label class="check">
+              <input type="checkbox" data-field="autofill.enabled" />
+              <span>このサイトで自動入力する</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" data-field="autofill.autoSubmit" />
+              <span>入力後にログインボタンも押す</span>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>ID 入力欄のセレクタ</span>
+              <input type="text" data-field="autofill.usernameSelector" placeholder="#username" />
+            </label>
+            <label class="field">
+              <span>パスワード入力欄のセレクタ</span>
+              <input type="text" data-field="autofill.passwordSelector" placeholder="input[type=password]" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>ログインボタンのセレクタ（任意）</span>
+              <input type="text" data-field="autofill.submitSelector" placeholder="button[type=submit]" />
+            </label>
+            <label class="field">
+              <span>ログインページの判定（URL の一部 / 空欄で全ページ）</span>
+              <input type="text" data-field="autofill.urlPattern" placeholder="login" />
+            </label>
+            <label class="field narrow">
+              <span>入力までの待機 (ms)</span>
+              <input type="number" data-field="autofill.delayMs" min="0" max="15000" step="100" />
+            </label>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="detect">ログイン欄を自動検出</button>
+            <span class="detect-status hint"></span>
+          </div>
+          <p class="hint">
+            パネルにそのサイトのログイン画面を表示した状態で「自動検出」を押すと、上の3つのセレクタが埋まります。
+            うまくいかないときはパネル上で右クリック →「検証」で入力欄の id / name を確認してください。
+          </p>
+        </details>
+
+        <details class="sub">
+          <summary>ユーザーエージェント（任意）</summary>
+          <label class="field grow">
+            <span>このサイト専用の UA（空欄で既定）</span>
+            <input type="text" data-field="userAgent" />
+          </label>
+        </details>
+
+        <div class="creds">
+          <div class="row">
+            <label class="field">
+              <span>ログイン ID</span>
+              <input type="text" data-cred="username" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>パスワード</span>
+              <input type="password" data-cred="password" autocomplete="new-password" />
+            </label>
+            <span class="cred-actions">
+              <button type="button" class="btn" data-cred-action="save">認証情報を保存</button>
+              <button type="button" class="btn btn-danger" data-cred-action="clear">削除</button>
+            </span>
+          </div>
+          <p class="cred-status"></p>
+        </div>
+      </section>
+    </template>
+
+    <script src="settings.js"></script>
+  </body>
+</html>
