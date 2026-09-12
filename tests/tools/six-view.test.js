@@ -70,7 +70,7 @@ function runTests() {
     );
   })) passed++; else failed++;
 
-  if (test('the 02 build flavour ships eight accounts plus X, each isolated', () => {
+  if (test('the 02 build flavour ships one shop and seven cast panes plus X', () => {
     const brand = schema.getBrand('msns');
     assert.strictEqual(brand.appName, '02View');
 
@@ -78,7 +78,11 @@ function runTests() {
     assert.strictEqual(config.sites.length, 9);
     assert.strictEqual(
       config.sites.filter((site) => site.url === 'https://m-sns.net/shop/login/').length,
-      8
+      1
+    );
+    assert.strictEqual(
+      config.sites.filter((site) => site.url === 'https://m-sns.net/cast/login/').length,
+      7
     );
     assert.strictEqual(config.sites[8].url, 'https://x.com/login');
 
@@ -99,7 +103,8 @@ function runTests() {
     const result = configStore.loadConfig(dir, 'msns');
     assert.strictEqual(result.created, true);
     assert.strictEqual(result.config.sites.length, 9);
-    assert.strictEqual(result.config.sites[0].name, '02 店舗1');
+    assert.strictEqual(result.config.sites[0].name, '02 店舗');
+    assert.strictEqual(result.config.sites[1].name, '02 キャスト1');
   })) passed++; else failed++;
 
   if (test('the shipped example config matches the built-in defaults', () => {

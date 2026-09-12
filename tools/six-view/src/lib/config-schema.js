@@ -61,10 +61,11 @@ const BRANDS = {
     id: 'msns',
     appName: '02View',
     sites: [
-      ...Array.from({ length: 8 }, (_, i) => ({
-        id: `msns-shop-${i + 1}`,
-        name: `02 店舗${i + 1}`,
-        url: 'https://m-sns.net/shop/login/',
+      { id: 'msns-shop', name: '02 店舗', url: 'https://m-sns.net/shop/login/' },
+      ...Array.from({ length: 7 }, (_, i) => ({
+        id: `msns-cast-${i + 1}`,
+        name: `02 キャスト${i + 1}`,
+        url: 'https://m-sns.net/cast/login/',
       })),
       { id: 'x', name: 'X', url: 'https://x.com/login' },
     ],
