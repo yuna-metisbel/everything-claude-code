@@ -10,6 +10,7 @@ const { Menu, app, shell } = require('electron');
 const isMac = process.platform === 'darwin';
 
 function buildMenu(handlers) {
+  const appName = handlers.appName || 'SixView';
   const paneItems = handlers.getSites().map((site, index) => ({
     label: `${index + 1}. ${site.name}`,
     // Only 1-9 can be typed as an accelerator; later panes are clicked instead.
@@ -23,15 +24,15 @@ function buildMenu(handlers) {
           {
             label: app.name,
             submenu: [
-              { role: 'about', label: 'SixView について' },
+              { role: 'about', label: `${appName} について` },
               { type: 'separator' },
               { label: '設定…', accelerator: 'Command+,', click: handlers.onOpenSettings },
               { type: 'separator' },
-              { role: 'hide', label: 'SixView を隠す' },
+              { role: 'hide', label: `${appName} を隠す` },
               { role: 'hideOthers', label: 'ほかを隠す' },
               { role: 'unhide', label: 'すべて表示' },
               { type: 'separator' },
-              { role: 'quit', label: 'SixView を終了' },
+              { role: 'quit', label: `${appName} を終了` },
             ],
           },
         ]

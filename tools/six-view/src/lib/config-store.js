@@ -20,18 +20,18 @@ function configPath(baseDir) {
  * Load and normalize the config. A missing or corrupt file falls back to
  * defaults instead of crashing the app.
  */
-function loadConfig(baseDir) {
+function loadConfig(baseDir, brandId) {
   const file = configPath(baseDir);
   if (!fs.existsSync(file)) {
-    return { config: normalizeConfig(createDefaultConfig()), created: true, error: null };
+    return { config: normalizeConfig(createDefaultConfig(brandId), brandId), created: true, error: null };
   }
 
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { config: normalizeConfig(raw), created: false, error: null };
+    return { config: normalizeConfig(raw, brandId), created: false, error: null };
   } catch (err) {
     return {
-      config: normalizeConfig(createDefaultConfig()),
+      config: normalizeConfig(createDefaultConfig(brandId), brandId),
       created: false,
       error: `設定ファイルを読み込めませんでした (${err.message})`,
     };
@@ -39,8 +39,8 @@ function loadConfig(baseDir) {
 }
 
 /** Write the config atomically (tmp file + rename) so a crash cannot truncate it. */
-function saveConfig(baseDir, rawConfig) {
-  const config = normalizeConfig(rawConfig);
+function saveConfig(baseDir, rawConfig, brandId) {
+  const config = normalizeConfig(rawConfig, brandId);
   fs.mkdirSync(baseDir, { recursive: true });
   const file = configPath(baseDir);
   const tmp = `${file}.tmp`;

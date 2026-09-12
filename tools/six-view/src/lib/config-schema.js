@@ -46,6 +46,38 @@ const SITE_PRESETS = [
   })),
 ];
 
+/**
+ * Build flavours. One codebase ships as two apps so the six work sites and the
+ * wall of 02 accounts stay in separate windows, with separate config and
+ * credential stores (each app name gets its own userData directory).
+ */
+const BRANDS = {
+  sixview: {
+    id: 'sixview',
+    appName: 'SixView',
+    sites: DEFAULT_SITE_PRESETS,
+  },
+  msns: {
+    id: 'msns',
+    appName: '02View',
+    sites: [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `msns-shop-${i + 1}`,
+        name: `02 店舗${i + 1}`,
+        url: 'https://m-sns.net/shop/login/',
+      })),
+      { id: 'x', name: 'X', url: 'https://x.com/login' },
+    ],
+  },
+};
+
+const DEFAULT_BRAND = 'sixview';
+
+/** Resolve a brand id to its definition, falling back to the default app. */
+function getBrand(brandId) {
+  return BRANDS[brandId] || BRANDS[DEFAULT_BRAND];
+}
+
 const DEFAULT_AUTOFILL = {
   enabled: false,
   urlPattern: '',
@@ -148,9 +180,9 @@ function normalizeSite(raw, index, usedIds) {
   };
 }
 
-function createDefaultSites() {
+function createDefaultSites(brandId = DEFAULT_BRAND) {
   const usedIds = new Set();
-  return DEFAULT_SITE_PRESETS.map((preset, index) => normalizeSite(preset, index, usedIds));
+  return getBrand(brandId).sites.map((preset, index) => normalizeSite(preset, index, usedIds));
 }
 
 /**
@@ -185,14 +217,14 @@ function resolveColumns(config) {
   return AUTO_COLUMNS[count] || Math.ceil(Math.sqrt(Math.max(1, count)));
 }
 
-function createDefaultConfig() {
+function createDefaultConfig(brandId = DEFAULT_BRAND) {
   return {
     version: CONFIG_VERSION,
     window: { width: 1680, height: 1020, x: null, y: null, maximized: true },
     layout: { columns: 0 },
     startup: { openAtLogin: false },
     defaults: { zoomFactor: 0.67, userAgent: '' },
-    sites: createDefaultSites(),
+    sites: createDefaultSites(brandId),
   };
 }
 
@@ -215,9 +247,10 @@ function normalizeWindow(raw) {
  * Keeps between MIN_PANES and MAX_PANES panes; a config with no sites at all
  * falls back to the shipped defaults rather than opening an empty window.
  */
-function normalizeConfig(raw) {
+function normalizeConfig(raw, brandId = DEFAULT_BRAND) {
   const source = isPlainObject(raw) ? raw : {};
-  const rawSites = Array.isArray(source.sites) && source.sites.length > 0 ? source.sites : DEFAULT_SITE_PRESETS;
+  const rawSites =
+    Array.isArray(source.sites) && source.sites.length > 0 ? source.sites : getBrand(brandId).sites;
   const count = Math.min(MAX_PANES, Math.max(MIN_PANES, rawSites.length));
   const usedIds = new Set();
   const sites = [];
@@ -278,6 +311,9 @@ function paneSlots(config) {
 }
 
 module.exports = {
+  BRANDS,
+  DEFAULT_BRAND,
+  getBrand,
   DEFAULT_PANE_COUNT,
   MIN_PANES,
   MAX_PANES,

@@ -19,6 +19,7 @@ const { loadConfig, saveConfig, configPath } = require('./lib/config-store');
 const { SecretStore } = require('./lib/secret-store');
 const {
   SITE_PRESETS,
+  getBrand,
   partitionForSite,
   resolveColumns,
   resolveUserAgent,
@@ -26,6 +27,21 @@ const {
 } = require('./lib/config-schema');
 const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
 const { buildMenu } = require('./menu');
+
+/**
+ * Which app this build is. `extraMetadata.sixviewBrand` is stamped in by the
+ * packaging config; the env var is the escape hatch for running the other
+ * flavour in development.
+ */
+const BRAND = getBrand(
+  process.env.SIXVIEW_BRAND ||
+    (process.argv.includes('--brand-msns') ? 'msns' : '') ||
+    require('../package.json').sixviewBrand
+);
+
+// Naming the app before it is ready is what gives each flavour its own
+// userData directory, so their configs and credential vaults never mix.
+app.setName(BRAND.appName);
 
 const RUN_ID = Date.now().toString(36);
 /** Ignore a second auto-login for the same URL within this window. */
@@ -348,7 +364,7 @@ function createMainWindow() {
     minHeight: 600,
     show: false,
     backgroundColor: '#12141a',
-    title: 'SixView',
+    title: BRAND.appName,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -389,7 +405,7 @@ function persistWindowBounds() {
       y: normal.y,
       maximized: mainWindow.isMaximized(),
     };
-    config = saveConfig(userDataDir, config);
+    config = saveConfig(userDataDir, config, BRAND.id);
   } catch (err) {
     log(`could not save window bounds: ${err.message}`);
   }
@@ -407,7 +423,7 @@ function openSettingsWindow() {
     minWidth: 720,
     minHeight: 560,
     parent: mainWindow || undefined,
-    title: 'SixView 設定',
+    title: `${BRAND.appName} 設定`,
     backgroundColor: '#12141a',
     autoHideMenuBar: true,
     webPreferences: {
@@ -440,6 +456,7 @@ function bootstrapPayload() {
     credentialStatus: secrets ? secrets.status(config.sites.map((site) => site.id)) : {},
     encryptionAvailable: Boolean(secrets && secrets.isAvailable()),
     loginItemSupported: process.platform === 'darwin' || process.platform === 'win32',
+    appName: BRAND.appName,
     configPath: configPath(userDataDir),
     configError,
   };
@@ -450,7 +467,7 @@ function registerIpc() {
 
   ipcMain.handle('config:save', (_event, incoming) => {
     const previousIds = config.sites.map((site) => site.id);
-    config = saveConfig(userDataDir, { ...incoming, window: config.window });
+    config = saveConfig(userDataDir, { ...incoming, window: config.window }, BRAND.id);
     configError = null;
 
     // A removed pane should not leave its password behind in the vault.
@@ -541,10 +558,10 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     userDataDir = app.getPath('userData');
 
-    const loaded = loadConfig(userDataDir);
+    const loaded = loadConfig(userDataDir, BRAND.id);
     config = loaded.config;
     configError = loaded.error;
-    if (loaded.created) config = saveConfig(userDataDir, config);
+    if (loaded.created) config = saveConfig(userDataDir, config, BRAND.id);
 
     secrets = new SecretStore(userDataDir, safeStorage);
 
@@ -552,6 +569,7 @@ if (!app.requestSingleInstanceLock()) {
     setupPaneSessions();
     registerIpc();
     buildMenu({
+      appName: BRAND.appName,
       onOpenSettings: openSettingsWindow,
       onReloadAll: () => {
         for (const site of config.sites) void runPaneCommand(site.id, 'reload');

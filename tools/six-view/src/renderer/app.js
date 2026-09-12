@@ -174,6 +174,10 @@ function render(bootstrap) {
 
   grid.style.setProperty('--columns', String(bootstrap.columns || 3));
   document.querySelector('.brand-mark').textContent = String(config.sites.length);
+  if (bootstrap.appName) {
+    document.querySelector('.brand-name').textContent = bootstrap.appName;
+    document.title = bootstrap.appName;
+  }
 
   const messages = [];
   if (bootstrap.configError) messages.push(bootstrap.configError);

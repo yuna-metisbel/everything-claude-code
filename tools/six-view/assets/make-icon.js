@@ -2,8 +2,11 @@
 'use strict';
 
 /**
- * Generates assets/icon.png (1024x1024) - a dark rounded square holding the
- * 3 x 2 pane grid. Run with: node assets/make-icon.js
+ * Generates the app icons (1024x1024) - a dark rounded square holding a pane
+ * grid. Run with: node assets/make-icon.js
+ *
+ * icon.png    SixView  - 3 x 2 grid, cool palette
+ * icon-02.png 02View   - 3 x 3 grid, warm palette
  *
  * Hand-rolled PNG writer so the repo needs no image dependencies.
  */
@@ -60,24 +63,16 @@ function blend(target, offset, color, alpha) {
   target[offset + 3] = Math.round(target[offset + 3] * (1 - alpha) + 255 * alpha);
 }
 
-function render() {
+function render({ paneColors, rows }) {
   const pixels = Buffer.alloc(SIZE * SIZE * 4, 0);
 
   const background = [26, 29, 38];
-  const paneColors = [
-    [79, 140, 255],
-    [109, 163, 255],
-    [61, 220, 151],
-    [255, 193, 77],
-    [199, 170, 255],
-    [255, 107, 107],
-  ];
 
   const marginX = 96;
   const gap = 36;
   const cellW = (SIZE - marginX * 2 - gap * 2) / 3;
-  const cellH = cellW * 0.78;
-  const boardTop = (SIZE - (cellH * 2 + gap)) / 2;
+  const cellH = rows === 3 ? cellW * 0.72 : cellW * 0.78;
+  const boardTop = (SIZE - (cellH * rows + gap * (rows - 1))) / 2;
 
   for (let y = 0; y < SIZE; y += 1) {
     for (let x = 0; x < SIZE; x += 1) {
@@ -87,7 +82,7 @@ function render() {
 
       blend(pixels, offset, background, coverage(roundedRectDistance(px, py, 24, 24, SIZE - 48, SIZE - 48, 200)));
 
-      for (let index = 0; index < 6; index += 1) {
+      for (let index = 0; index < paneColors.length; index += 1) {
         const col = index % 3;
         const row = Math.floor(index / 3);
         const cellX = marginX + col * (cellW + gap);
@@ -125,6 +120,38 @@ function render() {
   ]);
 }
 
-const outFile = path.join(__dirname, 'icon.png');
-fs.writeFileSync(outFile, render());
-console.log(`wrote ${outFile}`);
+const ICONS = [
+  {
+    file: 'icon.png',
+    rows: 2,
+    paneColors: [
+      [79, 140, 255],
+      [109, 163, 255],
+      [61, 220, 151],
+      [255, 193, 77],
+      [199, 170, 255],
+      [255, 107, 107],
+    ],
+  },
+  {
+    file: 'icon-02.png',
+    rows: 3,
+    paneColors: [
+      [255, 145, 77],
+      [255, 178, 71],
+      [255, 107, 107],
+      [236, 112, 170],
+      [199, 120, 255],
+      [140, 128, 255],
+      [95, 160, 255],
+      [61, 200, 190],
+      [110, 214, 132],
+    ],
+  },
+];
+
+for (const icon of ICONS) {
+  const outFile = path.join(__dirname, icon.file);
+  fs.writeFileSync(outFile, render(icon));
+  console.log(`wrote ${outFile}`);
+}

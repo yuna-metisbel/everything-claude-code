@@ -70,6 +70,38 @@ function runTests() {
     );
   })) passed++; else failed++;
 
+  if (test('the 02 build flavour ships eight accounts plus X, each isolated', () => {
+    const brand = schema.getBrand('msns');
+    assert.strictEqual(brand.appName, '02View');
+
+    const config = schema.createDefaultConfig('msns');
+    assert.strictEqual(config.sites.length, 9);
+    assert.strictEqual(
+      config.sites.filter((site) => site.url === 'https://m-sns.net/shop/login/').length,
+      8
+    );
+    assert.strictEqual(config.sites[8].url, 'https://x.com/login');
+
+    // Eight panes on one URL only work if every pane has its own session.
+    const partitions = new Set(config.sites.map((site) => schema.partitionForSite(site)));
+    assert.strictEqual(partitions.size, 9);
+  })) passed++; else failed++;
+
+  if (test('an unknown brand falls back to the default app', () => {
+    assert.strictEqual(schema.getBrand('nope').id, schema.DEFAULT_BRAND);
+    assert.strictEqual(schema.getBrand(undefined).appName, 'SixView');
+    assert.strictEqual(schema.createDefaultConfig('nope').sites[0].name, 'Venry');
+  })) passed++; else failed++;
+
+  if (test('each flavour starts from its own defaults on first run', () => {
+    const dir = path.join(tmpDir, 'brand-msns');
+    fs.mkdirSync(dir, { recursive: true });
+    const result = configStore.loadConfig(dir, 'msns');
+    assert.strictEqual(result.created, true);
+    assert.strictEqual(result.config.sites.length, 9);
+    assert.strictEqual(result.config.sites[0].name, '02 店舗1');
+  })) passed++; else failed++;
+
   if (test('the shipped example config matches the built-in defaults', () => {
     const example = JSON.parse(fs.readFileSync(path.join(toolRoot, 'sites.example.json'), 'utf8'));
     const normalized = schema.normalizeConfig(example);

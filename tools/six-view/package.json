@@ -13,10 +13,13 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "start:02": "electron . --brand-msns",
     "icon": "node assets/make-icon.js",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win"
+    "dist:win": "electron-builder --win",
+    "dist:mac:02": "electron-builder --mac --config electron-builder.02.json",
+    "dist:win:02": "electron-builder --win --config electron-builder.02.json"
   },
   "devDependencies": {
     "electron": "^44.3.0",

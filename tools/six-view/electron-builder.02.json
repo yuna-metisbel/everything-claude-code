@@ -1,0 +1,37 @@
+{
+  "appId": "com.sixview.msns",
+  "productName": "02View",
+  "extraMetadata": {
+    "name": "zerotwoview",
+    "sixviewBrand": "msns"
+  },
+  "directories": {
+    "buildResources": "assets",
+    "output": "dist-02"
+  },
+  "files": ["src/**/*", "package.json"],
+  "mac": {
+    "category": "public.app-category.productivity",
+    "icon": "assets/icon-02.png",
+    "identity": null,
+    "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }]
+  },
+  "win": {
+    "icon": "assets/icon-02.png",
+    "target": [
+      { "target": "nsis", "arch": ["x64"] },
+      { "target": "portable", "arch": ["x64"] }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "shortcutName": "02View"
+  },
+  "linux": {
+    "icon": "assets/icon-02.png",
+    "category": "Network",
+    "target": ["AppImage"]
+  }
+}
