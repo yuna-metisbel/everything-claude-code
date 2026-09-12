@@ -29,6 +29,23 @@ const DEFAULT_SITE_PRESETS = [
   { id: 'cti', name: 'CTI', url: 'https://prime-office-board.onrender.com/' },
 ];
 
+/**
+ * Sites offered when adding a pane, so a URL does not have to be retyped.
+ * Adding the same preset twice is fine - each pane gets its own session.
+ */
+const SITE_PRESETS = [
+  { key: 'blank', label: '空のパネル', name: '', url: '' },
+  { key: 'msns-shop', label: '02 店舗用', name: '02 店舗', url: 'https://m-sns.net/shop/login/' },
+  { key: 'msns-cast', label: '02 キャスト用', name: '02 キャスト', url: 'https://m-sns.net/cast/login/' },
+  { key: 'x', label: 'X (旧Twitter)', name: 'X', url: 'https://x.com/login' },
+  ...DEFAULT_SITE_PRESETS.map((preset) => ({
+    key: preset.id,
+    label: preset.name,
+    name: preset.name,
+    url: preset.url,
+  })),
+];
+
 const DEFAULT_AUTOFILL = {
   enabled: false,
   urlPattern: '',
@@ -266,6 +283,7 @@ module.exports = {
   MAX_PANES,
   CONFIG_VERSION,
   DEFAULT_SITE_PRESETS,
+  SITE_PRESETS,
   createDefaultConfig,
   createDefaultSites,
   createSite,

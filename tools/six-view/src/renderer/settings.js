@@ -17,6 +17,7 @@ const MAX_PANES = 12;
 let currentConfig = null;
 let encryptionAvailable = false;
 let credentialStatus = {};
+let presets = [];
 
 /** Copy a pane so a second account on the same site gets its own session. */
 function duplicateSite(site, takenIds) {
@@ -29,15 +30,15 @@ function duplicateSite(site, takenIds) {
   return copy;
 }
 
-/** A blank pane to fill in. */
-function blankSite(takenIds) {
+/** A new pane, optionally seeded from one of the shipped presets. */
+function blankSite(takenIds, preset = {}) {
   const used = new Set(takenIds);
   let index = used.size + 1;
   while (used.has(`site-${index}`)) index += 1;
   return {
-    id: `site-${index}`,
-    name: `サイト ${index}`,
-    url: '',
+    id: preset.key && preset.key !== 'blank' ? `${preset.key}-${index}` : `site-${index}`,
+    name: preset.name || `サイト ${index}`,
+    url: preset.url || '',
     enabled: true,
     incognito: false,
     zoomFactor: 0,
@@ -236,6 +237,16 @@ function render(bootstrap) {
   currentConfig = bootstrap.config;
   encryptionAvailable = bootstrap.encryptionAvailable;
   credentialStatus = bootstrap.credentialStatus || {};
+  presets = bootstrap.presets || [];
+
+  const presetSelect = document.getElementById('preset');
+  presetSelect.textContent = '';
+  for (const preset of presets) {
+    const option = document.createElement('option');
+    option.value = preset.key;
+    option.textContent = preset.label;
+    presetSelect.appendChild(option);
+  }
 
   document.getElementById('encryption-warning').hidden = encryptionAvailable;
   document.getElementById('config-path').textContent = bootstrap.configPath;
@@ -276,7 +287,8 @@ document.getElementById('add-pane').addEventListener('click', () => {
     flash(`パネルは最大 ${MAX_PANES} 個までです。`, true);
     return;
   }
-  currentConfig.sites.push(blankSite(currentConfig.sites.map((site) => site.id)));
+  const chosen = presets.find((preset) => preset.key === document.getElementById('preset').value) || {};
+  currentConfig.sites.push(blankSite(currentConfig.sites.map((site) => site.id), chosen));
   renderSites();
   document.getElementById('sites').lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });

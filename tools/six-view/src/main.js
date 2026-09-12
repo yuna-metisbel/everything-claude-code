@@ -18,6 +18,7 @@ const { app, BrowserWindow, ipcMain, session, shell, dialog, safeStorage } = req
 const { loadConfig, saveConfig, configPath } = require('./lib/config-store');
 const { SecretStore } = require('./lib/secret-store');
 const {
+  SITE_PRESETS,
   partitionForSite,
   resolveColumns,
   resolveUserAgent,
@@ -435,6 +436,7 @@ function bootstrapPayload() {
     partitions: Object.fromEntries(config.sites.map((site) => [site.id, partitionForSite(site, RUN_ID)])),
     zoomFactors: Object.fromEntries(config.sites.map((site) => [site.id, resolveZoomFactor(config, site)])),
     columns: resolveColumns(config),
+    presets: SITE_PRESETS,
     credentialStatus: secrets ? secrets.status(config.sites.map((site) => site.id)) : {},
     encryptionAvailable: Boolean(secrets && secrets.isAvailable()),
     loginItemSupported: process.platform === 'darwin' || process.platform === 'win32',
