@@ -286,6 +286,17 @@ table.cal .cell .k{font-size:10.5px; letter-spacing:-.02em}
 .todo-row{display:flex; gap:10px; align-items:flex-start}
 .todo-meta{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px}
 .legend i{display:inline-block; width:12px; height:12px; border-radius:2px; margin-right:5px; vertical-align:-2px}
+/* やったこと一覧：読むだけなので、押せる見た目にはしない */
+.done-row{display:flex; gap:10px; padding:9px 13px; border-bottom:1px solid var(--line)}
+.done-row:last-child{border-bottom:0}
+.done-mark{color:var(--ok); font-size:13px; line-height:1.7; flex:none}
+.done-head{display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; font-size:12px}
+.done-body{font-size:13.5px; color:var(--ink); white-space:pre-wrap; word-break:break-word; margin-top:2px}
+.out-chip{align-self:center; white-space:nowrap}
+.decided{
+  font-size:13px; color:var(--ink); white-space:pre-wrap; word-break:break-word;
+  border-left:3px solid var(--ok); padding:4px 0 4px 9px; margin-top:3px;
+}
 /* 古いものを見せ続けるより、古いと言う。押せば読み直す */
 .stale-bar{
   display:flex; align-items:center; gap:10px; flex-wrap:wrap;

@@ -131,6 +131,7 @@ const S = {
   notes: [], noteSide: ls("prime.noteSide") || "team",
   // 読み直しに失敗しているか、変更の通知が繋がっているか
   stale: false, live: false,
+  devices: [], deviceLog: [],
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
   siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
@@ -194,14 +195,19 @@ function copy(text, what){
 }
 
 /* ============================ data ============================ */
-const normMember = r => ({ id:r.id, name:r.name, color:r.color, present:r.present, presentAt:r.present_at });
+const normMember = r => ({ id:r.id, name:r.name, color:r.color, present:r.present, presentAt:r.present_at,
+                           phone:r.phone || "", emergency:r.emergency || "" });
 const normTask   = r => ({ id:r.id, title:r.title, detail:r.detail, assignee:r.assignee, status:r.status,
                            due:r.due, createdBy:r.created_by, createdAt:r.created_at, takenAt:r.taken_at, doneAt:r.done_at,
                            siteId:r.site_id, staffAssignee:r.staff_assignee, staffCreatedBy:r.staff_created_by,
-                           staffDoneBy:r.staff_done_by, doneMemo:r.done_memo, doneBy:r.done_by });
+                           staffDoneBy:r.staff_done_by, doneMemo:r.done_memo, doneBy:r.done_by,
+                           share:r.share || "all", sharedWith:r.shared_with || [], openSites:r.open_sites || [] });
 const normPay    = r => ({ id:r.id, title:r.title, payee:r.payee, amount:Number(r.amount), due:r.due, method:r.method,
                            category:r.category, paidOn:r.paid_on,
                            assignee:r.assignee, status:r.status, note:r.note, paidAt:r.paid_at, createdAt:r.created_at });
+const normDevice = r => ({ id:r.id, name:r.name, note:r.note, active:r.active, sortOrder:r.sort_order });
+const normDevLog = r => ({ id:r.id, deviceId:r.device_id, kind:r.kind, memberId:r.member_id,
+                           happenedAt:r.happened_at, note:r.note });
 const normNote   = r => ({ id:r.id, owner:r.owner, kind:r.kind, title:r.title, body:r.body, status:r.status,
                            due:r.due, share:r.share, sharedWith:r.shared_with || [],
                            createdAt:r.created_at });
@@ -212,7 +218,7 @@ const normDay    = r => ({ memberId:r.member_id, date:r.date, kind:r.kind, plan:
 async function loadAll(){
   const from = S.month + "-01";
   const to = S.month + "-" + pad(daysInMonth(S.month));
-  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf, nte] = await Promise.all([
+  const [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf, nte, dev, dlg] = await Promise.all([
     sb.from("members").select("*").order("created_at"),
     sb.from("office").select("*").eq("id", 1).maybeSingle(),
     sb.from("schedule").select("*").gte("date", from).lte("date", to),
@@ -225,11 +231,13 @@ async function loadAll(){
     sb.from("board_settings").select("*").eq("id", 1).maybeSingle(),
     sb.from("sites").select("*").order("sort_order").order("name"),
     sb.from("staff").select(STAFF_COLS).order("sort_order").order("name"),
-    sb.from("notes").select("*").order("created_at", { ascending: false })
+    sb.from("notes").select("*").order("created_at", { ascending: false }),
+    sb.from("devices").select("*").order("sort_order").order("name"),
+    sb.from("device_log").select("*").order("happened_at", { ascending: false }).limit(80)
   ]);
   // 取れなかったところは、前に読めていたものを残す。空で上書きすると
   // 「データが消えた」ように見えるうえ、失敗したこと自体が伝わらない。
-  const parts = [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf, nte];
+  const parts = [mem, off, sch, tsk, pay, vlt, shp, ntc, alw, bst, sit, stf, nte, dev, dlg];
   const ok = r => !(r && r.error);
   S.stale = parts.some(r => !ok(r));
   if (ok(mem)) S.members = (mem.data || []).map(normMember);
@@ -240,7 +248,8 @@ async function loadAll(){
   }
   if (ok(tsk)) S.tasks = (tsk.data || []).map(normTask);
   if (ok(pay)) S.payments = (pay.data || []).map(normPay);
-  if (ok(vlt)) S.vault = vlt.data || [];
+  if (ok(vlt)) S.vault = (vlt.data || []).map(v => Object.assign({}, v,
+    { sharedWith: v.shared_with || [], openSites: v.open_sites || [] }));
   if (ok(shp)) S.shops = shp.data || [];
   // 見えないものは RLS がそもそも返さない。ここに来た時点で読んでよいものだけ。
   if (ok(nte)) S.notes = (nte.data || []).map(normNote);
@@ -253,6 +262,8 @@ async function loadAll(){
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
   if (ok(sit)) S.sites = sit.data || [];
   if (ok(stf)) S.staff = (stf.data || []).map(normStaff);
+  if (ok(dev)) S.devices = (dev.data || []).map(normDevice);
+  if (ok(dlg)) S.deviceLog = (dlg.data || []).map(normDevLog);
   if (!site(S.siteId)) S.siteId = S.sites.length ? S.sites[0].id : "";
   await loadSite(S.siteId);
 }
@@ -287,7 +298,8 @@ function scheduleReload(){
 // その購読が通らず、同じチャンネルに乗せた他の表まで届かなくなる。
 // staff は pin 列があるので配信対象にしていない（下の定期読み直しで追いつく）。
 const LIVE_TABLES = ["members","office","schedule","tasks","payments","vault","shops","notices",
-                     "board_settings","sites","punches","key_events","key_duty","staff_shifts","notes"];
+                     "board_settings","sites","punches","key_events","key_duty","staff_shifts","notes",
+                     "devices","device_log"];
 function subscribeLive(){
   const ch = sb.channel("board");
   LIVE_TABLES.forEach(t => {
@@ -545,6 +557,14 @@ function renderTabs(){
     '<span class="t-lg">' + h(t.label) + '</span><span class="t-sm">' + h(t.short) + "</span>" +
     (badges[t.id] ? '<span class="badge num">' + badges[t.id] + "</span>" : "") + "</button>").join("");
 }
+// 持ち出しの状態は列に持たず、最後の記録から決める（鍵と同じ考え方）。
+function deviceState(id){
+  const last = S.deviceLog.find(x => x.deviceId === id);
+  if (!last || last.kind === "in") return null;
+  return last;
+}
+const devicesOut = () => S.devices.filter(d => d.active && deviceState(d.id))
+  .map(d => ({ d: d, at: deviceState(d.id) }));
 function renderDoor(){
   const open = !!S.office.doorOpen;
   const by = S.office.updatedBy ? (member(S.office.updatedBy) || {}).name : "";
@@ -554,7 +574,11 @@ function renderDoor(){
       '<span class="txt"><b>事務所 ' + (open ? "あいてます" : "しまっています") + "</b>" +
         "<small>" + (S.office.updatedAt ? h((by || "誰か") + " が " + stamp(S.office.updatedAt)) : "まだ記録がありません") + "</small></span>" +
       '<button class="btn sm" data-act="door">' + (open ? "閉めた" : "開けた") + "</button>" +
-    "</div>";
+    "</div>" +
+    // 持ち出されているものは、探す前に目に入る場所に出す。
+    devicesOut().map(function(x){
+      return '<span class="chip warn out-chip">' + h(x.d.name) + " " +
+        h((member(x.at.memberId) || {}).name || "誰か") + " 持ち出し中</span>"; }).join("");
 }
 const themeEntry = () => THEMES.find(t => t[0] === S.theme) || THEMES[0];
 const themeGlyph = () => themeEntry()[1];
@@ -622,12 +646,19 @@ function noticeRow(n){
       h(md(n.date)) + "(" + DOW[new Date(n.date + "T00:00:00").getDay()] + ")" +
       (d === 0 ? " 今日" : d === 1 ? " 明日" : "") + "</span>"
     : '<span class="chip">お知らせ</span>';
+  const meeting = n.kind === "meeting";
+  const whenMore = [n.at_time, n.place].filter(Boolean).join(" ・ ");
   return '<div class="row" style="flex-direction:column;gap:5px;align-items:stretch">' +
     '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">' +
-      (n.pinned ? '<span class="chip brass">重要</span>' : "") + when +
+      (n.pinned ? '<span class="chip brass">重要</span>' : "") +
+      (meeting ? '<span class="chip cool">会議</span>' : "") + when +
+      (whenMore ? '<span style="font-size:12px;color:var(--muted)">' + h(whenMore) + "</span>" : "") +
       '<span style="font-size:14.5px;font-weight:700;flex:1;min-width:0;word-break:break-word">' + h(n.title) + "</span>" +
       '<button class="btn sm ghost" data-act="edit-notice" data-id="' + h(n.id) + '">編集</button></div>' +
     (n.body ? '<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word">' + h(n.body) + "</div>" : "") +
+    // 決まったことは、あとから読む人がいちばん探すものなので目立たせる。
+    (n.decided ? '<div class="decided"><span class="done-tag">決まったこと</span>' +
+      h(n.decided) + "</div>" : "") +
     (n.url ? '<div><a href="' + h(n.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">リンクを開く ↗</a></div>' : "") +
     '<div style="font-size:11px;color:var(--muted)">' + h((member(n.created_by) || {}).name || "") +
       (n.created_at ? " ・ " + h(stamp(n.created_at)) : "") + "</div></div>";
@@ -645,11 +676,20 @@ function sortedNotices(){
 }
 function modalNotice(n){
   n = n || {};
-  showModal(n.id ? "お知らせを編集" : "お知らせ・共通予定を追加",
+  const isMeeting = n.kind === "meeting";
+  showModal(n.id ? (isMeeting ? "会議を編集" : "お知らせを編集") : "お知らせ・会議を追加",
     '<div class="fields">' +
+    '<label class="f">種類<select id="nt_kind">' +
+      '<option value="notice"' + (isMeeting ? "" : " selected") + ">お知らせ・共通予定</option>" +
+      '<option value="meeting"' + (isMeeting ? " selected" : "") + ">会議</option></select></label>" +
     '<label class="f">見出し<input type="text" id="n_title" maxlength="80" value="' + h(n.title || "") + '" placeholder="例：全体ミーティング / 新人スタッフが入りました"></label>' +
-    '<label class="f">日付（お知らせだけなら空でも可）<input type="date" id="n_date" value="' + h(n.date || "") + '"></label>' +
-    '<label class="f">内容<textarea id="n_body" placeholder="時間・場所・共有したいことなど">' + h(n.body || "") + "</textarea></label>" +
+    '<div class="fields two">' +
+      '<label class="f">日付（お知らせだけなら空でも可）<input type="date" id="n_date" value="' + h(n.date || "") + '"></label>' +
+      '<label class="f">時間<input type="time" id="nt_time" value="' + h(n.at_time || "") + '"></label></div>' +
+    '<label class="f">場所<input type="text" id="nt_place" maxlength="60" value="' + h(n.place || "") + '" placeholder="例：事務所 / オンライン"></label>' +
+    '<label class="f">内容・議題<textarea id="n_body" placeholder="話すこと、共有したいこと">' + h(n.body || "") + "</textarea></label>" +
+    '<label class="f">決まったこと（会議のあとに書く）<textarea id="nt_decided" placeholder="例：10月から受付時間を1時間延ばす。担当はかいと。">' +
+      h(n.decided || "") + "</textarea></label>" +
     '<label class="f">リンク<input type="url" id="n_url" value="' + h(n.url || "") + '" placeholder="https://"></label>' +
     '<label class="f" style="flex-direction:row;align-items:center;gap:8px">' +
       '<input type="checkbox" id="n_pin" style="width:auto"' + (n.pinned ? " checked" : "") + ">上に固定する（重要）</label></div>",
@@ -662,7 +702,9 @@ async function saveNoticeFromModal(id){
   if (!title){ toast("見出しを入力してください"); return; }
   const pin = el("n_pin");
   const body = { title: title, date: valOf("n_date") || null, body: valOf("n_body"),
-    url: valOf("n_url"), pinned: !!(pin && pin.checked), updated_at: nowIso() };
+    url: valOf("n_url"), pinned: !!(pin && pin.checked), updated_at: nowIso(),
+    kind: valOf("nt_kind") || "notice", at_time: valOf("nt_time"),
+    place: valOf("nt_place"), decided: valOf("nt_decided") };
   if (id) await run(sb.from("notices").update(body).eq("id", id), "保存しました");
   else { body.created_by = S.me.id; await run(sb.from("notices").insert(body), "登録しました"); }
   closeModal();
@@ -749,8 +791,30 @@ function viewHome(){
           (p.payee ? '<span class="chip">' + h(p.payee) + "</span>" : "") + "</div></div>" +
           '<span class="num" style="font-weight:600">' + h(yen(p.amount)) + "</span></div>").join("")
           : '<div class="empty">未払いはありません</div>') + "</div></div></section>" +
+      homeDevices() +
       homeNotes() +
     "</div></div>";
+}
+
+// 事務所から持ち出すもの。鍵と同じで、状態は最後の記録から決まる。
+function homeDevices(){
+  const list = S.devices.filter(d => d.active);
+  if (!list.length) return "";
+  return '<section class="sec"><div class="sec-head"><h2>事務所から持ち出すもの</h2></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    list.map(function(d){
+      const at = deviceState(d.id);
+      const who = at ? ((member(at.memberId) || {}).name || "誰か") : "";
+      return '<div class="row" style="align-items:center;gap:10px">' +
+        '<span style="flex:1;min-width:0">' +
+          '<span style="font-size:13.5px;font-weight:500">' + h(d.name) + "</span>" +
+          '<div style="font-size:11.5px;color:var(--muted)">' +
+            (at ? h(who + " が " + stamp(at.happenedAt) + " に持ち出し") + (at.note ? " ・ " + h(at.note) : "")
+                : "事務所にあります") + "</div></span>" +
+        '<span class="chip ' + (at ? "warn" : "ok") + '">' + (at ? "持ち出し中" : "あり") + "</span>" +
+        '<button class="btn sm' + (at ? "" : " primary") + '" data-act="device" data-id="' + h(d.id) +
+          '" data-v="' + (at ? "in" : "out") + '">' + (at ? "返した" : "持ち出す") + "</button></div>";
+    }).join("") + "</div></div></section>";
 }
 
 // 自分用はホームにも小さく出しておく。タブを開かないと思い出せないものは書かれない。
@@ -796,11 +860,13 @@ function viewSched(){
     return "<tr>" + r + "</tr>";
   }).join("");
   const label = ym.slice(0, 4) + "年" + Number(ym.slice(5, 7)) + "月";
-  const ngList = [];
+  const ngList = [], doneList = [];
   S.members.forEach(m => {
     for (let d = 1; d <= n; d++){
       const date = ym + "-" + pad(d), day = dayOf(m.id, date);
-      if (day && (day.ngFrom || day.ngTo)) ngList.push({ m: m, date: date, d: day });
+      if (!day) continue;
+      if (day.ngFrom || day.ngTo) ngList.push({ m: m, date: date, d: day });
+      if ((day.done || "").trim()) doneList.push({ m: m, date: date, d: day });
     }
   });
   const monthNotices = sortedNotices().filter(function(n){ return !n.date || n.date.slice(0, 7) === ym; });
@@ -827,6 +893,22 @@ function viewSched(){
       '<span><i style="background:var(--ok);border-radius:50%"></i>やったこと記録あり</span>' +
       '<span><i style="background:var(--cool);border-radius:50%"></i>関連リンクあり</span>' +
       '<span style="margin-left:auto">マスを押すと編集できます</span></div></section>' +
+    '<section class="sec"><div class="sec-head"><h2>やったこと（今月）</h2>' +
+      '<span class="hint">日ごとの記録をまとめて読む場所です。直すときはカレンダーのマスから。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (doneList.length
+      ? doneList.sort((a, b) => b.date.localeCompare(a.date) ||
+          String(a.m.name).localeCompare(String(b.m.name), "ja")).map(function(x){
+          return '<div class="done-row">' +
+            '<span class="done-mark" aria-hidden="true">✓</span>' +
+            '<div><div class="done-head">' +
+              '<span class="num" style="color:var(--muted)">' + h(md(x.date)) +
+              "(" + DOW[dow(ym, Number(x.date.slice(8, 10)))] + ")</span>" +
+              '<span class="who"><span class="pip" style="background:' + h(x.m.color) + '"></span>' +
+              h(x.m.name) + "</span></div>" +
+            '<div class="done-body">' + h(x.d.done.trim()) + "</div></div></div>"; }).join("")
+      : '<div class="empty">今月の記録はまだありません</div>') + "</div></div></section>" +
+
     '<section class="sec"><div class="sec-head"><h2>連絡がつかない時間帯（今月）</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     (ngList.length ? ngList.sort((a,b) => a.date.localeCompare(b.date)).map(x =>
@@ -853,6 +935,7 @@ function taskRow(t, compact){
       '<div class="t-meta">' +
         // 本部から見るときだけ、どこの仕事かを出す。スタッフ側は自分の拠点しか出ない。
         (isHq() ? '<span class="chip' + (t.siteId ? "" : " cool") + '">' + h(taskSiteName(t)) + "</span>" : "") +
+        (isHq() ? shareChip(t) : "") +
         taskOwnerChip(t) + dueChip(t.due, done) +
         (t.status === "doing" ? '<span class="chip cool">進行中</span>' : "") +
         (done && doneBy ? '<span class="done-tag">' + h(doneBy) + " が完了</span>" : "") +
@@ -1778,7 +1861,7 @@ function renderVaultList(){
         return "<tr>" + cols.map(function(c){
           return '<td data-label="' + h(c[1]) + '"><span>' + vaultCell(v, c[0]) + "</span></td>";
         }).join("") +
-        '<td class="acts" style="white-space:nowrap;text-align:right">' +
+        '<td class="acts" style="white-space:nowrap;text-align:right">' + shareChip(v) + " " +
           '<button class="btn sm" data-act="reveal" data-id="' + h(v.id) + '">' +
             (S.reveal[v.id] ? "隠す" : "表示") + "</button> " +
           '<button class="btn sm ghost" data-act="edit-vault" data-id="' + h(v.id) + '">編集</button></td></tr>';
@@ -1811,6 +1894,33 @@ function viewSettings(){
       '<span class="chip ' + (m.present ? "ok" : "") + '">' + (m.present ? "在席" : "不在") + "</span>" +
       '<button class="btn sm ghost" data-act="edit-member" data-id="' + h(m.id) + '">編集</button></div>').join("")
       : '<div class="empty">—</div>') + "</div></div></section>" +
+
+    '<section class="sec"><div class="sec-head"><h2>事務所から持ち出すもの</h2>' +
+      '<span class="hint">持ち出し・返却はホームから。ここでは増やしたり外したりできます。</span>' +
+      '<div class="btn-row"><button class="btn sm primary" data-act="new-device">＋ 追加</button></div></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (S.devices.filter(d => d.active).length
+      ? S.devices.filter(d => d.active).map(function(d){
+          return '<div class="row" style="align-items:center;gap:10px">' +
+            '<span style="flex:1;font-size:13.5px">' + h(d.name) + "</span>" +
+            '<button class="btn sm ghost" data-act="del-device" data-id="' + h(d.id) + '">外す</button></div>';
+        }).join("")
+      : '<div class="empty">まだありません</div>') + "</div></div></section>" +
+
+    // 緊急連絡先は探している時がいちばん急いでいる。一覧で並べておく。
+    '<section class="sec"><div class="sec-head"><h2>連絡先・緊急連絡先</h2>' +
+      '<span class="hint">本部のメンバーだけが見られます。拠点のスタッフには出ません。編集は上の「編集」から。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (S.members.length ? S.members.map(function(m){
+      const tel = (m.phone || "").trim();
+      return '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">' +
+        '<span class="who" style="flex:1 1 100px"><span class="pip" style="background:' + h(m.color) + '"></span>' +
+        h(m.name) + "</span>" +
+        (tel ? '<a href="tel:' + h(telHref(tel)) + '" style="font-size:13px">☎ ' + h(tel) + "</a>"
+             : '<span style="font-size:12.5px;color:var(--muted)">電話番号 未登録</span>') +
+        '<span style="flex:1 1 160px;font-size:12.5px;color:var(--ink-2)">' +
+          (m.emergency ? h(m.emergency) : '<span style="color:var(--muted)">緊急連絡先 未登録</span>') + "</span></div>";
+    }).join("") : '<div class="empty">—</div>') + "</div></div></section>" +
 
     viewSignupGate() +
 
@@ -1963,11 +2073,58 @@ function modalTask(t){
     '<label class="f">終わったときのメモ（共有）<textarea id="t_memo" placeholder="やってみて気づいたこと、次の人に伝えたいこと">' +
       h(t.doneMemo || "") + "</textarea></label>" +
     '<p style="font-size:12px;color:var(--muted);line-height:1.7">終わった人がここに書いておくと、' +
-      "次に同じことをする人がそのまま読めます。「完了」にしたあとでも書けます。</p></div>",
+      "次に同じことをする人がそのまま読めます。「完了」にしたあとでも書けます。</p>" +
+    (isHq() ? shareFields(t) : "") + "</div>",
     (t.id ? '<button class="btn danger left" data-act="del-task" data-id="' + h(t.id) + '">削除</button>' : "") +
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-task" data-id="' + h(t.id || "") + '">保存</button>');
 }
+/* ---- 1件ごとの公開範囲 ----
+   拠点に見せるか（open_sites）と、本部の中で誰に見せるか（share / shared_with）は
+   別の問いなので、欄も別にする。既定はこれまでどおり「本部の全員・拠点には出さない」。 */
+function shareFields(row){
+  const share = row.share || "all", picked = row.sharedWith || [], sites = row.openSites || [];
+  const others = S.members.filter(m => !S.me || m.id !== S.me.id);
+  return '<div class="f" style="gap:8px">公開範囲' +
+    '<label class="f" style="margin:0">本部の中で<select id="x_share">' +
+      '<option value="all"' + (share === "all" ? " selected" : "") + ">本部の全員</option>" +
+      '<option value="some"' + (share === "some" ? " selected" : "") + ">選んだ人だけ</option></select></label>" +
+    '<div class="f" id="x_who" style="margin:0"' + (share === "some" ? "" : " hidden") + ">見せる人" +
+      '<div class="pick-list">' + (others.length
+        ? others.map(m => '<label class="pick"><input type="checkbox" data-xwho="' + h(m.id) + '"' +
+            (picked.indexOf(m.id) >= 0 ? " checked" : "") + '><span class="pip" style="background:' +
+            h(m.color) + '"></span>' + h(m.name) + "</label>").join("")
+        : '<span style="font-size:12px;color:var(--muted)">ほかにメンバーがいません</span>') + "</div></div>" +
+    (S.sites.length
+      ? '<div class="f" style="margin:0">拠点にも見せる' +
+        '<div class="pick-list">' + S.sites.map(t =>
+          '<label class="pick"><input type="checkbox" data-xsite="' + h(t.id) + '"' +
+          (sites.indexOf(t.id) >= 0 ? " checked" : "") + ">" + h(t.name) + "</label>").join("") +
+        "</div></div>"
+      : "") +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">既定は「本部の全員・拠点には出さない」です。' +
+    "拠点に見せたものは、その拠点のスタッフは読めますが、書き換えはできません。</p></div>";
+}
+function shareValues(){
+  const share = valOf("x_share") || "all";
+  const pick = sel => Array.prototype.slice.call(document.querySelectorAll(sel))
+    .filter(c => c.checked).map(c => c.dataset.xwho || c.dataset.xsite);
+  return { share: share, shared_with: share === "some" ? pick("[data-xwho]") : [],
+           open_sites: pick("[data-xsite]") };
+}
+// 範囲を狭めた行は、一覧でもそれと分かるようにする。
+function shareChip(row){
+  const bits = [];
+  if ((row.share || "all") === "some"){
+    const names = (row.sharedWith || []).map(id => (member(id) || {}).name).filter(Boolean);
+    bits.push(names.length ? names.join("・") + " だけ" : "公開先が未選択");
+  }
+  (row.openSites || []).forEach(function(id){
+    const t = site(id); if (t) bits.push(t.name + " にも");
+  });
+  return bits.length ? '<span class="chip cool">' + h(bits.join(" / ")) + "</span>" : "";
+}
+
 function modalNote(x){
   x = x || {};
   const kind = x.kind || "task", share = x.share || "private", picked = x.sharedWith || [];
@@ -2045,7 +2202,8 @@ function modalVault(v){
     '<div class="fields two">' +
       '<label class="f">ID<input type="text" id="v_id" value="' + h(v.login_id || "") + '" autocomplete="off"></label>' +
       '<label class="f">パスワード<input type="text" id="v_pw" value="' + h(v.password || "") + '" autocomplete="off"></label></div>' +
-    '<label class="f">メモ<input type="text" id="v_note" maxlength="60" value="' + h(v.note || "") + '"></label></div>',
+    '<label class="f">メモ<input type="text" id="v_note" maxlength="60" value="' + h(v.note || "") + '"></label>' +
+    shareFields(v) + "</div>",
     (v.id ? '<button class="btn danger left" data-act="del-vault" data-id="' + h(v.id) + '">削除</button>' : "") +
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-vault" data-id="' + h(v.id || "") + '">保存</button>');
@@ -2085,6 +2243,10 @@ function modalMember(m){
   showModal("スタッフを編集",
     '<div class="fields">' +
     '<label class="f">名前<input type="text" id="m_name" maxlength="12" value="' + h(m.name || "") + '"></label>' +
+    '<label class="f">電話番号<input type="tel" id="m_phone" inputmode="tel" maxlength="20" value="' +
+      h(m.phone || "") + '" placeholder="090-0000-0000"></label>' +
+    '<label class="f">緊急連絡先<input type="text" id="m_emg" maxlength="80" value="' +
+      h(m.emergency || "") + '" placeholder="例：母 090-0000-0000"></label>' +
     '<label class="f">色<div class="colorpick" id="m_colors">' +
       PALETTE.map(c => '<button type="button" data-act="pick-color" data-v="' + c + '" aria-pressed="' +
         ((m.color || "") === c) + '" style="background:' + c + '" aria-label="' + c + '"></button>').join("") + "</div></label>" +
@@ -2128,6 +2290,8 @@ async function saveTaskFromModal(id){
     done_memo: valOf("t_memo"), assignee: who.assignee, staff_assignee: who.staff_assignee };
   if (siteBox) body.site_id = siteBox.value || null;
   else if (!isHq()) body.site_id = S.siteId;
+  // 拠点スタッフの画面には公開範囲の欄を出していないので、そのときは触らない。
+  if (el("x_share")) Object.assign(body, shareValues());
   if (id){
     const cur = S.tasks.find(t => t.id === id) || {};
     const owner = who.assignee || who.staff_assignee;
@@ -2169,6 +2333,7 @@ async function saveVaultFromModal(id){
   const body = { media: media, url: valOf("v_url"), note: valOf("v_note"),
     shop: valOf("v_shop"), cast_name: valOf("v_cast"),
     login_id: valOf("v_id"), password: valOf("v_pw"), updated_by: S.me.id, updated_at: nowIso() };
+  Object.assign(body, shareValues());
   if (id){ await run(sb.from("vault").update(body).eq("id", id), "保存しました"); delete S.reveal[id]; }
   else await run(sb.from("vault").insert(body), "保存しました");
   closeModal();
@@ -2259,6 +2424,22 @@ document.addEventListener("click", async function(ev){
         if (x) await run(sb.from("notes").update({ status: x.status === "done" ? "open" : "done" }).eq("id", id));
         break;
       }
+      case "device": {
+        const out = btn.dataset.v === "out";
+        await run(sb.from("device_log").insert({ device_id: id, kind: btn.dataset.v,
+          member_id: S.me.id, happened_at: nowIso() }), out ? "持ち出しにしました" : "返却にしました");
+        break;
+      }
+      case "new-device": {
+        const name = prompt("持ち出すものの名前（例：黒スマホ）");
+        if (!name || !name.trim()) break;
+        await run(sb.from("devices").insert({ name: name.trim(),
+          sort_order: S.devices.length + 1 }), "追加しました");
+        break;
+      }
+      case "del-device":
+        await run(sb.from("devices").update({ active: false }).eq("id", id), "一覧から外しました");
+        break;
       case "reload-all": {
         try {
           if (S.screen === "staff") await loadStaffAll(); else await loadAll();
@@ -2500,7 +2681,8 @@ document.addEventListener("click", async function(ev){
       case "save-member": {
         const name = valOf("m_name");
         if (!name){ toast("名前を入力してください"); break; }
-        await run(sb.from("members").update({ name: name, color: valOf("m_color") }).eq("id", id), "保存しました");
+        await run(sb.from("members").update({ name: name, color: valOf("m_color"),
+          phone: valOf("m_phone"), emergency: valOf("m_emg") }).eq("id", id), "保存しました");
         closeModal(); break;
       }
       case "del-member":
@@ -2562,6 +2744,10 @@ document.addEventListener("input", function(ev){
 document.addEventListener("change", function(ev){
   const t = ev.target;
   if (t && /^st_/.test(t.id)) S.form[t.id] = t.value;
+  if (t && t.id === "x_share"){
+    const box = el("x_who");
+    if (box) box.hidden = t.value !== "some";
+  }
   if (t && t.id === "n_share"){
     const box = el("n_who");
     if (box) box.hidden = t.value !== "some";
