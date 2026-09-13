@@ -270,3 +270,40 @@ input:focus {
 .btn-danger {
   color: var(--danger);
 }
+
+/* DM bridge: one row per selector, each with its own "pick it on the page" button. */
+.dm-pickers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.dm-pick {
+  align-items: center;
+  gap: 10px;
+}
+
+.dm-pick-name {
+  flex: 0 0 150px;
+  font-size: 13px;
+  color: #c7cddb;
+}
+
+.dm-pick-name em {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 11px;
+  color: #ff9db8;
+}
+
+.dm-pick input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.dm-status {
+  min-height: 1.2em;
+}

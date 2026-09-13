@@ -79,6 +79,38 @@ function getBrand(brandId) {
   return BRANDS[brandId] || BRANDS[DEFAULT_BRAND];
 }
 
+/**
+ * Per-pane DM monitoring. Every selector is blank by default: they are filled
+ * in by clicking the real elements in the pane (the picker), because no two
+ * sites lay their message list out the same way.
+ */
+const DEFAULT_DM = {
+  enabled: false,
+  openSelector: '',
+  rowSelector: '',
+  nameSelector: '',
+  previewSelector: '',
+  unreadSelector: '',
+  inputSelector: '',
+  sendSelector: '',
+  backSelector: '',
+  intervalSeconds: 90,
+};
+
+/**
+ * The Telegram side of the bridge. The bot token is NOT here - it lives in the
+ * safeStorage vault next to the passwords, so the config file stays shareable.
+ */
+const DEFAULT_TELEGRAM = {
+  enabled: false,
+  chatId: '',
+  pollSeconds: 30,
+  confirmBeforeSend: true,
+};
+
+/** Vault key the bot token is stored under; not a real pane id. */
+const TELEGRAM_SECRET_ID = '__telegram__';
+
 const DEFAULT_AUTOFILL = {
   enabled: false,
   urlPattern: '',
@@ -158,6 +190,44 @@ function normalizeAutofill(raw) {
   };
 }
 
+function normalizeDm(raw) {
+  const source = isPlainObject(raw) ? raw : {};
+  return {
+    enabled: toBoolean(source.enabled, DEFAULT_DM.enabled),
+    openSelector: toTrimmedString(source.openSelector),
+    rowSelector: toTrimmedString(source.rowSelector),
+    nameSelector: toTrimmedString(source.nameSelector),
+    previewSelector: toTrimmedString(source.previewSelector),
+    unreadSelector: toTrimmedString(source.unreadSelector),
+    inputSelector: toTrimmedString(source.inputSelector),
+    sendSelector: toTrimmedString(source.sendSelector),
+    backSelector: toTrimmedString(source.backSelector),
+    // 20s is the floor: polling a site harder than that is rude and buys
+    // nothing when messages arrive a few times a day.
+    intervalSeconds: Math.round(clampNumber(source.intervalSeconds, 20, 3600, DEFAULT_DM.intervalSeconds)),
+  };
+}
+
+function normalizeTelegram(raw) {
+  const source = isPlainObject(raw) ? raw : {};
+  return {
+    enabled: toBoolean(source.enabled, DEFAULT_TELEGRAM.enabled),
+    chatId: toTrimmedString(source.chatId),
+    pollSeconds: Math.round(clampNumber(source.pollSeconds, 5, 120, DEFAULT_TELEGRAM.pollSeconds)),
+    confirmBeforeSend: toBoolean(source.confirmBeforeSend, DEFAULT_TELEGRAM.confirmBeforeSend),
+  };
+}
+
+/** Enough selectors present to actually watch a pane's message list. */
+function dmIsUsable(site) {
+  return Boolean(site && site.dm && site.dm.enabled && site.dm.rowSelector);
+}
+
+/** Enough selectors present to post a reply back into a pane. */
+function dmCanSend(site) {
+  return Boolean(dmIsUsable(site) && site.dm.inputSelector);
+}
+
 function normalizeSite(raw, index, usedIds) {
   const source = isPlainObject(raw) ? raw : {};
   const preset = DEFAULT_SITE_PRESETS[index] || { id: `site-${index + 1}`, name: `サイト ${index + 1}` };
@@ -178,6 +248,7 @@ function normalizeSite(raw, index, usedIds) {
     zoomFactor: clampZoomOverride(source.zoomFactor),
     userAgent: toTrimmedString(source.userAgent),
     autofill: normalizeAutofill(source.autofill),
+    dm: normalizeDm(source.dm),
   };
 }
 
@@ -225,6 +296,7 @@ function createDefaultConfig(brandId = DEFAULT_BRAND) {
     layout: { columns: 0 },
     startup: { openAtLogin: false },
     defaults: { zoomFactor: 0.67, userAgent: '' },
+    telegram: { ...DEFAULT_TELEGRAM },
     sites: createDefaultSites(brandId),
   };
 }
@@ -273,6 +345,7 @@ function normalizeConfig(raw, brandId = DEFAULT_BRAND) {
       zoomFactor: clampNumber(defaults.zoomFactor, 0.25, 2, 0.67),
       userAgent: toTrimmedString(defaults.userAgent),
     },
+    telegram: normalizeTelegram(source.telegram),
     sites,
   };
 }
@@ -313,6 +386,13 @@ function paneSlots(config) {
 
 module.exports = {
   BRANDS,
+  DEFAULT_DM,
+  DEFAULT_TELEGRAM,
+  TELEGRAM_SECRET_ID,
+  dmCanSend,
+  dmIsUsable,
+  normalizeDm,
+  normalizeTelegram,
   DEFAULT_BRAND,
   getBrand,
   DEFAULT_PANE_COUNT,

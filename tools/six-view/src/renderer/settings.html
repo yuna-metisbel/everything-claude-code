@@ -55,6 +55,42 @@
       </div>
     </section>
 
+    <section class="card" id="telegram-card">
+      <h2>Telegram 連携（DMの通知と返信）</h2>
+      <p class="hint">
+        パネルの新着メッセージを Telegram に通知し、Telegram でその通知に「返信」すると、
+        そのお客様にそのまま送信されます。ボットのトークンはパスワードと同じく OS
+        のキーチェーンに暗号化して保存され、設定ファイルには書き込まれません。
+      </p>
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="tg-enabled" />
+          <span>Telegram 連携を使う</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="tg-confirm" />
+          <span>02 に送信する前に PC で確認する（推奨）</span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field grow">
+          <span>ボットトークン（@BotFather で発行）</span>
+          <input type="password" id="tg-token" autocomplete="new-password" placeholder="123456789:AA..." />
+          <small id="tg-token-status">未登録</small>
+        </label>
+        <label class="field">
+          <span>チャット ID</span>
+          <input type="text" id="tg-chat" placeholder="例: 123456789" />
+          <small>ボットに一度話しかけてから「接続テスト」を押すと確認できます。</small>
+        </label>
+        <span class="cred-actions">
+          <button type="button" id="tg-save" class="btn">トークンを保存</button>
+          <button type="button" id="tg-test" class="btn btn-primary">接続テスト</button>
+        </span>
+      </div>
+      <p id="tg-status" class="cred-status"></p>
+    </section>
+
     <section class="card">
       <h2>パネル<span id="pane-count" class="pane-count"></span></h2>
       <div class="row">
@@ -160,6 +196,76 @@
           </p>
         </details>
 
+
+        <details class="sub">
+          <summary>DM の通知と返信（Telegram）</summary>
+          <div class="row">
+            <label class="check">
+              <input type="checkbox" data-field="dm.enabled" />
+              <span>このパネルの新着メッセージを監視する</span>
+            </label>
+            <label class="field narrow">
+              <span>確認する間隔（秒）</span>
+              <input type="number" data-field="dm.intervalSeconds" min="20" max="3600" step="10" />
+            </label>
+          </div>
+          <p class="hint">
+            パネルに 02 のメッセージ一覧を表示した状態で、下の「指定」を押してから、
+            パネルの中の実際の場所をクリックしてください。中止したいときは Esc キーです。
+            <strong>「1件の行」を最初に指定してください。</strong>名前・本文・未読の指定は、その行を基準に記録されます。
+          </p>
+          <div class="dm-pickers">
+            <div class="row dm-pick" data-pick="dm.rowSelector" data-label="メッセージ一覧の「1件の行」をクリックしてください">
+              <span class="dm-pick-name">1件の行<em>必須</em></span>
+              <input type="text" data-field="dm.rowSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.nameSelector" data-label="その行の中の「相手の名前」をクリックしてください" data-relative="dm.rowSelector">
+              <span class="dm-pick-name">相手の名前</span>
+              <input type="text" data-field="dm.nameSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.previewSelector" data-label="その行の中の「メッセージ本文」をクリックしてください" data-relative="dm.rowSelector">
+              <span class="dm-pick-name">メッセージ本文</span>
+              <input type="text" data-field="dm.previewSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.unreadSelector" data-label="その行の中の「未読バッジ（赤い数字）」をクリックしてください" data-relative="dm.rowSelector">
+              <span class="dm-pick-name">未読バッジ</span>
+              <input type="text" data-field="dm.unreadSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.openSelector" data-label="下のメニューの「DM」ボタンをクリックしてください">
+              <span class="dm-pick-name">DM を開くボタン</span>
+              <input type="text" data-field="dm.openSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+          </div>
+          <p class="hint">
+            ここから下は「返信」に使います。<strong>会話を1つ開いた画面</strong>にしてから指定してください。
+          </p>
+          <div class="dm-pickers">
+            <div class="row dm-pick" data-pick="dm.inputSelector" data-label="返信を書く「入力欄」をクリックしてください">
+              <span class="dm-pick-name">返信の入力欄<em>返信に必須</em></span>
+              <input type="text" data-field="dm.inputSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.sendSelector" data-label="「送信」ボタンをクリックしてください">
+              <span class="dm-pick-name">送信ボタン</span>
+              <input type="text" data-field="dm.sendSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.backSelector" data-label="一覧に「戻る」ボタンをクリックしてください">
+              <span class="dm-pick-name">一覧に戻るボタン</span>
+              <input type="text" data-field="dm.backSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="dm-test">今すぐ読み取ってみる</button>
+            <span class="dm-status hint"></span>
+          </div>
+        </details>
         <details class="sub">
           <summary>ユーザーエージェント（任意）</summary>
           <label class="field grow">

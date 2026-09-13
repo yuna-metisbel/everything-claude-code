@@ -52,6 +52,18 @@ function blankSite(takenIds, preset = {}) {
       autoSubmit: false,
       delayMs: 600,
     },
+    dm: {
+      enabled: false,
+      openSelector: '',
+      rowSelector: '',
+      nameSelector: '',
+      previewSelector: '',
+      unreadSelector: '',
+      inputSelector: '',
+      sendSelector: '',
+      backSelector: '',
+      intervalSeconds: 90,
+    },
   };
 }
 
@@ -104,6 +116,82 @@ function renderCredStatus(card, hasCredential) {
   status.textContent = hasCredential
     ? '保存済み — 上書きするには入力して「認証情報を保存」を押してください。'
     : '未登録 — ID とパスワードを入力して「認証情報を保存」を押してください。';
+}
+
+const PICK_PROBLEMS = {
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。先にその画面を表示してください。',
+  cancelled: '中止しました。',
+  timeout: '時間切れです。もう一度「指定」を押してください。',
+  'already-picking': 'ほかの指定が進行中です。パネルをクリックするか Esc で終わらせてください。',
+  'script-error': 'ページを読み取れませんでした。',
+  'no-result': 'ページを読み取れませんでした。',
+  'bad-request': 'ページを読み取れませんでした。',
+};
+
+const SCAN_PROBLEMS = {
+  'not-configured': '「1件の行」がまだ指定されていません。',
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。',
+  'no-row-selector': '「1件の行」がまだ指定されていません。',
+  'open-not-found': '「DM を開くボタン」が見つかりません。指定し直してください。',
+  'no-rows': 'メッセージの行が見つかりません。DM 一覧を表示した状態で試してください。',
+  busy: '読み取り中です。少し待ってから試してください。',
+  'script-error': 'ページを読み取れませんでした。',
+};
+
+/**
+ * Fill the DM selectors by clicking the real elements in the pane.
+ *
+ * Row-relative fields record their selector relative to the row, so the same
+ * one selector works for every conversation in the list.
+ */
+function wireDmPickers(card, site) {
+  const status = card.querySelector('.dm-status');
+
+  card.querySelectorAll('.dm-pick').forEach((rowEl) => {
+    const field = rowEl.dataset.pick;
+    const input = rowEl.querySelector(`[data-field="${field}"]`);
+    const relativeField = rowEl.dataset.relative;
+
+    rowEl.querySelector('[data-action="pick"]').addEventListener('click', async () => {
+      const relativeTo = relativeField ? getPath(site, relativeField) || '' : '';
+      if (relativeField && !relativeTo) {
+        status.textContent = '先に「1件の行」を指定してください。';
+        return;
+      }
+
+      status.textContent = 'パネルの中の場所をクリックしてください（Esc で中止）。';
+      const picked = await window.sixview.dmPick(site.id, rowEl.dataset.label || '', relativeTo);
+
+      if (!picked || !picked.ok) {
+        status.textContent = PICK_PROBLEMS[picked && picked.reason] || '指定できませんでした。';
+        return;
+      }
+
+      // Prefer the row-relative form: an absolute path would only ever match
+      // the one conversation that happened to be clicked.
+      const selector = relativeField ? picked.relative || picked.selector : picked.selector;
+      writeInput(input, selector);
+      setPath(site, field, selector);
+      status.textContent = picked.sample
+        ? `指定しました（${picked.sample}）`
+        : '指定しました。';
+    });
+  });
+
+  card.querySelector('[data-action="dm-test"]').addEventListener('click', async () => {
+    status.textContent = '読み取り中…';
+    const result = await window.sixview.dmScan(site.id);
+    if (!result || !result.ok) {
+      status.textContent = SCAN_PROBLEMS[result && result.reason] || '読み取れませんでした。';
+      return;
+    }
+    const rows = result.rows || [];
+    const unread = rows.filter((row) => row.unread).length;
+    const first = rows[0];
+    status.textContent = first
+      ? `${rows.length}件を読み取りました（未読 ${unread}件）。先頭: ${first.name || '名前なし'} / ${first.preview || '本文なし'}`
+      : '行が見つかりませんでした。';
+  });
 }
 
 function buildSiteCard(site, index, hasCredential) {
@@ -185,6 +273,8 @@ function buildSiteCard(site, index, hasCredential) {
       ? '検出しました。ID / パスワードを保存して「保存して反映」を押してください。'
       : 'パスワード欄だけ検出しました。ID 欄のセレクタは手入力してください。';
   });
+
+  wireDmPickers(card, site);
 
   const usernameInput = card.querySelector('[data-cred="username"]');
   const passwordInput = card.querySelector('[data-cred="password"]');
@@ -279,7 +369,65 @@ function render(bootstrap) {
     currentConfig.defaults.userAgent = readInput(defaultUa);
   });
 
+  renderTelegram(bootstrap);
   renderSites();
+}
+
+/** The Telegram card: token in the vault, the rest in the config. */
+function renderTelegram(bootstrap) {
+  if (!currentConfig.telegram) currentConfig.telegram = { enabled: false, chatId: '', pollSeconds: 30, confirmBeforeSend: true };
+  const telegram = currentConfig.telegram;
+
+  const enabled = document.getElementById('tg-enabled');
+  const confirm = document.getElementById('tg-confirm');
+  const chat = document.getElementById('tg-chat');
+  const token = document.getElementById('tg-token');
+  const tokenStatus = document.getElementById('tg-token-status');
+  const status = document.getElementById('tg-status');
+
+  enabled.checked = Boolean(telegram.enabled);
+  confirm.checked = telegram.confirmBeforeSend !== false;
+  chat.value = telegram.chatId || '';
+  tokenStatus.textContent = bootstrap.telegramTokenStored ? '保存済み' : '未登録';
+
+  enabled.addEventListener('change', () => {
+    telegram.enabled = enabled.checked;
+  });
+  confirm.addEventListener('change', () => {
+    telegram.confirmBeforeSend = confirm.checked;
+  });
+  chat.addEventListener('input', () => {
+    telegram.chatId = chat.value.trim();
+  });
+
+  if (!encryptionAvailable) token.disabled = true;
+
+  document.getElementById('tg-save').addEventListener('click', async () => {
+    const value = token.value.trim();
+    const result = await window.sixview.setTelegramToken(value);
+    if (result && result.ok) {
+      token.value = '';
+      tokenStatus.textContent = value ? '保存済み' : '未登録';
+      status.textContent = value ? 'トークンを保存しました。' : 'トークンを削除しました。';
+    } else {
+      status.textContent = 'トークンを保存できませんでした。';
+    }
+  });
+
+  document.getElementById('tg-test').addEventListener('click', async () => {
+    status.textContent = '接続中…';
+    const result = await window.sixview.testTelegram(token.value.trim(), chat.value.trim());
+    if (!result || !result.ok) {
+      status.textContent =
+        result && result.reason === 'bad-token'
+          ? 'トークンの形式が違います。@BotFather が出した文字列をそのまま貼ってください。'
+          : `接続できませんでした（${(result && result.reason) || 'unknown'}）。`;
+      return;
+    }
+    status.textContent = result.sent
+      ? `つながりました（@${result.username}）。Telegram にテストメッセージを送りました。`
+      : `トークンは有効です（@${result.username}）。チャット ID を入れてもう一度テストしてください。`;
+  });
 }
 
 document.getElementById('add-pane').addEventListener('click', () => {

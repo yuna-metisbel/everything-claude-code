@@ -19,6 +19,7 @@ const { loadConfig, saveConfig, configPath } = require('./lib/config-store');
 const { SecretStore } = require('./lib/secret-store');
 const {
   SITE_PRESETS,
+  TELEGRAM_SECRET_ID,
   getBrand,
   partitionForSite,
   resolveColumns,
@@ -26,6 +27,7 @@ const {
   resolveZoomFactor,
 } = require('./lib/config-schema');
 const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
+const { DmService } = require('./dm-service');
 const { buildMenu } = require('./menu');
 
 /**
@@ -65,6 +67,8 @@ let config = null;
 let configError = null;
 /** @type {SecretStore|null} */
 let secrets = null;
+/** @type {DmService|null} */
+let dmService = null;
 
 /** siteId -> pane runtime */
 const panes = new Map();
@@ -254,6 +258,53 @@ async function detectLoginFields(siteId) {
     log(`login detection failed for ${siteId}: ${err.message}`);
     return { ok: false, reason: 'script-error' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// DM bridge
+// ---------------------------------------------------------------------------
+
+/** The bot token shares the credential vault; it is not a pane. */
+function readTelegramToken() {
+  const entry = secrets ? secrets.get(TELEGRAM_SECRET_ID) : null;
+  return entry && entry.password ? entry.password : '';
+}
+
+/**
+ * Ask before a reply typed in Telegram is posted into a customer's thread.
+ * The safety net for "wrong window, wrong person" while the setup is new;
+ * it can be switched off in settings once the bridge is trusted.
+ */
+async function confirmBridgeSend(info) {
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const options = {
+    type: 'question',
+    buttons: ['送信しない', '送信する'],
+    defaultId: 1,
+    cancelId: 0,
+    message: `${info.siteName} / ${info.name} さんに送信しますか？`,
+    detail: info.text,
+  };
+  const choice = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return choice.response === 1;
+}
+
+function createDmService() {
+  dmService = new DmService({
+    getConfig: () => config,
+    getSite: (siteId) => getSite(siteId),
+    getContents: (siteId) => {
+      const pane = panes.get(siteId);
+      return pane && pane.contents && !pane.contents.isDestroyed() ? pane.contents : null;
+    },
+    getToken: readTelegramToken,
+    confirmSend: confirmBridgeSend,
+    onStatus: (status) => sendToMain('dm:status', status),
+    log,
+  });
+  dmService.refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +507,8 @@ function bootstrapPayload() {
     credentialStatus: secrets ? secrets.status(config.sites.map((site) => site.id)) : {},
     encryptionAvailable: Boolean(secrets && secrets.isAvailable()),
     loginItemSupported: process.platform === 'darwin' || process.platform === 'win32',
+    telegramTokenStored: Boolean(secrets && secrets.has(TELEGRAM_SECRET_ID)),
+    dmStatus: dmService ? dmService.status() : null,
     appName: BRAND.appName,
     configPath: configPath(userDataDir),
     configError,
@@ -478,6 +531,7 @@ function registerIpc() {
 
     applyLoginItemSetting();
     setupPaneSessions();
+    if (dmService) dmService.refresh();
     sendToMain('app:config-changed', bootstrapPayload());
     return bootstrapPayload();
   });
@@ -525,6 +579,47 @@ function registerIpc() {
     return clearPaneSession(payload.siteId);
   });
 
+  ipcMain.handle('dm:pick', (_event, payload) => {
+    if (!payload || !payload.siteId || !dmService) return { ok: false, reason: 'bad-request' };
+    // Bring the main window forward: the user is about to click inside a pane.
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+    return dmService.pick(payload.siteId, {
+      label: payload.label || '',
+      relativeTo: payload.relativeTo || '',
+    });
+  });
+
+  ipcMain.handle('dm:scan', (_event, payload) => {
+    if (!payload || !payload.siteId || !dmService) return { ok: false, reason: 'bad-request' };
+    return dmService.scan(payload.siteId);
+  });
+
+  ipcMain.handle('dm:status', () => (dmService ? dmService.status() : null));
+
+  ipcMain.handle('telegram:set-token', (_event, payload) => {
+    if (!secrets) return { ok: false, reason: 'bad-request' };
+    if (!secrets.isAvailable()) return { ok: false, reason: 'no-encryption' };
+    const token = payload && typeof payload.token === 'string' ? payload.token.trim() : '';
+    const ok = token
+      ? secrets.set(TELEGRAM_SECRET_ID, '', token)
+      : secrets.clear(TELEGRAM_SECRET_ID) || true;
+    if (dmService) dmService.refresh();
+    sendToMain('app:config-changed', bootstrapPayload());
+    return { ok };
+  });
+
+  ipcMain.handle('telegram:test', async (_event, payload) => {
+    if (!dmService) return { ok: false, reason: 'bad-request' };
+    // An unsaved token in the form is tested as typed, so the user can verify
+    // before committing it to the vault.
+    const token =
+      payload && typeof payload.token === 'string' && payload.token.trim()
+        ? payload.token.trim()
+        : readTelegramToken();
+    const chatId = payload && payload.chatId ? String(payload.chatId).trim() : config.telegram.chatId;
+    return dmService.testToken(token, chatId);
+  });
+
   ipcMain.on('settings:open', () => openSettingsWindow());
   ipcMain.on('settings:close', () => {
     if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
@@ -567,6 +662,7 @@ if (!app.requestSingleInstanceLock()) {
 
     applyLoginItemSetting();
     setupPaneSessions();
+    createDmService();
     registerIpc();
     buildMenu({
       appName: BRAND.appName,
@@ -591,6 +687,10 @@ if (!app.requestSingleInstanceLock()) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
     });
+  });
+
+  app.on('before-quit', () => {
+    if (dmService) dmService.stop();
   });
 
   app.on('window-all-closed', () => {

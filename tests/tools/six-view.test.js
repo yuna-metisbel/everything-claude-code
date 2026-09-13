@@ -14,6 +14,10 @@ const schema = require(path.join(toolRoot, 'src/lib/config-schema'));
 const autofill = require(path.join(toolRoot, 'src/lib/autofill'));
 const configStore = require(path.join(toolRoot, 'src/lib/config-store'));
 const { SecretStore } = require(path.join(toolRoot, 'src/lib/secret-store'));
+const dmScript = require(path.join(toolRoot, 'src/lib/dm-script'));
+const { DmBridge } = require(path.join(toolRoot, 'src/lib/dm-bridge'));
+const telegramLib = require(path.join(toolRoot, 'src/lib/telegram'));
+const { DmService } = require(path.join(toolRoot, 'src/dm-service'));
 
 function test(name, fn) {
   try {
@@ -25,6 +29,85 @@ function test(name, fn) {
     console.log(`    Error: ${err.message}`);
     return false;
   }
+}
+
+/** Same reporting as `test`, for cases that have to await something. */
+async function testAsync(name, fn) {
+  try {
+    await fn();
+    console.log(`  \u2713 ${name}`);
+    return true;
+  } catch (err) {
+    console.log(`  \u2717 ${name}`);
+    console.log(`    Error: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * A guest page stand-in.
+ *
+ * Answers each generated script the way a real page would, and records what was
+ * asked of it. `rows` is a function so a test can change the list between
+ * scans, the way the site does after a reply is posted.
+ */
+function fakeContents(options = {}) {
+  const rowsFor = typeof options.rows === 'function' ? options.rows : () => options.rows || [];
+  return {
+    ran: [],
+    opened: [],
+    typed: [],
+    isDestroyed: () => false,
+    focus() {},
+    // settle() listens for this; answer at once so tests do not wait 2s.
+    once(event, callback) {
+      if (event === 'did-stop-loading') setImmediate(callback);
+    },
+    removeListener() {},
+    executeJavaScript(source) {
+      this.ran.push(source);
+
+      if (source.includes('alreadyThere')) return Promise.resolve({ ok: true, alreadyThere: true });
+
+      if (source.includes('maxRows')) {
+        const rows = rowsFor();
+        return Promise.resolve(
+          rows.length ? { ok: true, rows, path: '/dm' } : { ok: false, reason: 'no-rows', rows: [] }
+        );
+      }
+
+      if (source.includes('thread-not-found')) {
+        const key = (/"key":"([^"]*)"|WANTED = "([^"]*)"/.exec(source) || [])
+          .slice(1)
+          .find(Boolean);
+        this.opened.push(key || '');
+        if (options.openFails) return Promise.resolve({ ok: false, reason: 'thread-not-found' });
+        return Promise.resolve({ ok: true, opened: true });
+      }
+
+      if (source.includes('empty-text')) {
+        const text = (/const TEXT = "((?:[^"\\]|\\.)*)"/.exec(source) || [])[1] || '';
+        this.typed.push(JSON.parse(`"${text}"`));
+        if (options.onType) options.onType(JSON.parse(`"${text}"`));
+        return Promise.resolve({ ok: true, submitted: true });
+      }
+
+      return Promise.resolve({ ok: false, reason: 'unknown-script' });
+    },
+  };
+}
+
+/** A fetch stand-in that answers the Telegram API from a table. */
+function fakeFetch(handler) {
+  const calls = [];
+  const impl = async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push({ url, body });
+    const result = handler(url, body);
+    return { status: 200, json: async () => result };
+  };
+  impl.calls = calls;
+  return impl;
 }
 
 /** Reversible stand-in for Electron's safeStorage (OS keychain). */
@@ -40,7 +123,7 @@ function fakeSafeStorage(available = true) {
   };
 }
 
-function runTests() {
+async function runTests() {
   console.log('\n=== Testing six-view ===\n');
 
   let passed = 0;
@@ -389,10 +472,394 @@ function runTests() {
     assert.ok(!script.includes('require('), 'must not depend on anything in the page');
   })) passed++; else failed++;
 
+
+  // --- DM bridge: config ---
+
+  if (test('normalizeDm keeps the polling interval civil', () => {
+    assert.strictEqual(schema.normalizeDm({ intervalSeconds: 1 }).intervalSeconds, 20);
+    assert.strictEqual(schema.normalizeDm({ intervalSeconds: 999999 }).intervalSeconds, 3600);
+    assert.strictEqual(schema.normalizeDm({}).intervalSeconds, 90);
+  })) passed++; else failed++;
+
+  if (test('a pane is only watched once the row selector is picked', () => {
+    assert.strictEqual(schema.dmIsUsable({ dm: { enabled: true, rowSelector: '' } }), false);
+    assert.strictEqual(schema.dmIsUsable({ dm: { enabled: false, rowSelector: '.row' } }), false);
+    assert.strictEqual(schema.dmIsUsable({ dm: { enabled: true, rowSelector: '.row' } }), true);
+    // Replying additionally needs somewhere to type.
+    assert.strictEqual(schema.dmCanSend({ dm: { enabled: true, rowSelector: '.row' } }), false);
+    assert.strictEqual(
+      schema.dmCanSend({ dm: { enabled: true, rowSelector: '.row', inputSelector: '#t' } }),
+      true
+    );
+  })) passed++; else failed++;
+
+  if (test('the telegram block survives a config round trip', () => {
+    const config = schema.createDefaultConfig('msns');
+    config.telegram.enabled = true;
+    config.telegram.chatId = '12345';
+    config.telegram.pollSeconds = 999;
+    const back = schema.normalizeConfig(config, 'msns');
+    assert.strictEqual(back.telegram.enabled, true);
+    assert.strictEqual(back.telegram.chatId, '12345');
+    assert.strictEqual(back.telegram.pollSeconds, 120, 'long polls are capped');
+    assert.strictEqual(back.telegram.confirmBeforeSend, true, 'confirmation defaults to on');
+  })) passed++; else failed++;
+
+  if (test('every pane gets a dm block, and the token is not one of them', () => {
+    const config = schema.createDefaultConfig('msns');
+    assert.ok(config.sites.every((site) => site.dm && site.dm.enabled === false));
+    assert.ok(!JSON.stringify(config).includes(schema.TELEGRAM_SECRET_ID));
+  })) passed++; else failed++;
+
+  // --- DM bridge: what counts as news ---
+
+  if (test('the first scan of a pane primes silently', () => {
+    const bridge = new DmBridge();
+    const rows = [
+      { key: 'href:/dm/1', name: 'A', preview: 'hello', unread: true },
+      { key: 'href:/dm/2', name: 'B', preview: 'hi', unread: true },
+    ];
+    const first = bridge.diff('cast1', rows);
+    assert.strictEqual(first.primed, true);
+    assert.strictEqual(first.notify.length, 0, 'history must not arrive as notifications');
+    assert.strictEqual(bridge.diff('cast1', rows).notify.length, 0, 'nothing changed');
+  })) passed++; else failed++;
+
+  if (test('a changed preview is reported, an unchanged row is not', () => {
+    const bridge = new DmBridge();
+    bridge.diff('cast1', [{ key: 'k1', name: 'A', preview: 'one', unread: false }]);
+    const changed = bridge.diff('cast1', [{ key: 'k1', name: 'A', preview: 'two', unread: false }]);
+    assert.strictEqual(changed.notify.length, 1);
+    assert.strictEqual(changed.notify[0].preview, 'two');
+  })) passed++; else failed++;
+
+  if (test('our own reply does not bounce back out as a notification', () => {
+    const bridge = new DmBridge();
+    bridge.diff('cast1', [{ key: 'k1', name: 'A', preview: 'question', unread: true }]);
+    bridge.suppressNext('cast1', 'k1');
+    const echo = bridge.diff('cast1', [{ key: 'k1', name: 'A', preview: 'my answer', unread: false }]);
+    assert.strictEqual(echo.notify.length, 0, 'the echo of our own send is swallowed');
+    const next = bridge.diff('cast1', [{ key: 'k1', name: 'A', preview: 'thanks!', unread: true }]);
+    assert.strictEqual(next.notify.length, 1, 'only once - the next real message still reports');
+  })) passed++; else failed++;
+
+  if (test('a pane switched off forgets its baseline', () => {
+    const bridge = new DmBridge();
+    bridge.diff('cast1', [{ key: 'k1', name: 'A', preview: 'x', unread: false }]);
+    assert.strictEqual(bridge.hasBaseline('cast1'), true);
+    bridge.forget('cast1');
+    assert.strictEqual(bridge.hasBaseline('cast1'), false);
+  })) passed++; else failed++;
+
+  // --- DM bridge: routing replies ---
+
+  if (test('only a reply to one of our notifications is ever sent on', () => {
+    const bridge = new DmBridge();
+    bridge.rememberRoute(500, 'cast3', { key: 'href:/dm/9', name: 'tanaka' });
+
+    const routed = bridge.resolveReply({
+      message: { text: '19時から空いてます', message_id: 501, chat: { id: 77 }, reply_to_message: { message_id: 500 } },
+    });
+    assert.strictEqual(routed.siteId, 'cast3');
+    assert.strictEqual(routed.key, 'href:/dm/9');
+    assert.strictEqual(routed.text, '19時から空いてます');
+
+    // A bare message, a reply to something unknown, and an empty reply are all
+    // refused: guessing the recipient would mean messaging the wrong customer.
+    assert.strictEqual(bridge.resolveReply({ message: { text: 'hi', chat: { id: 77 } } }), null);
+    assert.strictEqual(
+      bridge.resolveReply({ message: { text: 'hi', reply_to_message: { message_id: 999 } } }),
+      null
+    );
+    assert.strictEqual(
+      bridge.resolveReply({ message: { text: '   ', reply_to_message: { message_id: 500 } } }),
+      null
+    );
+  })) passed++; else failed++;
+
+  if (test('the route table is bounded, dropping the oldest first', () => {
+    const bridge = new DmBridge({ maxRoutes: 2 });
+    bridge.rememberRoute(1, 's', { key: 'a' });
+    bridge.rememberRoute(2, 's', { key: 'b' });
+    bridge.rememberRoute(3, 's', { key: 'c' });
+    assert.strictEqual(bridge.routes.size, 2);
+    assert.ok(!bridge.routes.has(1), 'the oldest route is evicted');
+    assert.ok(bridge.routes.has(3));
+  })) passed++; else failed++;
+
+  if (test('a notification names the account and the sender', () => {
+    const bridge = new DmBridge();
+    const text = bridge.formatNotification('02 キャスト1', { name: 'たなか', preview: '明日は？' });
+    assert.ok(text.includes('02 キャスト1'), 'which account');
+    assert.ok(text.includes('たなか'), 'which customer');
+    assert.ok(text.includes('明日は？'), 'what they said');
+    assert.ok(bridge.formatNotification('x', { name: '', preview: '' }).includes('(名前なし)'));
+  })) passed++; else failed++;
+
+  // --- generated page scripts ---
+
+  if (test('the picker script parses and can always be escaped out of', () => {
+    const script = dmScript.buildPickerScript({ label: 'click the row', relativeTo: '.row' });
+    assert.doesNotThrow(() => new Function(`return ${script}`), 'picker script must parse');
+    assert.ok(script.includes('Escape'), 'Esc must cancel');
+    assert.ok(script.includes('"click the row"'));
+    assert.ok(!script.includes('require('), 'must not depend on anything in the page');
+  })) passed++; else failed++;
+
+  if (test('the scan script only reads - it can never be cut short by a click', () => {
+    const script = dmScript.buildDmScanScript({
+      rowSelector: '.dm-row',
+      nameSelector: '.name',
+      previewSelector: '.msg',
+      unreadSelector: '.badge',
+    });
+    assert.doesNotThrow(() => new Function(`return ${script}`), 'scan script must parse');
+    assert.ok(script.includes('"rowSelector":".dm-row"'));
+    assert.ok(!script.includes('.click()'), 'reading must not navigate');
+    assert.ok(!script.includes('require('));
+  })) passed++; else failed++;
+
+  if (test('scripts that click end on the click, because it navigates away', () => {
+    const ensure = dmScript.buildDmEnsureListScript({ rowSelector: '.r', openSelector: '#dm-tab' });
+    const open = dmScript.buildDmOpenThreadScript({ rowSelector: '.r' }, 'href:/dm/9');
+    [ensure, open].forEach((script) => {
+      assert.doesNotThrow(() => new Function(`return ${script}`));
+      const afterClick = script.slice(script.lastIndexOf('.click()'));
+      assert.ok(!afterClick.includes('await'), 'nothing may be awaited after the click');
+    });
+    assert.ok(ensure.includes('"openSelector":"#dm-tab"'));
+    assert.ok(open.includes('thread-not-found'), 'a vanished thread is reported, not guessed at');
+    assert.ok(open.includes('href:/dm/9'));
+  })) passed++; else failed++;
+
+  if (test('the reply text cannot break out of the script it travels in', () => {
+    const script = dmScript.buildDmTypeScript(
+      { inputSelector: '#reply', sendSelector: '#send' },
+      '</script><script>alert(1)</script>'
+    );
+    assert.doesNotThrow(() => new Function(`return ${script}`), 'type script must parse');
+    assert.ok(!script.includes('</script>'), 'the reply text is escaped');
+    assert.ok(script.includes('"inputSelector":"#reply"'));
+  })) passed++; else failed++;
+
+  // --- telegram client ---
+
+  if (test('a bot token is recognised, and never printed in full', () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    assert.strictEqual(telegramLib.looksLikeToken(token), true);
+    assert.strictEqual(telegramLib.looksLikeToken('not-a-token'), false);
+    assert.strictEqual(telegramLib.looksLikeToken(''), false);
+    const masked = telegramLib.maskToken(token);
+    assert.ok(!masked.includes('A'.repeat(10)), 'the secret half must not survive masking');
+    assert.ok(masked.length < token.length);
+  })) passed++; else failed++;
+
+  if (await testAsync('an unconfigured client refuses to call out', async () => {
+    const client = new telegramLib.TelegramClient({ token: 'nope', fetchImpl: fakeFetch(() => ({ ok: true })) });
+    const res = await client.sendMessage('1', 'hi');
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.error, 'not-configured');
+  })) passed++; else failed++;
+
+  if (await testAsync('sendMessage posts to the bot endpoint and returns the message id', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const impl = fakeFetch(() => ({ ok: true, result: { message_id: 42, chat: { id: 7 } } }));
+    const client = new telegramLib.TelegramClient({ token, fetchImpl: impl });
+    const res = await client.sendMessage(7, 'hello', { replyToMessageId: 41 });
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.messageId, 42);
+    assert.ok(impl.calls[0].url.endsWith('/sendMessage'));
+    assert.ok(impl.calls[0].url.includes(token), 'the token authenticates the call');
+    assert.strictEqual(impl.calls[0].body.reply_to_message_id, 41);
+  })) passed++; else failed++;
+
+  if (await testAsync('getUpdates advances the offset so nothing is handled twice', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const impl = fakeFetch((_url, body) =>
+      body.offset === undefined
+        ? { ok: true, result: [{ update_id: 10 }, { update_id: 11 }] }
+        : { ok: true, result: [] }
+    );
+    const client = new telegramLib.TelegramClient({ token, fetchImpl: impl });
+    const first = await client.getUpdates({ timeoutSeconds: 0 });
+    assert.strictEqual(first.updates.length, 2);
+    assert.strictEqual(client.offset, 12);
+    await client.getUpdates({ timeoutSeconds: 0 });
+    assert.strictEqual(impl.calls[1].body.offset, 12, 'the next poll asks for what comes after');
+  })) passed++; else failed++;
+
+  // --- the service end to end (with fake page + fake Telegram) ---
+
+  if (await testAsync('a new message reaches Telegram and its reply reaches the right pane', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const site = {
+      id: 'cast1',
+      name: '02 キャスト1',
+      dm: {
+        enabled: true,
+        rowSelector: '.dm-row',
+        nameSelector: '.name',
+        previewSelector: '.msg',
+        openSelector: '#dm-tab',
+        inputSelector: '#reply',
+        sendSelector: '#send',
+        intervalSeconds: 90,
+      },
+    };
+    const config = { telegram: { enabled: true, chatId: '77', pollSeconds: 5, confirmBeforeSend: false }, sites: [site] };
+
+    // The list the fake page shows; the reply rewrites it, as the real one does.
+    let rows = [
+      { key: 'href:/dm/9', name: 'たなか', preview: '明日は？', unread: true },
+      { key: 'href:/dm/12', name: '海斗', preview: 'こんばんは', unread: false },
+    ];
+    const contents = fakeContents({
+      rows: () => rows,
+      onType: (text) => {
+        rows = rows.map((row) => (row.key === 'href:/dm/9' ? { ...row, preview: text, unread: false } : row));
+      },
+    });
+
+    let nextMessageId = 100;
+    const impl = fakeFetch((url) =>
+      url.endsWith('/sendMessage')
+        ? { ok: true, result: { message_id: (nextMessageId += 1), chat: { id: 77 } } }
+        : { ok: true, result: [] }
+    );
+
+    const service = new DmService({
+      getConfig: () => config,
+      getSite: (id) => (id === site.id ? site : null),
+      getContents: () => contents,
+      getToken: () => token,
+    });
+    service.client.fetchImpl = impl;
+    service.client.token = token;
+
+    // First scan is the baseline; the second one is real news.
+    const primed = await service.scan('cast1');
+    assert.strictEqual(primed.primed, true);
+    assert.strictEqual(impl.calls.length, 0, 'priming must not notify');
+
+    rows = rows.map((row) => (row.key === 'href:/dm/9' ? { ...row, preview: '90いくら？' } : row));
+    const news = await service.scan('cast1');
+    assert.strictEqual(news.notified, 1, 'only the changed conversation is reported');
+    assert.strictEqual(impl.calls.length, 1);
+    assert.ok(impl.calls[0].body.text.includes('02 キャスト1'));
+    assert.ok(impl.calls[0].body.text.includes('90いくら？'));
+
+    // Replying to that notification must land in this pane, on this thread.
+    const instruction = service.bridge.resolveReply({
+      message: {
+        text: '19時から空いてます',
+        message_id: 900,
+        chat: { id: 77 },
+        reply_to_message: { message_id: 101 },
+      },
+    });
+    assert.ok(instruction, 'the notification must be repliable');
+    assert.strictEqual(instruction.siteId, 'cast1');
+
+    await service.deliver(instruction);
+    assert.deepStrictEqual(contents.opened, ['href:/dm/9'], 'the thread it came from was opened');
+    assert.deepStrictEqual(contents.typed, ['19時から空いてます'], 'the reply text was typed once');
+    assert.strictEqual(service.deliveredCount, 1);
+
+    const ack = impl.calls[impl.calls.length - 1];
+    assert.ok(ack.body.text.includes('送信しました'), 'the user is told it went through');
+    assert.ok(!ack.body.text.includes('確認は取れませんでした'), 'and that it was confirmed on the page');
+    assert.strictEqual(ack.body.reply_to_message_id, 900);
+
+    // The reply must not come straight back as a new message.
+    const after = await service.scan('cast1');
+    assert.strictEqual(after.notified, 0, 'our own message is not reported as news');
+
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('a conversation that has left the list is refused, not guessed at', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const site = {
+      id: 'cast1',
+      name: '02 キャスト1',
+      dm: { enabled: true, rowSelector: '.r', inputSelector: '#t', sendSelector: '#s', intervalSeconds: 90 },
+    };
+    const config = { telegram: { enabled: true, chatId: '77', pollSeconds: 5, confirmBeforeSend: false }, sites: [site] };
+    const contents = fakeContents({
+      rows: () => [{ key: 'href:/dm/1', name: 'A', preview: 'x', unread: false }],
+      openFails: true,
+    });
+    const impl = fakeFetch(() => ({ ok: true, result: { message_id: 1, chat: { id: 77 } } }));
+
+    const service = new DmService({
+      getConfig: () => config,
+      getSite: () => site,
+      getContents: () => contents,
+      getToken: () => token,
+    });
+    service.client.fetchImpl = impl;
+    service.client.token = token;
+
+    await service.deliver({ siteId: 'cast1', key: 'href:/dm/999', name: 'gone', text: 'hi', chatId: 77, messageId: 5 });
+    assert.strictEqual(contents.typed.length, 0, 'nothing was typed into whatever was on screen');
+    assert.strictEqual(service.deliveredCount, 0);
+    assert.ok(impl.calls[0].body.text.includes('その会話が一覧に見つかりません'));
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('a pane that cannot send yet says so instead of half-working', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    // Watched, but the reply input was never picked.
+    const site = { id: 'cast2', name: '02 キャスト2', dm: { enabled: true, rowSelector: '.r', intervalSeconds: 90 } };
+    const config = { telegram: { enabled: true, chatId: '77', pollSeconds: 5, confirmBeforeSend: false }, sites: [site] };
+    const impl = fakeFetch(() => ({ ok: true, result: { message_id: 1, chat: { id: 77 } } }));
+
+    const service = new DmService({
+      getConfig: () => config,
+      getSite: () => site,
+      getContents: () => fakeContents({ rows: [] }),
+      getToken: () => token,
+    });
+    service.client.fetchImpl = impl;
+    service.client.token = token;
+
+    await service.deliver({ siteId: 'cast2', key: 'k', name: 'x', text: 'hi', chatId: 77, messageId: 5 });
+    assert.strictEqual(service.deliveredCount, 0);
+    assert.ok(impl.calls[0].body.text.includes('送信できません'));
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('the confirmation dialog can veto a send', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const site = {
+      id: 'cast1',
+      name: '02 キャスト1',
+      dm: { enabled: true, rowSelector: '.r', inputSelector: '#t', intervalSeconds: 90 },
+    };
+    const config = { telegram: { enabled: true, chatId: '77', pollSeconds: 5, confirmBeforeSend: true }, sites: [site] };
+    const impl = fakeFetch(() => ({ ok: true, result: { message_id: 1, chat: { id: 77 } } }));
+    const contents = fakeContents({ rows: [{ key: 'k', name: 'x', preview: 'y', unread: false }] });
+
+    const service = new DmService({
+      getConfig: () => config,
+      getSite: () => site,
+      getContents: () => contents,
+      getToken: () => token,
+      confirmSend: async () => false,
+    });
+    service.client.fetchImpl = impl;
+    service.client.token = token;
+
+    await service.deliver({ siteId: 'cast1', key: 'k', name: 'x', text: 'hi', chatId: 77, messageId: 5 });
+    assert.strictEqual(contents.ran.length, 0, 'nothing was typed into the page');
+    assert.ok(impl.calls[0].body.text.includes('取り消し'));
+    service.stop();
+  })) passed++; else failed++;
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);
   process.exit(failed > 0 ? 1 : 0);
 }
 
-runTests();
+void runTests();

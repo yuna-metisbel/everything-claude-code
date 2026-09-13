@@ -7,7 +7,13 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-const PANE_EVENTS = ['pane:state', 'pane:focus', 'pane:toggle-maximize', 'app:config-changed'];
+const PANE_EVENTS = [
+  'pane:state',
+  'pane:focus',
+  'pane:toggle-maximize',
+  'app:config-changed',
+  'dm:status',
+];
 
 contextBridge.exposeInMainWorld('sixview', {
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
@@ -18,6 +24,15 @@ contextBridge.exposeInMainWorld('sixview', {
   paneCommand: (siteId, command) => ipcRenderer.invoke('pane:command', { siteId, command }),
   detectLogin: (siteId) => ipcRenderer.invoke('pane:detect-login', { siteId }),
   clearSession: (siteId) => ipcRenderer.invoke('session:clear', { siteId }),
+
+  // DM bridge. The bot token goes straight to the main process and is never
+  // read back out - the renderer only ever learns whether one is stored.
+  dmPick: (siteId, label, relativeTo) =>
+    ipcRenderer.invoke('dm:pick', { siteId, label, relativeTo }),
+  dmScan: (siteId) => ipcRenderer.invoke('dm:scan', { siteId }),
+  dmStatus: () => ipcRenderer.invoke('dm:status'),
+  setTelegramToken: (token) => ipcRenderer.invoke('telegram:set-token', { token }),
+  testTelegram: (token, chatId) => ipcRenderer.invoke('telegram:test', { token, chatId }),
   openSettings: () => ipcRenderer.send('settings:open'),
   closeSettings: () => ipcRenderer.send('settings:close'),
   reloadAll: () => ipcRenderer.send('panes:reload-all'),
