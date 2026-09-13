@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="メンズエステプライムグループ スタッフ用 共有ボード">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PRIME">
+<title>PRIME 事務所ボード</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%A2%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Old+Mincho:wght@600;700&display=swap">
+<style>
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%; text-size-adjust:100%}
+img{max-width:100%}
+[hidden]{display:none !important}
+
+:root{
+  color-scheme: light;
+  --paper:#FCFAF7; --surface:#FFFFFF; --surface-2:#F6F2EB; --surface-3:#EDE6DA;
+  --line:#E8E1D5; --line-strong:#D2C8B8;
+  --ink:#2A232C; --ink-2:#544B56; --muted:#7E7367;
+  --brass:#9C6C1F; --brass-soft:#F5E8CC; --brass-line:#D9BE8B;
+  --ok:#2C7A5B; --ok-soft:#DFF0E7;
+  --warn:#B0670F; --warn-soft:#FAEAD3;
+  --bad:#A63244; --bad-soft:#F8E0E3;
+  --cool:#3E6497; --cool-soft:#E4EAF5;
+  /* 媒体・店舗・キャストを見分けるための8色。強い色は点と線、薄い色は帯の地に使う */
+  --g1:#9C6C1F; --g1s:#F5E8CC; --g2:#3E6497; --g2s:#E4EAF5;
+  --g3:#2C7A5B; --g3s:#DFF0E7; --g4:#A63244; --g4s:#F8E0E3;
+  --g5:#6B4A93; --g5s:#EBE3F5; --g6:#1F7A80; --g6s:#D9EFF0;
+  --g7:#B0670F; --g7s:#FAEAD3; --g8:#A63A78; --g8s:#F8E1EF;
+  --shadow:0 1px 2px rgba(27,22,28,.05), 0 14px 34px -22px rgba(27,22,28,.45);
+  --r:4px;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+  --sans:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,-apple-system,sans-serif;
+  --serif:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --paper:#221E28; --surface:#2B2632; --surface-2:#342E3C; --surface-3:#3E3747;
+    --line:#3E3747; --line-strong:#584F63;
+    --ink:#F2ECE3; --ink-2:#D2C9BE; --muted:#A79C91;
+    --brass:#D5A54D; --brass-soft:#3B2E19; --brass-line:#5C4726;
+    --ok:#5CB88D; --ok-soft:#17342A;
+    --warn:#E09A4B; --warn-soft:#3A2A15;
+    --bad:#E2717F; --bad-soft:#3A1B21;
+    --cool:#83A6D8; --cool-soft:#1B2432;
+    --g1:#D5A54D; --g1s:#3B2E19; --g2:#83A6D8; --g2s:#1B2432;
+    --g3:#5CB88D; --g3s:#17342A; --g4:#E2717F; --g4s:#3A1B21;
+    --g5:#B197E0; --g5s:#261E38; --g6:#5FC2C8; --g6s:#123033;
+    --g7:#E09A4B; --g7s:#3A2A15; --g8:#E28ABC; --g8s:#38182C;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 36px -22px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --paper:#221E28; --surface:#2B2632; --surface-2:#342E3C; --surface-3:#3E3747;
+  --line:#3E3747; --line-strong:#584F63;
+  --ink:#F2ECE3; --ink-2:#D2C9BE; --muted:#A79C91;
+  --brass:#D5A54D; --brass-soft:#3B2E19; --brass-line:#5C4726;
+  --ok:#5CB88D; --ok-soft:#17342A;
+  --warn:#E09A4B; --warn-soft:#3A2A15;
+  --bad:#E2717F; --bad-soft:#3A1B21;
+  --cool:#83A6D8; --cool-soft:#1B2432;
+  --g1:#D5A54D; --g1s:#3B2E19; --g2:#83A6D8; --g2s:#1B2432;
+  --g3:#5CB88D; --g3s:#17342A; --g4:#E2717F; --g4s:#3A1B21;
+  --g5:#B197E0; --g5s:#261E38; --g6:#5FC2C8; --g6s:#123033;
+  --g7:#E09A4B; --g7s:#3A2A15; --g8:#E28ABC; --g8s:#38182C;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 36px -22px rgba(0,0,0,.9);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink); overflow-x:hidden;
+  font-family:var(--sans); font-size:15px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0; text-wrap:balance; font-weight:700}
+p{margin:0}
+button{font:inherit; color:inherit; cursor:pointer}
+input,select,textarea{font:inherit; color:inherit}
+a{color:var(--brass); text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--brass); outline-offset:2px; border-radius:2px}
+.num{font-family:var(--mono); font-variant-numeric:tabular-nums}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1200px; margin:0 auto; padding:0 20px}
+@media (max-width:640px){ .wrap{padding:0 12px} }
+
+.masthead{background:var(--surface); border-bottom:1px solid var(--line)}
+.mast-in{display:flex; flex-wrap:wrap; align-items:center; gap:18px; padding:14px 0; min-width:0}
+.mast-in > *{min-width:0}
+.brand{display:flex; align-items:baseline; gap:10px; margin-right:auto}
+.brand .mark{
+  font-family:var(--serif); font-size:23px; letter-spacing:.16em; font-weight:700;
+  color:var(--brass);
+}
+.brand .sub{font-size:12.5px; color:var(--muted); letter-spacing:.09em}
+
+/* office door */
+.door{
+  display:flex; align-items:center; gap:12px;
+  border:1px solid var(--line); background:var(--surface-2);
+  padding:8px 10px 8px 14px; border-radius:var(--r);
+}
+.door.open{background:var(--ok-soft); border-color:color-mix(in srgb, var(--ok) 40%, transparent)}
+/* 未確認は、開いているとも閉まっているとも言わない見た目にする */
+.door.unknown{background:var(--surface-2); border-style:dashed}
+.door .btn-row{gap:6px; flex:none}
+.door .btn-row .btn{white-space:nowrap}
+.door .txt{flex:1 1 auto; min-width:0}
+.door.unknown .lamp{background:transparent; border:2px solid var(--line-strong)}
+.door .lamp{width:11px; height:11px; border-radius:50%; background:var(--line-strong); flex:none}
+.door.open .lamp{background:var(--ok); box-shadow:0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent)}
+.door .txt{display:flex; flex-direction:column; line-height:1.25}
+.door .txt b{font-size:14px}
+.door .txt small{font-size:11px; color:var(--muted)}
+
+.here{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.avatars{display:flex; gap:-4px}
+.av{
+  width:30px; height:30px; border-radius:50%; display:grid; place-items:center;
+  font-size:12px; font-weight:700; color:#fff; border:2px solid var(--surface); margin-left:-6px;
+  flex:none;
+}
+.av:first-child{margin-left:0}
+.av.off{opacity:.32; filter:grayscale(1)}
+
+/* buttons */
+.btn{
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--ink);
+  padding:6px 12px; border-radius:var(--r); font-size:13.5px; font-weight:500;
+  transition:background .12s ease, border-color .12s ease;
+}
+.btn:hover{background:var(--surface-2)}
+.btn.sm{padding:3px 9px; font-size:12.5px}
+.btn.primary{background:var(--brass); border-color:var(--brass); color:#fff}
+:root[data-theme="dark"] .btn.primary, :root:not([data-theme="light"]) .btn.primary{color:#1B140A}
+@media (prefers-color-scheme: light){ :root:not([data-theme="dark"]) .btn.primary{color:#fff} }
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.ghost{border-color:transparent; background:transparent; color:var(--muted)}
+.btn.ghost:hover{background:var(--surface-2); color:var(--ink)}
+.btn.danger{color:var(--bad); border-color:color-mix(in srgb, var(--bad) 40%, transparent)}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+
+/* tabs */
+.tabs{background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:30}
+.tabs-in{display:flex; gap:2px; overflow-x:auto; scrollbar-width:none}
+.tabs-in::-webkit-scrollbar{display:none}
+.tab{
+  border:0; background:none; padding:11px 14px; font-size:14px; font-weight:500;
+  color:var(--muted); border-bottom:2px solid transparent; white-space:nowrap;
+}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--brass); border-bottom-color:var(--brass); font-weight:700}
+.tab .badge{
+  display:inline-block; min-width:17px; padding:0 5px; margin-left:6px; border-radius:9px;
+  background:var(--bad); color:#fff; font-size:10.5px; font-weight:700; line-height:17px;
+  font-family:var(--mono);
+}
+.tab .t-sm{display:none}
+
+main{padding:22px 0 80px}
+.grid-home{display:grid; grid-template-columns:minmax(0,1.62fr) minmax(0,1fr); gap:26px; align-items:start}
+@media (max-width:900px){ .grid-home{grid-template-columns:minmax(0,1fr)} }
+
+/* section heads */
+.sec{margin-bottom:30px}
+.sec-head{display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap}
+.sec-head h2{font-family:var(--serif); font-size:17px; letter-spacing:.04em}
+.sec-head .hint{font-size:12px; color:var(--muted)}
+.sec-head .spacer{margin-left:auto}
+/* Keeps a pair of buttons together: side by side on desktop, one shared row on phones. */
+.btn-row{display:flex; gap:8px; flex-wrap:nowrap; margin-left:auto}
+.eyebrow{
+  font-size:10.5px; letter-spacing:.18em; text-transform:uppercase;
+  color:var(--muted); font-weight:700; font-family:var(--mono);
+}
+
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--r)}
+.rows{border-top:1px solid var(--line)}
+.row{display:flex; gap:12px; padding:11px 14px; border-bottom:1px solid var(--line); align-items:flex-start}
+.row:hover{background:var(--surface-2)}
+.empty{padding:22px 14px; color:var(--muted); font-size:13px; text-align:center; border-bottom:1px solid var(--line)}
+
+/* chips */
+.chip{
+  display:inline-flex; align-items:center; gap:5px; padding:1px 8px; border-radius:999px;
+  font-size:11.5px; font-weight:700; letter-spacing:.02em; white-space:nowrap;
+  background:var(--surface-3); color:var(--ink-2);
+}
+.chip.ok{background:var(--ok-soft); color:var(--ok)}
+.chip.warn{background:var(--warn-soft); color:var(--warn)}
+.chip.bad{background:var(--bad-soft); color:var(--bad)}
+.chip.cool{background:var(--cool-soft); color:var(--cool)}
+.chip.brass{background:var(--brass-soft); color:var(--brass)}
+.chip .dot{width:6px; height:6px; border-radius:50%; background:currentColor}
+
+.who{display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:700}
+.who .pip{width:9px;height:9px;border-radius:50%;flex:none}
+
+/* today board */
+.today-row{display:grid; grid-template-columns:150px minmax(0,1fr); gap:14px; padding:13px 14px; border-bottom:1px solid var(--line)}
+@media (max-width:560px){ .today-row{grid-template-columns:minmax(0,1fr); gap:6px} }
+.today-meta{display:flex; flex-direction:column; gap:6px}
+.today-plan{font-size:14px; color:var(--ink-2); white-space:pre-wrap; word-break:break-word}
+.today-plan.blank{color:var(--muted); font-style:italic}
+.today-done{
+  font-size:13.5px; color:var(--ink-2); white-space:pre-wrap; word-break:break-word;
+  margin-top:6px; padding-left:10px; border-left:2px solid var(--ok);
+}
+.done-tag{
+  display:inline-block; font-size:10px; font-family:var(--mono); letter-spacing:.1em;
+  font-weight:700; color:var(--ok); margin-right:7px; vertical-align:1px;
+}
+.ng{font-size:12.5px; color:var(--bad); font-weight:500}
+.ng .num{font-weight:600}
+
+textarea, input[type=text], input[type=email], input[type=number], input[type=date], input[type=time], input[type=password], input[type=url], select{
+  width:100%; background:var(--paper); border:1px solid var(--line-strong); border-radius:var(--r);
+  padding:7px 9px; font-size:14px;
+}
+textarea{resize:vertical; min-height:70px; line-height:1.6}
+label.f{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); font-weight:700}
+.fields{display:grid; gap:12px}
+.fields.two{grid-template-columns:1fr 1fr}
+@media (max-width:560px){ .fields.two{grid-template-columns:1fr} }
+
+/* calendar */
+.cal-scroll{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); background:var(--surface)}
+table.cal{border-collapse:separate; border-spacing:0; font-size:12px; min-width:100%}
+table.cal th, table.cal td{border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:0}
+table.cal th.name, table.cal td.name{
+  position:sticky; left:0; z-index:2; background:var(--surface); min-width:118px;
+  padding:6px 10px; text-align:left; border-right:1px solid var(--line-strong);
+}
+table.cal thead th{background:var(--surface-2); font-weight:700; font-size:11px; color:var(--muted); padding:5px 0; text-align:center; min-width:34px}
+table.cal thead th.sat{color:var(--cool)}
+table.cal thead th.sun{color:var(--bad)}
+table.cal td.day{text-align:center; height:44px; vertical-align:middle}
+.cell{
+  width:100%; height:44px; border:0; background:transparent; display:flex;
+  flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:0;
+}
+.cell:hover{background:var(--surface-2)}
+.cell .k{font-size:11px; font-weight:700; line-height:1}
+.cell .marks{display:flex; gap:2px; height:5px; align-items:center}
+.cell .m{width:5px; height:5px; border-radius:50%}
+.m.ngm{background:var(--bad)}
+.m.notem{background:var(--brass)}
+.m.donem{background:var(--ok)}
+.m.linkm{background:var(--cool)}
+td.k-off{background:var(--bad-soft)}
+td.k-office{background:var(--brass-soft)}
+td.k-home{background:var(--cool-soft)}
+/* 半々の日は、事務所と在宅の色をそのまま half-and-half で見せる */
+td.k-both{background:linear-gradient(112deg, var(--brass-soft) 0 50%, var(--cool-soft) 50% 100%)}
+.legend i.k-both-sw{background:linear-gradient(112deg, var(--brass-soft) 0 50%, var(--cool-soft) 50% 100%)}
+td.k-out{background:var(--warn-soft)}
+td.today-col{box-shadow:inset 0 0 0 2px var(--brass)}
+.legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:10px; align-items:center}
+.cell .k{min-height:11px}
+td.s-work{background:var(--ok-soft)}
+td.s-off{background:var(--bad-soft)}
+.cal .who{flex-wrap:nowrap; min-width:0}
+/* a start time has to fit a day column, so it sets the size for this grid */
+table.cal .cell .k{font-size:10.5px; letter-spacing:-.02em}
+.cal .who .mine{font-size:10px; font-weight:500; color:var(--brass); flex:none}
+
+/* staff side: its own slim header, since the office door and presence are HQ-only */
+.staff-bar{display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--surface)}
+.staff-bar .mark{font-family:var(--serif); font-size:15px; letter-spacing:.16em; color:var(--brass)}
+.staff-site{font-size:13.5px; font-weight:700}
+.staff-me{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-2);
+  background:transparent; border:0; padding:2px 4px; border-radius:var(--r)}
+.staff-me:hover{background:var(--surface-2)}
+.site-switch{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px}
+.site-switch.sub{margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--line)}
+
+/* one big punch button - the thing most people open the app to press */
+.punch-card{display:flex; align-items:center; gap:12px; padding:14px; flex-wrap:wrap; margin-bottom:16px}
+.punch-now{flex:1 1 150px; min-width:0; display:flex; flex-direction:column; gap:2px}
+.punch-now b{font-size:15px}
+.punch-now span{font-size:12.5px; color:var(--muted)}
+.punch-btn{padding:11px 22px; font-size:15px}
+.todo-row{display:flex; gap:10px; align-items:flex-start}
+.todo-meta{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px}
+.legend i{display:inline-block; width:12px; height:12px; border-radius:2px; margin-right:5px; vertical-align:-2px}
+/* やったこと一覧：読むだけなので、押せる見た目にはしない */
+.done-row{display:flex; gap:10px; padding:9px 13px; border-bottom:1px solid var(--line)}
+.done-row:last-child{border-bottom:0}
+.done-mark{color:var(--ok); font-size:13px; line-height:1.7; flex:none}
+.done-head{display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; font-size:12px}
+.done-body{font-size:13.5px; color:var(--ink); white-space:pre-wrap; word-break:break-word; margin-top:2px}
+.out-chip{align-self:center; white-space:nowrap}
+/* 掲示板：1件を1枚として読ませる。見出しは幅いっぱい、操作は下の隅に。 */
+.note{padding:13px 15px 11px; border-bottom:1px solid var(--line)}
+.note:last-child{border-bottom:0}
+.note.pin{background:var(--brass-soft)}
+.note-top{display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-bottom:5px}
+.note-top:empty{display:none}
+.note-when{font-size:11.5px; color:var(--muted)}
+.note-title{
+  font-family:var(--serif); font-size:16px; font-weight:700; line-height:1.45;
+  margin:0 0 5px; word-break:break-word;
+}
+.note-body{font-size:13px; color:var(--ink-2); line-height:1.75; white-space:pre-wrap; word-break:break-word}
+.note-link{margin-top:5px; font-size:12.5px}
+.note-foot{
+  display:flex; align-items:center; gap:10px; margin-top:8px;
+  font-size:11px; color:var(--muted);
+}
+.note-foot > span{flex:1; min-width:0}
+/* 貼られた URL は短く見せる。行を占領させない */
+.in-link{
+  display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; vertical-align:bottom; font-size:12.5px;
+}
+.decided{
+  font-size:13px; color:var(--ink); white-space:pre-wrap; word-break:break-word;
+  border-left:3px solid var(--ok); padding:4px 0 4px 9px; margin-top:3px;
+}
+/* 古いものを見せ続けるより、古いと言う。押せば読み直す */
+.stale-bar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:8px 16px; font-size:12.5px; background:var(--warn-soft); color:var(--ink);
+  border-bottom:1px solid var(--line);
+}
+
+/* tiles */
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r); overflow:hidden}
+.tile{background:var(--surface); padding:13px 15px; display:flex; flex-direction:column; gap:3px}
+.tile .lab{font-size:11px; letter-spacing:.12em; color:var(--muted); font-weight:700; font-family:var(--mono)}
+.tile .val{font-family:var(--mono); font-size:23px; font-weight:600; font-variant-numeric:tabular-nums; line-height:1.2}
+.tile .val.bad{color:var(--bad)} .tile .val.ok{color:var(--ok)} .tile .val.warn{color:var(--warn)}
+.tile .sub{font-size:11.5px; color:var(--muted)}
+
+/* task rows */
+.t-row{display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:11px; padding:11px 14px; border-bottom:1px solid var(--line); align-items:start}
+.t-row:hover{background:var(--surface-2)}
+.t-title{font-size:14.5px; font-weight:500; word-break:break-word}
+.t-row.done .t-title{text-decoration:line-through; color:var(--muted)}
+.t-meta{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px}
+.t-detail{font-size:12.5px; color:var(--muted); white-space:pre-wrap; margin-top:3px; word-break:break-word}
+.t-acts{display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end}
+.tick{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line-strong);background:transparent;margin-top:2px;flex:none;display:grid;place-items:center;padding:0}
+.tick.on{background:var(--ok); border-color:var(--ok); color:#fff; font-size:11px}
+.tick.memo{border-style:dashed; color:var(--muted); font-size:11px; line-height:1}
+.tick:disabled{opacity:.45}
+.pick-list{display:flex; flex-wrap:wrap; gap:8px; margin-top:6px}
+.pick{display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--line);
+      border-radius:999px; font-size:13px; background:var(--surface)}
+.pick input{margin:0}
+.pick:has(input:checked){border-color:var(--brass-line); background:var(--brass-soft)}
+.wanted{border-left:3px solid var(--brass)}
+
+/* table */
+.tbl-scroll{overflow-x:auto}
+table.data{width:100%; border-collapse:collapse; font-size:13.5px; min-width:640px}
+table.data.data-wide{min-width:720px}
+table.data th{
+  text-align:left; font-size:11px; letter-spacing:.1em; color:var(--muted); font-weight:700;
+  font-family:var(--mono); padding:8px 12px; border-bottom:1px solid var(--line-strong); white-space:nowrap;
+}
+table.data td{padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:middle}
+table.data tr:hover td{background:var(--surface-2)}
+table.data td.r, table.data th.r{text-align:right}
+tr.paid td:not(.acts){opacity:.55}
+
+/* vault */
+.lockbox{max-width:430px; margin:10px auto; padding:26px; text-align:center}
+.lockbox .glyph{font-size:30px; margin-bottom:6px}
+.secret{display:flex; align-items:center; gap:6px}
+.secret code{
+  font-family:var(--mono); font-size:13px; background:var(--surface-2); padding:2px 7px;
+  border-radius:3px; border:1px solid var(--line); min-width:88px; display:inline-block;
+  word-break:break-all;
+}
+.note{
+  font-size:12.5px; color:var(--muted); background:var(--surface-2); border:1px solid var(--line);
+  border-left:3px solid var(--brass); padding:10px 13px; border-radius:2px; line-height:1.7;
+}
+
+/* modal */
+.scrim{position:fixed; inset:0; background:rgba(20,16,22,.55); backdrop-filter:blur(2px); z-index:100; display:grid; place-items:center; padding:16px}
+.modal{background:var(--surface); border:1px solid var(--line-strong); border-radius:6px; box-shadow:var(--shadow); width:min(560px,100%); max-height:88vh; max-height:88dvh; display:flex; flex-direction:column}
+.modal header{padding:15px 18px 11px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
+.modal header h3{font-family:var(--serif); font-size:16px}
+.modal .body{padding:16px 18px; overflow:auto}
+.modal footer{padding:12px 18px; border-top:1px solid var(--line); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap}
+.modal footer .left{margin-right:auto}
+
+.toast{
+  position:fixed; left:50%; bottom:26px; transform:translateX(-50%); z-index:200;
+  background:var(--ink); color:var(--paper); padding:9px 17px; border-radius:999px;
+  font-size:13px; font-weight:500; box-shadow:var(--shadow); pointer-events:none;
+}
+.banner{
+  background:var(--warn-soft); color:var(--warn); border-bottom:1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  font-size:13px; padding:8px 0; font-weight:500;
+}
+.presets{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px}
+.preset{border:1px dashed var(--line-strong); background:transparent; color:var(--muted); font-size:12px; padding:2px 9px; border-radius:999px}
+.preset:hover{border-style:solid; color:var(--brass); border-color:var(--brass)}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} }
+
+/* ---------- auth / gate screens (web build only) ---------- */
+.gate{min-height:100vh; min-height:100dvh; display:grid; place-items:center; padding:24px 16px}
+.gate-card{width:min(400px,100%); background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:26px 24px; box-shadow:var(--shadow)}
+.gate .brand{justify-content:center; margin:0 0 4px}
+.gate h1{font-family:var(--serif); font-size:19px; text-align:center; margin-bottom:5px}
+.gate p.lead{font-size:13px; color:var(--muted); text-align:center; margin-bottom:18px; line-height:1.7}
+.gate .fields{margin-bottom:14px}
+.gate .err{color:var(--bad); font-size:12.5px; font-weight:700; line-height:1.6; margin-bottom:12px}
+.gate .swap{text-align:center; font-size:12.5px; color:var(--muted); margin-top:14px}
+.gate .swap button{border:0; background:none; color:var(--brass); font-weight:700; text-decoration:underline; text-underline-offset:3px; padding:0}
+.colorpick{display:flex; gap:8px; flex-wrap:wrap}
+.colorpick button{width:30px; height:30px; border-radius:50%; border:2px solid transparent; padding:0}
+.colorpick button[aria-pressed="true"]{border-color:var(--ink)}
+.who-bar{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted)}
+/* ---------- ID / pass toolbar and groups ---------- */
+.vault-bar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px}
+.vault-search{flex:1 1 240px; min-width:0}
+.vault-group{display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); font-weight:700}
+.vault-group select{width:auto; min-width:118px}
+.grp-head{
+  display:flex; align-items:baseline; gap:9px; margin:0 0 6px; padding-top:2px;
+  border-bottom:1px solid var(--line-strong); padding-bottom:5px;
+}
+.grp-name{font-family:var(--serif); font-size:15px; font-weight:700}
+.g1{--g:var(--g1); --gs:var(--g1s)} .g2{--g:var(--g2); --gs:var(--g2s)}
+.g3{--g:var(--g3); --gs:var(--g3s)} .g4{--g:var(--g4); --gs:var(--g4s)}
+.g5{--g:var(--g5); --gs:var(--g5s)} .g6{--g:var(--g6); --gs:var(--g6s)}
+.g7{--g:var(--g7); --gs:var(--g7s)} .g8{--g:var(--g8); --gs:var(--g8s)}
+.g-dot{
+  display:inline-block; width:9px; height:9px; border-radius:2px; background:var(--g);
+  margin-right:6px; vertical-align:1px; flex:none;
+}
+/* 色を付けた見出しは、下の表と地続きの1つのかたまりに見せる */
+.grp-head.gc{
+  align-items:center; margin-bottom:0; padding:6px 11px 5px;
+  background:var(--gs); border-bottom:2px solid var(--g); border-radius:var(--r) var(--r) 0 0;
+}
+.grp-head.gc .grp-name{color:var(--g)}
+.panel.gp{border-left:3px solid var(--g); border-radius:0 0 var(--r) var(--r)}
+@media (max-width:720px){
+  .vault-search{flex:1 1 100%}
+  .vault-group{flex:1 1 100%; justify-content:space-between}
+  .vault-group select{flex:1 1 auto; margin-left:10px}
+}
+
+/* ---------- shop notes ---------- */
+.shop{border-bottom:1px solid var(--line)}
+.shop:last-child{border-bottom:0}
+.shop-head{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:14px 16px 8px}
+.shop-head h3{font-family:var(--serif); font-size:17px}
+.shop-head .spacer{margin-left:auto}
+.shop-grid{display:grid; grid-template-columns:104px minmax(0,1fr); gap:2px 14px; padding:0 16px 15px; margin:0}
+.shop-grid dt{
+  font-size:11px; font-family:var(--mono); letter-spacing:.08em; color:var(--muted);
+  font-weight:700; padding-top:4px;
+}
+.shop-grid dd{margin:0; font-size:13.5px; white-space:pre-wrap; word-break:break-word; padding-bottom:6px}
+.shop-grid dd.blank{color:var(--muted); font-style:italic}
+@media (max-width:560px){
+  .shop-grid{grid-template-columns:minmax(0,1fr); gap:0}
+  .shop-grid dt{padding-top:9px}
+  .shop-grid dd{padding-bottom:2px}
+}
+
+/* ---------- theme switch ---------- */
+.themebtn{
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--muted);
+  width:34px; height:34px; border-radius:50%; display:grid; place-items:center;
+  font-size:15px; padding:0; flex:none;
+}
+.themebtn:hover{color:var(--brass); border-color:var(--brass)}
+
+/* ---------- phone ---------- */
+@media (max-width:720px){
+  /* 画面が小さいほど字を大きくする理由はない。全体を一段落とす。
+     中身の文字寸法は JS 側に px で入っているものが多いので、
+     読む場所ごと縮める（zoom は inline の px にも効く）。 */
+  body{font-size:14px}
+  #view, #modalRoot{zoom:.93}
+  .mast-in{gap:10px; padding:9px 0}
+  .brand{margin-right:0; flex:0 0 auto}
+  .brand .mark{font-size:17px}
+  .brand .sub{display:none}
+  #doorBox{flex:1 1 100%; order:3; min-width:0}
+  .door{justify-content:space-between}
+  .here{order:2; margin-left:auto; min-width:0}
+  .here .chip{display:none}
+  .av{width:24px; height:24px; font-size:10px; margin-left:-5px}
+  .tiles > .tile:last-child:nth-child(odd){grid-column:1 / -1}
+  main{padding:14px 0 40px}
+  .sec{margin-bottom:20px}
+
+  /* タブは PC と同じく上に置く。下固定だと、押した指で中身が隠れるうえ、
+     画面ごとに場所が変わって覚え直しになる。 */
+  .tabs-in{padding:0; gap:0}
+  .tab{
+    flex:1 1 0; padding:9px 2px 8px; font-size:11px; letter-spacing:-.02em;
+    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
+  }
+  .tab .t-lg{display:none}
+  .tab .t-sm{display:inline}
+  /* 件数は文字の幅を食わない場所に。並べて置くと「タスク」が切れる */
+  .tab{position:relative}
+  .tab .badge{
+    position:absolute; top:2px; right:3px; margin-left:0;
+    min-width:13px; padding:0 3px; font-size:9px; line-height:13px;
+  }
+
+  /* data tables become stacked cards */
+  table.data, table.data.data-wide{min-width:0; display:block}
+  table.data thead{display:none}
+  table.data tbody, table.data tr, table.data td{display:block; width:auto}
+  table.data tr{
+    border-bottom:1px solid var(--line); padding:11px 13px;
+    display:grid; grid-template-columns:auto 1fr; gap:2px 10px;
+  }
+  table.data tr:last-child{border-bottom:0}
+  table.data td{border:0; padding:2px 0; grid-column:2}
+  table.data td::before{
+    content:attr(data-label); grid-column:1; display:block;
+    font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--muted);
+    font-weight:700; padding-top:3px;
+  }
+  table.data td{display:grid; grid-template-columns:76px minmax(0,1fr); gap:10px; align-items:baseline}
+  table.data td.r{text-align:left}
+  table.data td.acts{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; grid-column:1 / -1}
+  table.data td.acts::before{content:none}
+  table.data td.acts .btn{flex:1 1 auto; min-height:40px}
+  table.data td.acts .btn.ghost{border-color:var(--line-strong); color:var(--ink-2)}
+  table.data tr:hover td{background:transparent}
+  .tbl-scroll{overflow-x:visible}
+
+  /* modals as bottom sheets */
+  .scrim{padding:0; place-items:end stretch}
+  .modal{width:100%; max-height:92vh; max-height:92dvh; border-radius:14px 14px 0 0; border-bottom:0}
+  .modal footer{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+  .modal footer .btn{flex:1 1 auto; min-height:42px}
+  .modal footer .left{flex:1 1 100%; order:2; margin-right:0}
+
+  /* comfortable touch targets */
+  .btn{padding:8px 13px; font-size:14px}
+  .btn.sm{padding:6px 11px; font-size:13px}
+  /* 見出し・説明・ボタンが3行に散ると、見出しが埋もれる。
+     見出しとボタンを同じ行に置き、説明はその下に回す。 */
+  .sec-head{gap:8px 10px; margin-bottom:8px}
+  .sec-head .hint{flex:1 1 100%; order:3; margin-top:-2px}
+  .sec-head .btn-row{flex:1 1 100%; margin-left:0}
+  /* a lone button should not stretch across the phone */
+  .sec-head .btn-row:has(> :only-child){flex:0 1 auto; margin-left:auto}
+  .staff-bar{padding:9px 14px; gap:8px}
+  .punch-card .punch-btn{flex:1 1 100%}
+  .sec-head .btn-row .btn{flex:1 1 0; text-align:center; min-width:0}
+  textarea, input, select{font-size:16px; padding:9px 10px}
+  .tick{width:26px; height:26px}
+  .cell{height:48px}
+  table.cal thead th{min-width:38px}
+  .lockbox{padding:22px 16px}
+  .gate-card{padding:22px 18px}
+}
+</style>
+</head>
+<body>
+<div class="masthead" id="masthead" hidden>
+  <div class="wrap mast-in">
+    <div class="brand">
+      <span class="mark">PRIME</span>
+      <span class="sub">事務所ボード</span>
+    </div>
+    <div id="doorBox"></div>
+    <div id="hereBox" class="here"></div>
+  </div>
+</div>
+<div id="bannerBox"></div>
+<nav class="tabs" id="tabsNav" hidden><div class="wrap tabs-in" id="tabs" role="tablist"></div></nav>
+<div class="stale-bar" id="staleBar" hidden></div>
+<main class="wrap" id="view"></main>
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
