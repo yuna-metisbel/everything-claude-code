@@ -489,17 +489,28 @@ tr.paid td:not(.acts){opacity:.55}
   /* 画面が小さいほど字を大きくする理由はない。全体を一段落とす。
      中身の文字寸法は JS 側に px で入っているものが多いので、
      読む場所ごと縮める（zoom は inline の px にも効く）。 */
-  body{font-size:14px}
-  #view, #modalRoot{zoom:.93}
-  .mast-in{gap:10px; padding:9px 0}
+  /* 一段階を --fs にまとめ、設定の 小/中/大 で差し替える。
+     中身の文字寸法は JS 側に px で入っているものが多いので、読む場所ごと
+     zoom で縮める（zoom は inline の px にも効く）。上の帯とタブは #view の
+     外にあって zoom が効かないので、同じ --fs を掛けて個別に下げる。 */
+  :root{--fs:.82}
+  :root[data-fs="s"]{--fs:.74}
+  :root[data-fs="l"]{--fs:.93}
+  body{font-size:calc(15px * var(--fs))}
+  #view, #modalRoot{zoom:var(--fs)}
+  .mast-in{gap:9px; padding:7px 0}
   .brand{margin-right:0; flex:0 0 auto}
-  .brand .mark{font-size:17px}
+  .brand .mark{font-size:calc(18px * var(--fs)); letter-spacing:.13em}
   .brand .sub{display:none}
   #doorBox{flex:1 1 100%; order:3; min-width:0}
-  .door{justify-content:space-between}
+  .door{justify-content:space-between; padding:7px 10px}
+  .door .txt b{font-size:calc(15px * var(--fs))}
+  .door .txt small{font-size:calc(12px * var(--fs))}
   .here{order:2; margin-left:auto; min-width:0}
   .here .chip{display:none}
-  .av{width:24px; height:24px; font-size:10px; margin-left:-5px}
+  .av{width:21px; height:21px; font-size:9px; margin-left:-5px}
+  .themebtn{width:29px; height:29px; font-size:13px}
+  .stale-bar, #bannerBox .banner{font-size:calc(15px * var(--fs))}
   .tiles > .tile:last-child:nth-child(odd){grid-column:1 / -1}
   main{padding:14px 0 40px}
   .sec{margin-bottom:20px}
@@ -508,7 +519,7 @@ tr.paid td:not(.acts){opacity:.55}
      画面ごとに場所が変わって覚え直しになる。 */
   .tabs-in{padding:0; gap:0}
   .tab{
-    flex:1 1 0; padding:9px 2px 8px; font-size:11px; letter-spacing:-.02em;
+    flex:1 1 0; padding:8px 2px 7px; font-size:calc(12.2px * var(--fs)); letter-spacing:-.02em;
     min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
   }
   .tab .t-lg{display:none}
@@ -517,7 +528,7 @@ tr.paid td:not(.acts){opacity:.55}
   .tab{position:relative}
   .tab .badge{
     position:absolute; top:2px; right:3px; margin-left:0;
-    min-width:13px; padding:0 3px; font-size:9px; line-height:13px;
+    min-width:12px; padding:0 3px; font-size:8.5px; line-height:12px;
   }
 
   /* data tables become stacked cards */
@@ -551,9 +562,10 @@ tr.paid td:not(.acts){opacity:.55}
   .modal footer .btn{flex:1 1 auto; min-height:42px}
   .modal footer .left{flex:1 1 100%; order:2; margin-right:0}
 
-  /* comfortable touch targets */
-  .btn{padding:8px 13px; font-size:14px}
-  .btn.sm{padding:6px 11px; font-size:13px}
+  /* 指で押せる大きさは保ったまま、字だけ落とす。 */
+  .btn{padding:8px 12px; font-size:13px}
+  .btn.sm{padding:6px 10px; font-size:12px}
+  .masthead .btn{padding:7px 12px; font-size:calc(15px * var(--fs))}
   /* 見出し・説明・ボタンが3行に散ると、見出しが埋もれる。
      見出しとボタンを同じ行に置き、説明はその下に回す。 */
   .sec-head{gap:8px 10px; margin-bottom:8px}
@@ -564,7 +576,12 @@ tr.paid td:not(.acts){opacity:.55}
   .staff-bar{padding:9px 14px; gap:8px}
   .punch-card .punch-btn{flex:1 1 100%}
   .sec-head .btn-row .btn{flex:1 1 0; text-align:center; min-width:0}
-  textarea, input, select{font-size:16px; padding:9px 10px}
+  /* iPhone は 16px 未満の入力欄に触れると、ページごと拡大して寄っていく。
+     一度そうなると全体が大きいまま戻らないので、実寸だけは 16px を割らせない
+     （見た目は上の zoom で他と揃う）。素の input では上の型つき指定に負けるため、
+     同じ並びで書く。 */
+  textarea, input[type=text], input[type=email], input[type=number], input[type=date],
+  input[type=time], input[type=password], input[type=url], select{font-size:16px; padding:9px 10px}
   .tick{width:26px; height:26px}
   .cell{height:48px}
   table.cal thead th{min-width:38px}

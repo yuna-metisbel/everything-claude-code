@@ -50,6 +50,16 @@ function applyTheme(){
   if (S.theme === "auto") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", S.theme);
 }
+// 画面の見え方は端末と持ち主でちがう。こちらで決め打つより、選べるようにする。
+// 端末ごとの好みなので、データベースではなくこの端末にだけ覚える。
+const FONT_SIZES = [["s","小"],["m","中"],["l","大"]];
+function applyFontSize(){
+  document.documentElement.setAttribute("data-fs", S.fontSize);
+}
+function setFontSize(v){
+  if (!FONT_SIZES.some(f => f[0] === v)) return;
+  S.fontSize = v; ls("prime.fontsize", v); applyFontSize(); render();
+}
 function cycleTheme(){
   const i = THEMES.findIndex(t => t[0] === S.theme);
   S.theme = THEMES[(i + 1) % THEMES.length][0];
@@ -126,7 +136,8 @@ const S = {
   shops: [], notices: [], allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
-  theme: ls("prime.theme") || "light", settings: null, form: {}, mode: "",
+  theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
+  settings: null, form: {}, mode: "",
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
   shopKind: ls("prime.shopKind") || "shop",
@@ -415,6 +426,7 @@ async function pushTurnOff(){
 /* ============================ auth ============================ */
 async function boot(){
   applyTheme();
+  applyFontSize();
   S.siteCode = urlSiteCode();
   const { data } = await sb.auth.getSession();
   S.user = data && data.session ? data.session.user : null;
@@ -2021,6 +2033,14 @@ function viewSettings(){
       '<button class="btn sm ghost" data-act="edit-member" data-id="' + h(m.id) + '">編集</button></div>').join("")
       : '<div class="empty">—</div>') + "</div></div></section>" +
 
+    '<section class="sec"><div class="sec-head"><h2>文字の大きさ</h2>' +
+      '<span class="hint">この端末でだけ変わります。ほかの人の見え方はそのままです。</span></div>' +
+    '<div class="panel"><div style="padding:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+    FONT_SIZES.map(function(f){
+      return '<button class="btn' + (S.fontSize === f[0] ? " primary" : "") +
+        '" data-act="font-size" data-v="' + f[0] + '">' + f[1] + "</button>";
+    }).join("") + "</div></div></section>" +
+
     '<section class="sec"><div class="sec-head"><h2>スマホの通知</h2>' +
       '<span class="hint">会議やお知らせが登録されたとき、決まったことが書かれたとき、' +
       "そして毎朝8時に「今日のこと」が届きます。端末ごとに設定します。</span></div>" +
@@ -2571,6 +2591,7 @@ document.addEventListener("click", async function(ev){
           member_id: S.me.id, happened_at: nowIso() }), out ? "持ち出しにしました" : "返却にしました");
         break;
       }
+      case "font-size": setFontSize(btn.dataset.v); break;
       case "push-on": await pushTurnOn(); break;
       case "push-off": await pushTurnOff(); break;
       case "new-device": {
