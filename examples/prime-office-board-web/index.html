@@ -110,6 +110,12 @@ a{color:var(--brass); text-underline-offset:3px}
   padding:8px 10px 8px 14px; border-radius:var(--r);
 }
 .door.open{background:var(--ok-soft); border-color:color-mix(in srgb, var(--ok) 40%, transparent)}
+/* 未確認は、開いているとも閉まっているとも言わない見た目にする */
+.door.unknown{background:var(--surface-2); border-style:dashed}
+.door .btn-row{gap:6px; flex:none}
+.door .btn-row .btn{white-space:nowrap}
+.door .txt{flex:1 1 auto; min-width:0}
+.door.unknown .lamp{background:transparent; border:2px solid var(--line-strong)}
 .door .lamp{width:11px; height:11px; border-radius:50%; background:var(--line-strong); flex:none}
 .door.open .lamp{background:var(--ok); box-shadow:0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent)}
 .door .txt{display:flex; flex-direction:column; line-height:1.25}
@@ -293,6 +299,29 @@ table.cal .cell .k{font-size:10.5px; letter-spacing:-.02em}
 .done-head{display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; font-size:12px}
 .done-body{font-size:13.5px; color:var(--ink); white-space:pre-wrap; word-break:break-word; margin-top:2px}
 .out-chip{align-self:center; white-space:nowrap}
+/* 掲示板：1件を1枚として読ませる。見出しは幅いっぱい、操作は下の隅に。 */
+.note{padding:13px 15px 11px; border-bottom:1px solid var(--line)}
+.note:last-child{border-bottom:0}
+.note.pin{background:var(--brass-soft)}
+.note-top{display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-bottom:5px}
+.note-top:empty{display:none}
+.note-when{font-size:11.5px; color:var(--muted)}
+.note-title{
+  font-family:var(--serif); font-size:16px; font-weight:700; line-height:1.45;
+  margin:0 0 5px; word-break:break-word;
+}
+.note-body{font-size:13px; color:var(--ink-2); line-height:1.75; white-space:pre-wrap; word-break:break-word}
+.note-link{margin-top:5px; font-size:12.5px}
+.note-foot{
+  display:flex; align-items:center; gap:10px; margin-top:8px;
+  font-size:11px; color:var(--muted);
+}
+.note-foot > span{flex:1; min-width:0}
+/* 貼られた URL は短く見せる。行を占領させない */
+.in-link{
+  display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; vertical-align:bottom; font-size:12.5px;
+}
 .decided{
   font-size:13px; color:var(--ink); white-space:pre-wrap; word-break:break-word;
   border-left:3px solid var(--ok); padding:4px 0 4px 9px; margin-top:3px;
@@ -523,6 +552,10 @@ tr.paid td:not(.acts){opacity:.55}
   /* comfortable touch targets */
   .btn{padding:8px 13px; font-size:14px}
   .btn.sm{padding:6px 11px; font-size:13px}
+  /* 見出し・説明・ボタンが3行に散ると、見出しが埋もれる。
+     見出しとボタンを同じ行に置き、説明はその下に回す。 */
+  .sec-head{gap:8px 10px; margin-bottom:8px}
+  .sec-head .hint{flex:1 1 100%; order:3; margin-top:-2px}
   .sec-head .btn-row{flex:1 1 100%; margin-left:0}
   /* a lone button should not stretch across the phone */
   .sec-head .btn-row:has(> :only-child){flex:0 1 auto; margin-left:auto}

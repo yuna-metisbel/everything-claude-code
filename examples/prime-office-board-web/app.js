@@ -568,12 +568,26 @@ const devicesOut = () => S.devices.filter(d => d.active && deviceState(d.id))
 function renderDoor(){
   const open = !!S.office.doorOpen;
   const by = S.office.updatedBy ? (member(S.office.updatedBy) || {}).name : "";
+  // 昨日以前の記録は、今日の状態の証拠にならない。日をまたいだら未確認に戻す。
+  // そうしないと、何日も前に開けた人の名前が「いまの担当」のように出続ける。
+  const fresh = !!S.office.updatedAt && jstDay(S.office.updatedAt) === today();
   el("doorBox").innerHTML =
-    '<div class="door ' + (open ? "open" : "") + '">' +
+    '<div class="door ' + (fresh ? (open ? "open" : "shut") : "unknown") + '">' +
       '<span class="lamp"></span>' +
-      '<span class="txt"><b>事務所 ' + (open ? "あいてます" : "しまっています") + "</b>" +
-        "<small>" + (S.office.updatedAt ? h((by || "誰か") + " が " + stamp(S.office.updatedAt)) : "まだ記録がありません") + "</small></span>" +
-      '<button class="btn sm" data-act="door">' + (open ? "閉めた" : "開けた") + "</button>" +
+      '<span class="txt"><b>事務所 ' +
+        (fresh ? (open ? "あいてます" : "しまっています") : "未確認") + "</b>" +
+        "<small>" + (fresh
+          ? h((by || "誰か") + " が " + stamp(S.office.updatedAt))
+          : "今日はまだ誰も記録していません") + "</small></span>" +
+      '<span class="btn-row" style="margin-left:auto">' +
+        (fresh
+          ? '<button class="btn sm" data-act="door" data-v="' + (open ? "close" : "open") + '">' +
+            (open ? "閉めた" : "開けた") + "</button>"
+          // 未確認のときは、どちらを押すかを人が決める。片方だけ出すと、
+          // 押した結果がその日の記録として残るので、勝手に決めてはいけない。
+          : '<button class="btn sm" data-act="door" data-v="open">開けた</button>' +
+            '<button class="btn sm" data-act="door" data-v="close">閉めた</button>') +
+      "</span>" +
     "</div>" +
     // 持ち出されているものは、探す前に目に入る場所に出す。
     devicesOut().map(function(x){
@@ -639,29 +653,44 @@ function viewProfile(){
 /* ============================ お知らせ・共通予定 ============================ */
 // Team-wide entries: a whole-team meeting, a call with a media rep, or a plain
 // announcement such as a new staff member joining.
+// 本文に貼られた URL は、そのままだと1行を丸ごと占めて本文が読めなくなる。
+// 先にエスケープしてから短いリンクに置き換える（順番を逆にすると危ない）。
+function linkify(text){
+  return h(String(text || "")).replace(/https?:\/\/[^\s<>"']+/g, function(u){
+    const label = u.replace(/^https?:\/\//, "").replace(/^www\./, "");
+    // 後ろを切ると、末尾だけが違う URL が全部同じ見た目になる（入り口コードなど）。
+    // 真ん中を省いて、頭と末尾を残す。
+    const short = label.length > 34 ? label.slice(0, 15) + "…" + label.slice(-16) : label;
+    return '<a href="' + u + '" target="_blank" rel="noopener noreferrer" class="in-link">' +
+      short + "</a>";
+  });
+}
 function noticeRow(n){
   const d = n.date ? daysUntil(n.date) : null;
+  const meeting = n.kind === "meeting";
   const when = n.date
     ? '<span class="chip ' + (d === null ? "" : d < 0 ? "" : d === 0 ? "warn" : d <= 7 ? "cool" : "") + '">' +
       h(md(n.date)) + "(" + DOW[new Date(n.date + "T00:00:00").getDay()] + ")" +
       (d === 0 ? " 今日" : d === 1 ? " 明日" : "") + "</span>"
-    : '<span class="chip">お知らせ</span>';
-  const meeting = n.kind === "meeting";
+    : "";
   const whenMore = [n.at_time, n.place].filter(Boolean).join(" ・ ");
-  return '<div class="row" style="flex-direction:column;gap:5px;align-items:stretch">' +
-    '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">' +
+  // 掲示板として読めるように、上から「いつ・何の話か」→「見出し」→「本文」→「誰がいつ」。
+  // 見出しと編集ボタンを同じ行に並べると、見出しが折り返して読みにくくなる。
+  return '<article class="note' + (n.pinned ? " pin" : "") + '">' +
+    '<div class="note-top">' +
       (n.pinned ? '<span class="chip brass">重要</span>' : "") +
       (meeting ? '<span class="chip cool">会議</span>' : "") + when +
-      (whenMore ? '<span style="font-size:12px;color:var(--muted)">' + h(whenMore) + "</span>" : "") +
-      '<span style="font-size:14.5px;font-weight:700;flex:1;min-width:0;word-break:break-word">' + h(n.title) + "</span>" +
-      '<button class="btn sm ghost" data-act="edit-notice" data-id="' + h(n.id) + '">編集</button></div>' +
-    (n.body ? '<div style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word">' + h(n.body) + "</div>" : "") +
-    // 決まったことは、あとから読む人がいちばん探すものなので目立たせる。
-    (n.decided ? '<div class="decided"><span class="done-tag">決まったこと</span>' +
-      h(n.decided) + "</div>" : "") +
-    (n.url ? '<div><a href="' + h(n.url) + '" target="_blank" rel="noopener noreferrer" style="font-size:12.5px">リンクを開く ↗</a></div>' : "") +
-    '<div style="font-size:11px;color:var(--muted)">' + h((member(n.created_by) || {}).name || "") +
-      (n.created_at ? " ・ " + h(stamp(n.created_at)) : "") + "</div></div>";
+      (whenMore ? '<span class="note-when">' + h(whenMore) + "</span>" : "") +
+    "</div>" +
+    '<h3 class="note-title">' + h(n.title) + "</h3>" +
+    (n.body ? '<div class="note-body">' + linkify(n.body) + "</div>" : "") +
+    (n.decided ? '<div class="decided"><span class="done-tag">決まったこと</span>' + linkify(n.decided) + "</div>" : "") +
+    (n.url ? '<div class="note-link"><a href="' + h(n.url) + '" target="_blank" rel="noopener noreferrer">リンクを開く ↗</a></div>' : "") +
+    '<div class="note-foot">' +
+      "<span>" + h((member(n.created_by) || {}).name || "") +
+        (n.created_at ? " ・ " + h(stamp(n.created_at)) : "") + "</span>" +
+      '<button class="btn sm ghost" data-act="edit-notice" data-id="' + h(n.id) + '">編集</button>' +
+    "</div></article>";
 }
 function sortedNotices(){
   return S.notices.slice().sort(function(a, b){
@@ -2393,7 +2422,10 @@ document.addEventListener("click", async function(ev){
       case "signout": await signOut(); break;
 
       case "door":
-        await run(sb.from("office").update({ door_open: !S.office.doorOpen, updated_by: S.me.id, updated_at: nowIso() }).eq("id", 1));
+        // どちらの状態にするかはボタンが持つ。裏返すだけだと、未確認から
+        // 「開けた」を押したのに閉まった記録になることがある。
+        await run(sb.from("office").update({ door_open: btn.dataset.v === "open",
+          updated_by: S.me.id, updated_at: nowIso() }).eq("id", 1));
         break;
       case "present":
         await run(sb.from("members").update({ present: !S.me.present, present_at: nowIso() }).eq("id", S.me.id));
