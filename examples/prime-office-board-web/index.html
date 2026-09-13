@@ -444,39 +444,37 @@ tr.paid td:not(.acts){opacity:.55}
 
 /* ---------- phone ---------- */
 @media (max-width:720px){
-  body{font-size:15.5px}
-  .mast-in{gap:10px; padding:10px 0}
+  /* 画面が小さいほど字を大きくする理由はない。全体を一段落とす。
+     中身の文字寸法は JS 側に px で入っているものが多いので、
+     読む場所ごと縮める（zoom は inline の px にも効く）。 */
+  body{font-size:14px}
+  #view, #modalRoot{zoom:.93}
+  .mast-in{gap:10px; padding:9px 0}
   .brand{margin-right:0; flex:0 0 auto}
-  .brand .mark{font-size:19px}
+  .brand .mark{font-size:17px}
   .brand .sub{display:none}
   #doorBox{flex:1 1 100%; order:3; min-width:0}
   .door{justify-content:space-between}
   .here{order:2; margin-left:auto; min-width:0}
   .here .chip{display:none}
-  .av{width:26px; height:26px; font-size:11px; margin-left:-5px}
+  .av{width:24px; height:24px; font-size:10px; margin-left:-5px}
   .tiles > .tile:last-child:nth-child(odd){grid-column:1 / -1}
-  main{padding:16px 0 96px}
-  .sec{margin-bottom:22px}
+  main{padding:14px 0 40px}
+  .sec{margin-bottom:20px}
 
-  /* tabs move to the thumb */
-  .tabs{
-    position:fixed; top:auto; bottom:0; left:0; right:0; z-index:40;
-    border-bottom:0; border-top:1px solid var(--line);
-    padding-bottom:env(safe-area-inset-bottom);
-    box-shadow:0 -2px 14px -8px rgba(0,0,0,.5);
-  }
-  .tabs-in{padding:0; justify-content:space-between}
+  /* タブは PC と同じく上に置く。下固定だと、押した指で中身が隠れるうえ、
+     画面ごとに場所が変わって覚え直しになる。 */
+  .tabs-in{padding:0; gap:0}
   .tab{
-    flex:1 1 0; padding:13px 1px 7px; font-size:11px; letter-spacing:-.02em;
-    border-bottom:0; border-top:2px solid transparent; min-width:0;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
+    flex:1 1 0; padding:9px 2px 8px; font-size:11px; letter-spacing:-.02em;
+    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
   }
   .tab .t-lg{display:none}
   .tab .t-sm{display:inline}
-  .tab[aria-selected="true"]{border-top-color:var(--brass); border-bottom-color:transparent}
+  /* 件数は文字の幅を食わない場所に。並べて置くと「タスク」が切れる */
   .tab{position:relative}
   .tab .badge{
-    position:absolute; top:1px; right:4px; margin-left:0;
+    position:absolute; top:2px; right:3px; margin-left:0;
     min-width:13px; padding:0 3px; font-size:9px; line-height:13px;
   }
 
