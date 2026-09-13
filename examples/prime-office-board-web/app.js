@@ -133,6 +133,8 @@ const S = {
   notes: [], noteSide: ls("prime.noteSide") || "team",
   // 読み直しに失敗しているか、変更の通知が繋がっているか
   stale: false, live: false,
+  // スマホの通知。端末ごとに入れるものなので localStorage ではなく、その場で調べる。
+  push: { ready: false, on: false, busy: false, why: "" },
   devices: [], deviceLog: [],
   // 拠点（スタッフ用の入り口）。本部は sites を切り替えて見る。
   siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
@@ -325,6 +327,91 @@ function watchForStaleness(){
   setInterval(again, 60000);
 }
 
+/* ============================ スマホの通知 ============================ */
+// 通知はページを閉じていても届く必要があるので、受け口は service worker に置く。
+// iPhone は「ホーム画面に追加」したときしか通知を許さないので、そこだけ先に見る。
+const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches ||
+  navigator.standalone === true;
+
+async function pushRegister(){
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)){
+    S.push.why = "この端末（またはブラウザ）は通知に対応していません。";
+    return null;
+  }
+  if (isIos() && !isStandalone()){
+    S.push.why = "iPhone は、共有ボタンから「ホーム画面に追加」して、そこから開くと通知を受け取れます。";
+    return null;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js");
+    S.push.ready = true;
+    const sub = await reg.pushManager.getSubscription();
+    S.push.on = !!sub;
+    return reg;
+  } catch(e){
+    S.push.why = "通知の準備に失敗しました。";
+    return null;
+  }
+}
+
+// 公開鍵は base64url で来る。subscribe はバイト列しか受け取らない。
+function keyToBytes(b64){
+  const pad = b64.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(pad + "=".repeat((4 - pad.length % 4) % 4));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function pushTurnOn(){
+  const reg = await pushRegister();
+  if (!reg){ toast(S.push.why || "通知を使えません"); return; }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted"){
+    toast("通知が許可されませんでした。端末の設定からも変えられます。");
+    return;
+  }
+  const r = await sb.functions.invoke("push", { body: { action: "key" } });
+  const pub = r && r.data && r.data.publicKey;
+  if (!pub){ toast("通知の鍵を取れませんでした"); return; }
+  // ここは端末側の都合で落ちることがある（機内モード、通知サービスに繋がらない等）。
+  // 黙って終わると押しても何も起きないように見えるので、必ず何か返す。
+  let sub = null;
+  try {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: keyToBytes(pub)
+    });
+  } catch(e){
+    toast("この端末で通知を始められませんでした。少し時間をおいて、もう一度お試しください。");
+    return;
+  }
+  const j = sub.toJSON();
+  // endpoint が端末そのもの。同じ端末で入れ直しても増えないよう、それを鍵にする。
+  await run(sb.from("push_subs").upsert({
+    member_id: S.me.id, endpoint: j.endpoint,
+    p256dh: j.keys.p256dh, auth: j.keys.auth,
+    label: (navigator.userAgent.match(/iPhone|iPad|Android|Mac|Windows/) || ["端末"])[0]
+  }, { onConflict: "endpoint" }), "この端末に通知が届くようにしました");
+  S.push.on = true;
+  render();
+}
+
+async function pushTurnOff(){
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = reg && await reg.pushManager.getSubscription();
+    if (sub){
+      await sb.from("push_subs").delete().eq("endpoint", sub.endpoint);
+      await sub.unsubscribe();
+    }
+  } catch(e){ /* 端末側が先に消えていることがある */ }
+  S.push.on = false;
+  toast("この端末への通知を止めました");
+  render();
+}
+
 /* ============================ auth ============================ */
 async function boot(){
   applyTheme();
@@ -340,6 +427,8 @@ async function boot(){
   await refresh();
   subscribeLive();
   watchForStaleness();
+  // 端末側の状態を見てから設定画面の表示を合わせる。
+  pushRegister().then(function(){ if (S.screen === "app") render(); });
 }
 async function refresh(){
   if (S.user) S.form = {};
@@ -1932,6 +2021,18 @@ function viewSettings(){
       '<button class="btn sm ghost" data-act="edit-member" data-id="' + h(m.id) + '">編集</button></div>').join("")
       : '<div class="empty">—</div>') + "</div></div></section>" +
 
+    '<section class="sec"><div class="sec-head"><h2>スマホの通知</h2>' +
+      '<span class="hint">会議やお知らせが登録されたとき、決まったことが書かれたとき、' +
+      "そして毎朝8時に「今日のこと」が届きます。端末ごとに設定します。</span></div>" +
+    '<div class="panel"><div style="padding:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+      '<span class="chip ' + (S.push.on ? "ok" : "") + '">' + (S.push.on ? "この端末は受け取ります" : "この端末は受け取りません") + "</span>" +
+      (S.push.on
+        ? '<button class="btn" data-act="push-off">止める</button>'
+        : '<button class="btn primary" data-act="push-on">通知を受け取る</button>') +
+      (S.push.why ? '<div style="flex:1 1 100%;font-size:12.5px;color:var(--muted);line-height:1.7">' +
+        h(S.push.why) + "</div>" : "") +
+    "</div></div></section>" +
+
     '<section class="sec"><div class="sec-head"><h2>事務所から持ち出すもの</h2>' +
       '<span class="hint">持ち出し・返却はホームから。ここでは増やしたり外したりできます。</span>' +
       '<div class="btn-row"><button class="btn sm primary" data-act="new-device">＋ 追加</button></div></div>' +
@@ -2470,6 +2571,8 @@ document.addEventListener("click", async function(ev){
           member_id: S.me.id, happened_at: nowIso() }), out ? "持ち出しにしました" : "返却にしました");
         break;
       }
+      case "push-on": await pushTurnOn(); break;
+      case "push-off": await pushTurnOff(); break;
       case "new-device": {
         const name = prompt("持ち出すものの名前（例：黒スマホ）");
         if (!name || !name.trim()) break;

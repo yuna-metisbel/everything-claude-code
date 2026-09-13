@@ -8,9 +8,10 @@ Render が publish するのは `../prime-office-board-web/` だけなので、�
 
 ## Edge Function
 
-| 関数          | 役割                                 |
-|---------------|--------------------------------------|
-| `staff-login` | スタッフの「名前＋暗証番号」ログイン |
+| 関数          | 役割                                   |
+|---------------|----------------------------------------|
+| `staff-login` | スタッフの「名前＋暗証番号」ログイン   |
+| `push`        | スマホへの通知（送信鍵の配布と、送信） |
 
 暗証番号は4桁しかなく、bcrypt ハッシュでもブラウザに渡した時点で総当たりで割れる。
 そのため照合はこの関数（`service_role`）の中だけで行い、成功したときだけ
@@ -28,6 +29,36 @@ Render が publish するのは `../prime-office-board-web/` だけなので、�
 `site_gate(text)` だけは `anon` から呼べる。入り口の表示に必要な拠点名と名簿を、
 コードが一致して公開中の拠点についてのみ返す。
 
+## スマホへの通知
+
+送信鍵（VAPID）は `push` 関数が自分で作って `push_config` に置く。人の手で貼らないので、
+鍵がリポジトリにも会話にも出てこない。`push_config` は RLS を有効にしたうえで
+ポリシーを1つも置いていないので、`service_role` 以外からは1行も見えない。
+
+送信は誰でも呼べては困る（全員の端末を鳴らせてしまう）。名乗り方は2つだけ。
+
+- `service_role` の JWT
+- `push_config.send_secret` と一致する `x-push-secret` ヘッダー
+
+後者は DB 側から呼ぶためのもの。`service_role` の鍵を SQL に書き込まずに済む。
+照合は長さを揃えて1文字ずつ比べ、何文字目まで合っていたかが時間に出ないようにしている。
+
+送るきっかけは次の4つ。いずれも `push_send()` を通り、`push_log.tag` が一意なので
+同じ知らせで二度鳴らない。
+
+| きっかけ                       | しくみ                                      |
+|--------------------------------|---------------------------------------------|
+| 会議・お知らせが登録されたとき | `notices` の insert トリガ `notices_push()` |
+| 「決まったこと」が書かれたとき | `notices` の update トリガ（同じ関数）      |
+| 会議の前日・当日の朝           | `push_morning()`                            |
+| 期日が今日のタスク・支払い     | `push_morning()`（同じ通知にまとめる）      |
+
+朝の分は `pg_cron` の `push-morning`（`0 23 * * *` = 日本時間の8時）から。
+何も無い日は鳴らさない。空の通知が続くと、次から見なくなるため。
+
+端末の登録先は `push_subs`。自分の行しか読めず、書けず、消せない
+（`member_id = auth.uid()`）。他人の端末の endpoint は、本部からも見えない。
+
 ## デプロイ
 
 Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`）、
@@ -36,8 +67,8 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 
 ## スキーマ
 
-マイグレーションは Supabase プロジェクト側に記録されている。拠点まわりで入れたものは
-次の6件。
+マイグレーションは Supabase プロジェクト側に記録されている。拠点まわり以降に
+入れたものは次のとおり。
 
 | バージョン     | 名前                              | 内容                                                                             |
 |----------------|-----------------------------------|----------------------------------------------------------------------------------|
@@ -58,6 +89,10 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 | 20260913014336 | `meetings_and_emergency_contacts` | 会議（`kind`/時間/場所/決まったこと）と、連絡先・緊急連絡先                      |
 | 20260913014503 | `device_checkout`                 | `devices` `device_log`（黒スマホなどの持ち出し）                                 |
 | 20260913014640 | `per_item_visibility_tasks_vault` | やること・ID /パスの1件ごとの公開範囲と `hq_can_see()`                           |
+| 20260913174019 | `web_push_subscriptions`          | `push_subs` `push_config` `push_log`（スマホへの通知）                           |
+| 20260913174139 | `enable_pg_net_and_cron`          | DB から HTTP を投げる `pg_net` と、時刻で動かす `pg_cron`                        |
+| 20260913174159 | `push_send_secret`                | DB から送信を頼むときの合言葉を `push_config` に置く                             |
+| 20260913174403 | `push_triggers_and_digest`        | 会議・決まったこと・毎朝8時の「今日のこと」を送るトリガと関数                    |
 
 `staff_pin_hash_column_grants` は落とし穴の修正。Supabase は `public` の全テーブルに
 表単位の権限を配るので、表単位の権限をいったん剥がしてから見せてよい列だけを
