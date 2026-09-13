@@ -114,6 +114,8 @@ const colorDot = name => {
   return c ? '<span class="g-dot g' + c + '"></span>' : "";
 };
 // Categories the office actually books expenses under; free text is still allowed.
+// 会議の時間は、決まっている日もあれば「17時以降」までしか決まらない日もある。
+const TIME_HINTS = ["17時以降", "夕方", "午前中", "午後", "終日", "10:00", "14:00", "19:00〜"];
 const EXPENSE_CATEGORIES = ["広告・媒体掲載料","家賃","水道光熱費","通信費","備品・消耗品","交通費","外注費","接待交際費","講習・研修","その他"];
 const MEDIA_PRESETS = ["シティヘブンネット","エステ魂","メンエス魂","リフナビ","メンズエステ求人","エステの達人","X (旧Twitter)","公式LINE","Instagram","Googleビジネス","予約システム","勤怠システム"];
 
@@ -714,7 +716,13 @@ function modalNotice(n){
     '<label class="f">見出し<input type="text" id="n_title" maxlength="80" value="' + h(n.title || "") + '" placeholder="例：全体ミーティング / 新人スタッフが入りました"></label>' +
     '<div class="fields two">' +
       '<label class="f">日付（お知らせだけなら空でも可）<input type="date" id="n_date" value="' + h(n.date || "") + '"></label>' +
-      '<label class="f">時間<input type="time" id="nt_time" value="' + h(n.at_time || "") + '"></label></div>' +
+      // 「17時以降」「夕方」のように決まりきらないことのほうが多い。
+      // 時計の入力だと、決まっていない時間を書けずに空欄で出すことになる。
+      '<label class="f">時間<input type="text" id="nt_time" list="dl_time" maxlength="20" value="' +
+        h(n.at_time || "") + '" placeholder="例：17時以降 / 夕方 / 14:00〜"></label></div>' +
+    '<datalist id="dl_time">' + TIME_HINTS.map(x => '<option value="' + h(x) + '">').join("") + "</datalist>" +
+    '<div class="presets">' + TIME_HINTS.map(x =>
+      '<button type="button" class="preset" data-act="time-preset" data-v="' + h(x) + '">' + h(x) + "</button>").join("") + "</div>" +
     '<label class="f">場所<input type="text" id="nt_place" maxlength="60" value="' + h(n.place || "") + '" placeholder="例：事務所 / オンライン"></label>' +
     '<label class="f">内容・議題<textarea id="n_body" placeholder="話すこと、共有したいこと">' + h(n.body || "") + "</textarea></label>" +
     '<label class="f">決まったこと（会議のあとに書く）<textarea id="nt_decided" placeholder="例：10月から受付時間を1時間延ばす。担当はかいと。">' +
@@ -2478,6 +2486,11 @@ document.addEventListener("click", async function(ev){
         } catch(e){ S.stale = true; }
         render();
         toast(S.stale ? "まだ繋がりません。電波の良い場所で試してください。" : "最新の状態にしました");
+        break;
+      }
+      case "time-preset": {
+        const box = el("nt_time");
+        if (box){ box.value = btn.dataset.v; box.focus(); }
         break;
       }
       case "new-task": modalTask(null); break;
