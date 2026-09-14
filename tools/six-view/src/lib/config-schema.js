@@ -112,7 +112,9 @@ const DEFAULT_TELEGRAM = {
 const TELEGRAM_SECRET_ID = '__telegram__';
 
 const DEFAULT_AUTOFILL = {
-  enabled: false,
+  // On by default: with no credential saved for a pane nothing happens, so this
+  // costs nothing, and saving an ID and password becomes the whole setup.
+  enabled: true,
   urlPattern: '',
   usernameSelector: '',
   passwordSelector: '',

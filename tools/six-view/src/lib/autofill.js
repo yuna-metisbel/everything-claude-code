@@ -48,7 +48,8 @@ function matchesUrlPattern(pattern, url) {
 function shouldAutofill(site, url, credentials) {
   if (!site || !site.autofill || !site.autofill.enabled) return false;
   if (!credentials || !credentials.username) return false;
-  if (!site.autofill.usernameSelector && !site.autofill.passwordSelector) return false;
+  // Selectors are optional: with none set, the script finds the login boxes by
+  // the shape of the page, so saving an ID and password is the whole setup.
   return matchesUrlPattern(site.autofill.urlPattern, url);
 }
 
@@ -102,6 +103,51 @@ function buildAutofillScript(autofill, credentials) {
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
+  /**
+   * Find the login boxes by the shape of the page rather than by selector, so
+   * a pane works with nothing configured: the visible password box, and the
+   * text box that comes before it.
+   */
+  const findByShape = () => {
+    const inputs = [...document.querySelectorAll('input')].filter(visible);
+    const isTextish = (el) => {
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      return type === 'text' || type === 'email' || type === 'tel' || type === '';
+    };
+    const pass = inputs.find((el) => (el.getAttribute('type') || '').toLowerCase() === 'password') || null;
+
+    if (pass) {
+      const before = inputs.slice(0, inputs.indexOf(pass)).filter(isTextish);
+      return { user: before[before.length - 1] || null, pass };
+    }
+
+    // No password box: this may be the first screen of a two-step sign-in. Only
+    // an input that actually looks like an ID field is offered, so a search box
+    // on some unrelated page never gets typed into.
+    const loginish = (el) => {
+      const hint = [
+        el.getAttribute('autocomplete'),
+        el.getAttribute('name'),
+        el.getAttribute('id'),
+        el.getAttribute('placeholder'),
+        el.getAttribute('aria-label'),
+        (el.getAttribute('type') || ''),
+      ].join(' ').toLowerCase();
+      return /user|email|mail|login|account|signin|sign-in|tel|phone|\u30e6\u30fc\u30b6|\u30e1\u30fc\u30eb|\u30ed\u30b0\u30a4\u30f3/.test(hint);
+    };
+    return { user: inputs.filter(isTextish).find(loginish) || null, pass: null };
+  };
+
+  const waitForShape = async (timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const found = findByShape();
+      if (found.user || found.pass) return found;
+      if (Date.now() > deadline) return found;
+      await sleep(150);
+    }
+  };
+
   const advance = async (fromEl) => {
     let button = null;
     if (opts.submitSelector) button = await waitFor(opts.submitSelector, 1500);
@@ -121,8 +167,17 @@ function buildAutofillScript(autofill, credentials) {
 
   if (opts.delayMs) await sleep(opts.delayMs);
 
-  const userEl = await waitFor(opts.usernameSelector, 8000);
+  let userEl = await waitFor(opts.usernameSelector, 8000);
   let passEl = await waitFor(opts.passwordSelector, userEl ? 3000 : 8000);
+
+  // Nothing configured, or the page changed under a configured selector: read
+  // the form's shape instead. This is what lets a pane auto-login with only an
+  // ID and password saved.
+  if (!userEl || !passEl) {
+    const shape = await waitForShape(userEl || passEl ? 1500 : 8000);
+    if (!userEl) userEl = shape.user;
+    if (!passEl) passEl = shape.pass;
+  }
 
   if (!userEl && !passEl) {
     return { status: 'skipped', filled: 0, submitted: false, twoStep: false, reason: 'no-field' };
@@ -133,7 +188,7 @@ function buildAutofillScript(autofill, credentials) {
 
   // Two-step sign-in: the password field only appears after the ID is submitted.
   let twoStep = false;
-  if (!passEl && filled > 0 && opts.passwordSelector && opts.password) {
+  if (!passEl && filled > 0 && opts.password) {
     twoStep = true;
     await sleep(250);
     const advanced = await advance(userEl);
@@ -141,6 +196,7 @@ function buildAutofillScript(autofill, credentials) {
       return { status: 'partial', filled, submitted: false, twoStep, reason: 'no-next-button' };
     }
     passEl = await waitFor(opts.passwordSelector, 12000);
+    if (!passEl) passEl = (await waitForShape(4000)).pass;
     if (!passEl) {
       return { status: 'partial', filled, submitted: false, twoStep, reason: 'no-password-step' };
     }

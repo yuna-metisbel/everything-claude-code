@@ -208,6 +208,30 @@ async function runAutofill(siteId, options = {}) {
   const site = getSite(siteId);
   if (!pane || !pane.contents || pane.contents.isDestroyed() || !site) return;
 
+  // A two-step sign-in whose "next" button navigates takes the running script
+  // with it, so the password step is finished by a second pass on the page
+  // that lands. `secondPass` keeps that to exactly one retry.
+  const finishTwoStep = async (result) => {
+    if (options.secondPass) return result;
+    if (!result || result.twoStep !== true) return result;
+    if (result.status !== 'partial') return result;
+
+    await new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        pane.contents.removeListener('did-stop-loading', done);
+        resolve();
+      }, 4000);
+      pane.contents.once('did-stop-loading', done);
+    });
+
+    if (pane.contents.isDestroyed()) return result;
+    return runAutofill(siteId, { ...options, auto: false, secondPass: true });
+  };
+
   const url = pane.contents.getURL();
   const credentials = secrets ? secrets.get(siteId) : null;
 
@@ -226,16 +250,24 @@ async function runAutofill(siteId, options = {}) {
   }
 
   try {
-    const result = await pane.contents.executeJavaScript(
+    let result = await pane.contents.executeJavaScript(
       buildAutofillScript(site.autofill, credentials),
       true
     );
+    result = await finishTwoStep(result);
     sendToMain('pane:state', {
       siteId,
       autofill: result && result.status ? result.status : 'unknown',
       autofillSubmitted: Boolean(result && result.submitted),
     });
+    return result;
   } catch (err) {
+    // A navigation mid-script rejects the call; the page that landed gets the
+    // second pass, which is where a navigating two-step sign-in completes.
+    const navigated = /destroyed|Script failed to execute|context/i.test(String(err.message));
+    if (navigated && !options.secondPass) {
+      return finishTwoStep({ status: 'partial', twoStep: true, filled: 1, submitted: false });
+    }
     log(`autofill failed for ${siteId}: ${err.message}`);
     sendToMain('pane:state', { siteId, autofill: 'error' });
   }

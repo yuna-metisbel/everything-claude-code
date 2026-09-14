@@ -44,7 +44,7 @@ function blankSite(takenIds, preset = {}) {
     zoomFactor: 0,
     userAgent: '',
     autofill: {
-      enabled: false,
+      enabled: true,
       urlPattern: '',
       usernameSelector: '',
       passwordSelector: '',
@@ -447,6 +447,17 @@ document.getElementById('add-pane').addEventListener('click', () => {
   currentConfig.sites.push(blankSite(currentConfig.sites.map((site) => site.id), chosen));
   renderSites();
   document.getElementById('sites').lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+document.getElementById('enable-all-autofill').addEventListener('click', () => {
+  // For configs made before auto-login defaulted to on: flip every pane at once
+  // rather than opening eight cards to tick the same box.
+  for (const site of currentConfig.sites) {
+    if (!site.autofill) site.autofill = {};
+    site.autofill.enabled = true;
+  }
+  renderSites();
+  flash('すべてのパネルで自動ログインをオンにしました。「保存して反映」を押してください。');
 });
 
 document.getElementById('save').addEventListener('click', async () => {

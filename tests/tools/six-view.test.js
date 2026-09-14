@@ -405,7 +405,7 @@ async function runTests() {
     assert.strictEqual(autofill.matchesUrlPattern('', 'about:blank'), false);
   })) passed++; else failed++;
 
-  if (test('shouldAutofill requires enablement, credentials and a selector', () => {
+  if (test('shouldAutofill needs enablement and credentials - selectors are optional', () => {
     const site = {
       autofill: { enabled: true, urlPattern: 'login', usernameSelector: '#u', passwordSelector: '#p' },
     };
@@ -417,14 +417,34 @@ async function runTests() {
       autofill.shouldAutofill({ autofill: { ...site.autofill, enabled: false } }, 'https://x.jp/login', creds),
       false
     );
+    // No selectors at all still tries: the script finds the boxes by the shape
+    // of the page, so saving an ID and password is the whole setup.
     assert.strictEqual(
       autofill.shouldAutofill(
         { autofill: { enabled: true, urlPattern: '', usernameSelector: '', passwordSelector: '' } },
         'https://x.jp/login',
         creds
       ),
-      false
+      true
     );
+  })) passed++; else failed++;
+
+  if (test('a pane with nothing configured still produces a usable script', () => {
+    const script = autofill.buildAutofillScript({}, { username: 'yuna', password: 'pw' });
+    assert.doesNotThrow(() => new Function(`return ${script}`), 'must parse with no selectors');
+    assert.ok(script.includes('findByShape'), 'falls back to the shape of the form');
+    assert.ok(script.includes("'password'"), 'anchors on the password box');
+    assert.ok(!script.includes('require('), 'must not depend on anything in the page');
+  })) passed++; else failed++;
+
+  if (test('auto-login is on by default, so a saved credential is enough', () => {
+    const config = schema.createDefaultConfig('msns');
+    assert.ok(
+      config.sites.every((site) => site.autofill.enabled === true),
+      'every shipped pane is ready to auto-login once a credential is saved'
+    );
+    // It cannot act on its own: no credential, no attempt.
+    assert.strictEqual(autofill.shouldAutofill(config.sites[1], config.sites[1].url, null), false);
   })) passed++; else failed++;
 
   if (test('buildAutofillScript escapes credentials safely', () => {
