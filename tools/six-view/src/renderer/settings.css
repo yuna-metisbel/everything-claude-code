@@ -59,10 +59,20 @@ body {
   font-size: 12px;
 }
 
-main {
+/*
+ * One scroller for everything between the header and the footer. An inner
+ * scroller for the pane list alone gets squeezed to nothing by the cards above
+ * it, because a flex item that scrolls is allowed to shrink past its content.
+ */
+.scroll {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 20px;
+}
+
+main {
+  padding: 0;
 }
 
 .card {
@@ -82,7 +92,7 @@ main {
 }
 
 section.card:first-of-type {
-  margin: 12px 20px;
+  margin-top: 12px;
 }
 
 .site-index {
