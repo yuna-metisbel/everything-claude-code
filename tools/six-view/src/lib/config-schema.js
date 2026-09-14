@@ -220,9 +220,15 @@ function normalizeTelegram(raw) {
   };
 }
 
+/** Is this pane shown in the grid? A closed pane keeps its config and session. */
+function isPaneVisible(site) {
+  return Boolean(site) && site.enabled !== false;
+}
+
 /** Enough selectors present to actually watch a pane's message list. */
 function dmIsUsable(site) {
-  return Boolean(site && site.dm && site.dm.enabled && site.dm.rowSelector);
+  // A closed pane has no page loaded, so there is nothing to read.
+  return Boolean(isPaneVisible(site) && site.dm && site.dm.enabled && site.dm.rowSelector);
 }
 
 /** Enough selectors present to post a reply back into a pane. */
@@ -286,7 +292,9 @@ function duplicateSite(site, takenIds = []) {
 /** Columns for a pane count, honouring an explicit override. */
 function resolveColumns(config) {
   const explicit = config && config.layout ? Number(config.layout.columns) : 0;
-  const count = config && Array.isArray(config.sites) ? config.sites.length : 0;
+  // Closed panes are not in the grid, so they must not shape it either.
+  const count =
+    config && Array.isArray(config.sites) ? config.sites.filter(isPaneVisible).length : 0;
   if (Number.isFinite(explicit) && explicit >= 1 && explicit <= MAX_PANES) return Math.floor(explicit);
   return AUTO_COLUMNS[count] || Math.ceil(Math.sqrt(Math.max(1, count)));
 }
@@ -393,6 +401,7 @@ module.exports = {
   TELEGRAM_SECRET_ID,
   dmCanSend,
   dmIsUsable,
+  isPaneVisible,
   normalizeDm,
   normalizeTelegram,
   DEFAULT_BRAND,

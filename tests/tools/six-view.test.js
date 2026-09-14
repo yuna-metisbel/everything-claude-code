@@ -876,6 +876,51 @@ async function runTests() {
     service.stop();
   })) passed++; else failed++;
 
+
+  // --- closing a pane ---
+
+  if (test('a pane is open unless it was closed, and closing keeps its settings', () => {
+    const site = schema.normalizeSite({ name: 'X', url: 'https://x.jp' }, 0, new Set());
+    assert.strictEqual(site.enabled, true, 'panes start open');
+    assert.strictEqual(schema.isPaneVisible(site), true);
+
+    const closed = schema.normalizeSite({ ...site, enabled: false }, 0, new Set());
+    assert.strictEqual(schema.isPaneVisible(closed), false);
+    // Closing takes it out of the grid; it does not throw the pane away.
+    assert.strictEqual(closed.url, 'https://x.jp/');
+    assert.deepStrictEqual(closed.autofill, site.autofill);
+  })) passed++; else failed++;
+
+  if (test('a closed pane leaves the grid without reshaping it around a gap', () => {
+    const config = schema.createDefaultConfig('msns');
+    assert.strictEqual(config.sites.length, 9);
+    assert.strictEqual(schema.resolveColumns(config), 3, 'nine panes read as 3 x 3');
+
+    config.sites[8].enabled = false;
+    assert.strictEqual(schema.resolveColumns(config), 4, 'eight read as 4 x 2');
+
+    // An explicit column choice still wins.
+    config.layout.columns = 2;
+    assert.strictEqual(schema.resolveColumns(config), 2);
+  })) passed++; else failed++;
+
+  if (test('a closed pane is not watched for DMs', () => {
+    const watched = { enabled: true, dm: { enabled: true, rowSelector: '.row', inputSelector: '#t' } };
+    assert.strictEqual(schema.dmIsUsable(watched), true);
+    assert.strictEqual(schema.dmIsUsable({ ...watched, enabled: false }), false);
+    assert.strictEqual(schema.dmCanSend({ ...watched, enabled: false }), false);
+  })) passed++; else failed++;
+
+  if (test('the open/closed state survives being written and read back', () => {
+    const config = schema.createDefaultConfig('sixview');
+    config.sites[2].enabled = false;
+    const saved = configStore.saveConfig(tmpDir, config, 'sixview');
+    assert.strictEqual(saved.sites[2].enabled, false);
+    const { config: reloaded } = configStore.loadConfig(tmpDir, 'sixview');
+    assert.strictEqual(reloaded.sites[2].enabled, false, 'a closed pane stays closed after a restart');
+    assert.strictEqual(reloaded.sites[0].enabled, true);
+  })) passed++; else failed++;
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);

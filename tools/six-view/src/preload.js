@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('sixview', {
     ipcRenderer.invoke('creds:set', { siteId, username, password }),
   clearCredentials: (siteId) => ipcRenderer.invoke('creds:clear', { siteId }),
   paneCommand: (siteId, command) => ipcRenderer.invoke('pane:command', { siteId, command }),
+  paneNavigate: (siteId, url) => ipcRenderer.invoke('pane:navigate', { siteId, url }),
+  paneUpdate: (siteId, patch) => ipcRenderer.invoke('pane:update', { siteId, patch }),
   detectLogin: (siteId) => ipcRenderer.invoke('pane:detect-login', { siteId }),
   clearSession: (siteId) => ipcRenderer.invoke('session:clear', { siteId }),
 

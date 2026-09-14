@@ -21,6 +21,7 @@ const {
   SITE_PRESETS,
   TELEGRAM_SECRET_ID,
   getBrand,
+  normalizeUrl,
   partitionForSite,
   resolveColumns,
   resolveUserAgent,
@@ -586,6 +587,46 @@ function registerIpc() {
   ipcMain.handle('pane:detect-login', (_event, payload) => {
     if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
     return detectLoginFields(payload.siteId);
+  });
+
+  ipcMain.handle('pane:navigate', async (_event, payload) => {
+    if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    const pane = panes.get(payload.siteId);
+    if (!pane || !pane.contents || pane.contents.isDestroyed()) {
+      return { ok: false, reason: 'pane-not-loaded' };
+    }
+    // Reuses the config normaliser, so only http(s) is ever loaded.
+    const url = normalizeUrl(payload.url);
+    if (!url) return { ok: false, reason: 'bad-url' };
+
+    pane.lastAutofillUrl = '';
+    pane.lastAutofillAt = 0;
+    await pane.contents.loadURL(url);
+    return { ok: true, url };
+  });
+
+  /**
+   * Change what a pane *is*, not just what it shows: its start page, or
+   * whether it appears in the grid at all. Closing a pane keeps its settings,
+   * its saved credential and its cookies - it only stops taking up a tile.
+   */
+  ipcMain.handle('pane:update', (_event, payload) => {
+    if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    const site = getSite(payload.siteId);
+    if (!site) return { ok: false, reason: 'unknown-site' };
+
+    const patch = payload.patch && typeof payload.patch === 'object' ? payload.patch : {};
+    if (typeof patch.url === 'string') {
+      const url = normalizeUrl(patch.url);
+      if (!url) return { ok: false, reason: 'bad-url' };
+      site.url = url;
+    }
+    if (typeof patch.enabled === 'boolean') site.enabled = patch.enabled;
+
+    config = saveConfig(userDataDir, config, BRAND.id);
+    if (dmService) dmService.refresh();
+    sendToMain('app:config-changed', bootstrapPayload());
+    return { ok: true };
   });
 
   ipcMain.handle('pane:command', (_event, payload) => {

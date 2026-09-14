@@ -24,6 +24,11 @@
 
     <div id="notice" class="notice" hidden></div>
 
+    <div id="closed-bar" class="closed-bar" hidden>
+      <span class="closed-label">閉じているパネル</span>
+      <span id="closed-list" class="closed-list"></span>
+    </div>
+
     <main id="grid" class="grid"></main>
 
     <template id="pane-template">
@@ -33,7 +38,15 @@
           <span class="pane-name"></span>
           <span class="pane-badge pane-private" hidden>シークレット</span>
           <span class="pane-status" title="状態"></span>
-          <span class="pane-url"></span>
+          <span class="pane-url" title="クリックするとアドレスを変更できます"></span>
+          <input
+            type="text"
+            class="pane-url-input"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="https://..."
+            hidden
+          />
           <span class="pane-buttons">
             <button type="button" class="icon-btn" data-command="back" title="戻る">‹</button>
             <button type="button" class="icon-btn" data-command="forward" title="進む">›</button>
@@ -45,6 +58,13 @@
             <button type="button" class="icon-btn" data-action="maximize" title="このパネルを拡大 / 元に戻す">⤢</button>
             <button type="button" class="icon-btn" data-command="external" title="既定のブラウザで開く">↗</button>
             <button type="button" class="icon-btn" data-action="logout" title="ログイン状態を消去">⎋</button>
+            <button
+              type="button"
+              class="icon-btn"
+              data-action="set-home"
+              title="今開いているページを、このパネルの最初のページにする"
+            >☆</button>
+            <button type="button" class="icon-btn" data-action="close" title="このパネルを閉じる">✕</button>
           </span>
         </header>
         <div class="pane-body">

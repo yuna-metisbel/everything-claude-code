@@ -281,3 +281,57 @@ body {
   font-size: 12px;
   max-width: 260px;
 }
+
+/* Panes the user closed: kept out of the grid, one click away from coming back. */
+.closed-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  background: #1b1e26;
+  border-bottom: 1px solid #262b36;
+  font-size: 12px;
+}
+
+.closed-label {
+  color: #8b93a7;
+}
+
+.closed-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.closed-chip {
+  border: 1px solid #39404f;
+  background: #232834;
+  color: #d7dcE6;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.closed-chip:hover {
+  border-color: #5b6478;
+  background: #2c3341;
+}
+
+/* The address line doubles as an input once clicked. */
+.pane-url {
+  cursor: text;
+}
+
+.pane-url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 6px;
+  padding: 2px 6px;
+  border: 1px solid #4a5468;
+  border-radius: 4px;
+  background: #0d0f14;
+  color: #e8ebf2;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}

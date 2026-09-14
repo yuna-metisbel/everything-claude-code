@@ -10,6 +10,8 @@
 const grid = document.getElementById('grid');
 const notice = document.getElementById('notice');
 const paneTemplate = document.getElementById('pane-template');
+const closedBar = document.getElementById('closed-bar');
+const closedList = document.getElementById('closed-list');
 
 /** siteId -> { root, webview, els, signature } */
 const panes = new Map();
@@ -57,6 +59,56 @@ function createWebview(site, partition) {
   return webview;
 }
 
+/** Say something briefly in the pane's status tooltip area. */
+function flashPane(pane, message) {
+  pane.els.url.dataset.flash = message;
+  pane.els.url.textContent = message;
+  setTimeout(() => {
+    if (pane.els.url.dataset.flash !== message) return;
+    delete pane.els.url.dataset.flash;
+    pane.els.url.textContent = pane.lastUrl || '';
+  }, 2500);
+}
+
+/**
+ * The address line turns into an input when clicked, so a pane can be pointed
+ * at a different page without going through settings. Enter goes, Escape
+ * cancels; the change is temporary until "set as this pane's page" is used.
+ */
+function wireAddressBar(pane, site) {
+  const { url, urlInput } = pane.els;
+
+  const close = () => {
+    urlInput.hidden = true;
+    url.hidden = false;
+  };
+
+  url.addEventListener('click', () => {
+    urlInput.value = pane.lastUrl || site.url || '';
+    url.hidden = true;
+    urlInput.hidden = false;
+    urlInput.focus();
+    urlInput.select();
+  });
+
+  urlInput.addEventListener('keydown', async (event) => {
+    if (event.key === 'Escape') {
+      close();
+      return;
+    }
+    if (event.key !== 'Enter') return;
+
+    const wanted = urlInput.value.trim();
+    close();
+    if (!wanted) return;
+
+    const result = await window.sixview.paneNavigate(site.id, wanted);
+    if (!result || !result.ok) flashPane(pane, 'そのページは開けません');
+  });
+
+  urlInput.addEventListener('blur', close);
+}
+
 function buildPane(site, index, partition) {
   const fragment = paneTemplate.content.cloneNode(true);
   const root = fragment.querySelector('.pane');
@@ -67,6 +119,7 @@ function buildPane(site, index, partition) {
     private: root.querySelector('.pane-private'),
     status: root.querySelector('.pane-status'),
     url: root.querySelector('.pane-url'),
+    urlInput: root.querySelector('.pane-url-input'),
     body: root.querySelector('.pane-body'),
     empty: root.querySelector('.pane-empty'),
   };
@@ -95,9 +148,24 @@ function buildPane(site, index, partition) {
     window.sixview.openSettings();
   });
 
+  // Closing a pane only takes it out of the grid: settings, saved credential
+  // and cookies all stay, and it comes back from the bar at the top.
+  root.querySelector('[data-action="close"]').addEventListener('click', () => {
+    void window.sixview.paneUpdate(site.id, { enabled: false });
+  });
+
+  // Make whatever is on screen this pane's start page.
+  root.querySelector('[data-action="set-home"]').addEventListener('click', async () => {
+    const current = pane.els.url.textContent.trim();
+    if (!current) return;
+    const result = await window.sixview.paneUpdate(site.id, { url: current });
+    flashPane(pane, result && result.ok ? 'このページを次回から開きます' : 'この住所は設定できません');
+  });
+
   els.name.addEventListener('dblclick', () => toggleMaximized(site.id));
 
-  const pane = { root, els, webview: null, signature: '' };
+  const pane = { root, els, webview: null, signature: '', lastUrl: site.url || '' };
+  wireAddressBar(pane, site);
   panes.set(site.id, pane);
   grid.appendChild(root);
   updatePaneShell(pane, site, partition);
@@ -140,8 +208,11 @@ function applyState(state) {
   if (!pane) return;
 
   if (typeof state.url === 'string' && state.url) {
-    pane.els.url.textContent = state.url;
-    pane.els.url.title = state.url;
+    pane.lastUrl = state.url;
+    if (!pane.els.url.dataset.flash) {
+      pane.els.url.textContent = state.url;
+      pane.els.url.title = state.url;
+    }
   }
 
   if (state.error) {
@@ -169,11 +240,31 @@ function applyState(state) {
   }
 }
 
+/** One chip per closed pane; clicking it puts the pane back in the grid. */
+function renderClosedBar(closed) {
+  closedList.textContent = '';
+  closedBar.hidden = closed.length === 0;
+
+  for (const site of closed) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'closed-chip';
+    chip.textContent = site.name;
+    chip.title = `${site.name} をもう一度開く`;
+    chip.addEventListener('click', () => {
+      void window.sixview.paneUpdate(site.id, { enabled: true });
+    });
+    closedList.appendChild(chip);
+  }
+}
+
 function render(bootstrap) {
   const { config, partitions } = bootstrap;
 
   grid.style.setProperty('--columns', String(bootstrap.columns || 3));
-  document.querySelector('.brand-mark').textContent = String(config.sites.length);
+  document.querySelector('.brand-mark').textContent = String(
+    config.sites.filter((site) => site.enabled !== false).length
+  );
   if (bootstrap.appName) {
     document.querySelector('.brand-name').textContent = bootstrap.appName;
     document.title = bootstrap.appName;
@@ -188,15 +279,20 @@ function render(bootstrap) {
   }
   showNotice(messages.join('  /  '));
 
-  config.sites.forEach((site, index) => {
+  const visible = config.sites.filter((site) => site.enabled !== false);
+  const closed = config.sites.filter((site) => site.enabled === false);
+
+  visible.forEach((site, index) => {
     const partition = partitions[site.id];
     const pane = panes.get(site.id) || buildPane(site, index, partition);
+    pane.els.index.textContent = String(index + 1);
     updatePaneShell(pane, site, partition);
     syncPaneContent(pane, site, partition);
   });
 
-  // Drop panes whose site id disappeared (config replaced wholesale).
-  const liveIds = new Set(config.sites.map((site) => site.id));
+  // Drop panes that were closed, or whose site id disappeared. Removing the
+  // element takes its webview with it, so a closed pane costs no memory.
+  const liveIds = new Set(visible.map((site) => site.id));
   for (const [id, pane] of panes) {
     if (liveIds.has(id)) continue;
     pane.root.remove();
@@ -205,7 +301,9 @@ function render(bootstrap) {
     if (maximizedSiteId === id) maximizedSiteId = null;
   }
 
-  if (!focusedSiteId && config.sites.length > 0) setFocused(config.sites[0].id);
+  renderClosedBar(closed);
+
+  if (!focusedSiteId && visible.length > 0) setFocused(visible[0].id);
   applyMaximized();
 }
 
