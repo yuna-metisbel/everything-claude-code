@@ -338,6 +338,14 @@ function render(bootstrap) {
     presetSelect.appendChild(option);
   }
 
+  // 02View and SixView share this window, so the name has to follow the build.
+  if (bootstrap.appName) {
+    document.querySelectorAll('.brand-name').forEach((el) => {
+      el.textContent = bootstrap.appName;
+    });
+    document.title = `${bootstrap.appName} 設定`;
+  }
+
   document.getElementById('encryption-warning').hidden = encryptionAvailable;
   document.getElementById('config-path').textContent = bootstrap.configPath;
   document.getElementById('config-path').title = bootstrap.configPath;
