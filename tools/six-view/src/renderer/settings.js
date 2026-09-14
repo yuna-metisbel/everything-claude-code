@@ -422,6 +422,29 @@ function renderTelegram(bootstrap) {
     }
   });
 
+  document.getElementById('tg-find-chat').addEventListener('click', async () => {
+    status.textContent = '取得中…';
+    const found = await window.sixview.discoverChatId(token.value.trim());
+
+    if (found && found.ok) {
+      chat.value = found.chatId;
+      telegram.chatId = found.chatId;
+      status.textContent = found.from
+        ? `チャット ID を取得しました（${found.from}）。「接続テスト」で確認してください。`
+        : 'チャット ID を取得しました。「接続テスト」で確認してください。';
+      return;
+    }
+
+    const problems = {
+      'no-messages': 'まだボットにメッセージが届いていません。Telegram でそのボットを開いて何か一言送ってから、もう一度押してください。',
+      'bad-token': '先にトークンを入れて「トークンを保存」を押してください。',
+      network: 'インターネットに出られませんでした。',
+      timeout: '応答がありませんでした。もう一度押してください。',
+    };
+    status.textContent =
+      problems[found && found.reason] || `取得できませんでした（${(found && found.reason) || 'unknown'}）。`;
+  });
+
   document.getElementById('tg-test').addEventListener('click', async () => {
     status.textContent = '接続中…';
     const result = await window.sixview.testTelegram(token.value.trim(), chat.value.trim());

@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('sixview', {
   dmStatus: () => ipcRenderer.invoke('dm:status'),
   setTelegramToken: (token) => ipcRenderer.invoke('telegram:set-token', { token }),
   testTelegram: (token, chatId) => ipcRenderer.invoke('telegram:test', { token, chatId }),
+  discoverChatId: (token) => ipcRenderer.invoke('telegram:discover-chat', { token }),
   openSettings: () => ipcRenderer.send('settings:open'),
   closeSettings: () => ipcRenderer.send('settings:close'),
   reloadAll: () => ipcRenderer.send('panes:reload-all'),

@@ -921,6 +921,56 @@ async function runTests() {
     assert.strictEqual(reloaded.sites[0].enabled, true);
   })) passed++; else failed++;
 
+
+  if (await testAsync('the chat id is read from the latest message to the bot', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const impl = fakeFetch((url, body) => {
+      assert.ok(url.endsWith('/getUpdates'));
+      // -1 asks for just the latest, even if earlier ones were consumed.
+      assert.strictEqual(body.offset, -1);
+      return {
+        ok: true,
+        result: [
+          { update_id: 1, message: { chat: { id: 111, first_name: 'old' }, text: 'first' } },
+          { update_id: 2, message: { chat: { id: 222, first_name: 'ゆな' }, text: 'テスト' } },
+        ],
+      };
+    });
+
+    const service = new DmService({
+      getConfig: () => ({ telegram: { enabled: false, chatId: '' }, sites: [] }),
+      getSite: () => null,
+      getContents: () => null,
+      getToken: () => token,
+    });
+    service.client.fetchImpl = impl;
+
+    const found = await service.discoverChatId(token);
+    assert.strictEqual(found.ok, true);
+    assert.strictEqual(found.chatId, '222', 'the most recent chat wins');
+    assert.strictEqual(found.from, 'ゆな');
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('an unaddressed bot says so rather than guessing an id', async () => {
+    const token = `123456789:${'A'.repeat(35)}`;
+    const service = new DmService({
+      getConfig: () => ({ telegram: { enabled: false, chatId: '' }, sites: [] }),
+      getSite: () => null,
+      getContents: () => null,
+      getToken: () => token,
+    });
+    service.client.fetchImpl = fakeFetch(() => ({ ok: true, result: [] }));
+
+    const empty = await service.discoverChatId(token);
+    assert.strictEqual(empty.ok, false);
+    assert.strictEqual(empty.reason, 'no-messages');
+
+    const bad = await service.discoverChatId('not-a-token');
+    assert.strictEqual(bad.reason, 'bad-token');
+    service.stop();
+  })) passed++; else failed++;
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);

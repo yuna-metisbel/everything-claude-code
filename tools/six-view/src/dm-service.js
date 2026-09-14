@@ -427,6 +427,43 @@ class DmService {
   }
 
   /**
+   * Read the chat id out of the most recent message sent to the bot, so it
+   * never has to be looked up by hand.
+   *
+   * The poll loop is paused around this: Telegram refuses a second getUpdates
+   * while one is open on the same token.
+   */
+  async discoverChatId(token) {
+    const probe = new TelegramClient({ token, fetchImpl: this.client.fetchImpl });
+    if (!probe.configured) return { ok: false, reason: 'bad-token' };
+
+    const wasPolling = this.polling;
+    this.stopPolling();
+
+    try {
+      // offset -1 asks for just the latest update, whether or not the bridge
+      // has already consumed the ones before it.
+      const res = await probe.call('getUpdates', { offset: -1, timeout: 0 }, { timeoutMs: 12000 });
+      if (!res.ok) return { ok: false, reason: res.error };
+
+      const updates = Array.isArray(res.result) ? res.result : [];
+      const message = updates
+        .map((update) => update && (update.message || update.edited_message))
+        .filter(Boolean)
+        .pop();
+
+      if (!message || !message.chat || !Number.isFinite(message.chat.id)) {
+        return { ok: false, reason: 'no-messages' };
+      }
+
+      const from = message.chat.first_name || message.chat.title || message.chat.username || '';
+      return { ok: true, chatId: String(message.chat.id), from };
+    } finally {
+      if (wasPolling) this.startPolling();
+    }
+  }
+
+  /**
    * Check a token and chat id by actually sending a message, so the user sees
    * the bridge work end to end before any customer message goes near it.
    */

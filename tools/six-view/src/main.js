@@ -681,6 +681,15 @@ function registerIpc() {
     return { ok };
   });
 
+  ipcMain.handle('telegram:discover-chat', (_event, payload) => {
+    if (!dmService) return { ok: false, reason: 'bad-request' };
+    const token =
+      payload && typeof payload.token === 'string' && payload.token.trim()
+        ? payload.token.trim()
+        : readTelegramToken();
+    return dmService.discoverChatId(token);
+  });
+
   ipcMain.handle('telegram:test', async (_event, payload) => {
     if (!dmService) return { ok: false, reason: 'bad-request' };
     // An unsaved token in the form is tested as typed, so the user can verify
