@@ -12,6 +12,12 @@ const notice = document.getElementById('notice');
 const paneTemplate = document.getElementById('pane-template');
 const closedBar = document.getElementById('closed-bar');
 const closedList = document.getElementById('closed-list');
+const reopenForm = document.getElementById('reopen-form');
+const reopenTitle = document.getElementById('reopen-title');
+const reopenName = document.getElementById('reopen-name');
+const reopenUrl = document.getElementById('reopen-url');
+const reopenWipe = document.getElementById('reopen-wipe');
+const reopenStatus = document.getElementById('reopen-status');
 
 /** siteId -> { root, webview, els, signature } */
 const panes = new Map();
@@ -240,12 +246,69 @@ function applyState(state) {
   }
 }
 
-/** One chip per closed pane; clicking it puts the pane back in the grid. */
+/** The pane whose tile is being handed to a different site, if any. */
+let reopenSiteId = '';
+
+function hideReopenForm() {
+  reopenSiteId = '';
+  reopenForm.hidden = true;
+  reopenStatus.textContent = '';
+}
+
+function showReopenForm(site) {
+  reopenSiteId = site.id;
+  reopenForm.hidden = false;
+  reopenTitle.textContent = `「${site.name}」の枠を使う`;
+  reopenName.value = site.name;
+  reopenUrl.value = '';
+  reopenWipe.checked = true;
+  reopenStatus.textContent = '';
+  reopenUrl.focus();
+}
+
+const REOPEN_PROBLEMS = {
+  'bad-url': '住所が正しくありません（https:// から入力してください）',
+  'unknown-site': 'このパネルは見つかりません',
+};
+
+reopenForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!reopenSiteId) return;
+
+  reopenStatus.textContent = '開いています…';
+  const result = await window.sixview.paneReopenAs(reopenSiteId, {
+    url: reopenUrl.value,
+    name: reopenName.value,
+    // Unticking it keeps the password and the DM settings, for when the same
+    // site simply moved to a different address.
+    keep: !reopenWipe.checked,
+  });
+
+  if (result && result.ok) {
+    hideReopenForm();
+    return;
+  }
+  reopenStatus.textContent =
+    (result && REOPEN_PROBLEMS[result.reason]) || '開けませんでした';
+});
+
+document.getElementById('reopen-cancel').addEventListener('click', hideReopenForm);
+reopenForm.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hideReopenForm();
+});
+
+/**
+ * One chip per closed pane. The name puts the pane back as it was; the button
+ * beside it hands the same tile to a different site.
+ */
 function renderClosedBar(closed) {
   closedList.textContent = '';
   closedBar.hidden = closed.length === 0;
 
   for (const site of closed) {
+    const group = document.createElement('span');
+    group.className = 'closed-chip-group';
+
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'closed-chip';
@@ -254,8 +317,20 @@ function renderClosedBar(closed) {
     chip.addEventListener('click', () => {
       void window.sixview.paneUpdate(site.id, { enabled: true });
     });
-    closedList.appendChild(chip);
+
+    const other = document.createElement('button');
+    other.type = 'button';
+    other.className = 'closed-chip closed-chip-other';
+    other.textContent = '別のサイト';
+    other.title = `この枠を別のサイト用にして開く`;
+    other.addEventListener('click', () => showReopenForm(site));
+
+    group.append(chip, other);
+    closedList.appendChild(group);
   }
+
+  // The pane being re-pointed may have been reopened or removed elsewhere.
+  if (reopenSiteId && !closed.some((site) => site.id === reopenSiteId)) hideReopenForm();
 }
 
 function render(bootstrap) {
@@ -284,7 +359,15 @@ function render(bootstrap) {
 
   visible.forEach((site, index) => {
     const partition = partitions[site.id];
-    const pane = panes.get(site.id) || buildPane(site, index, partition);
+    let pane = panes.get(site.id);
+    if (!pane) {
+      pane = buildPane(site, index, partition);
+      // Put a new pane in its own place rather than at the end, so a pane that
+      // was closed and reopened comes back where it was. Panes already on
+      // screen are never moved: detaching a webview reloads the page inside it.
+      const at = grid.children[index];
+      if (at && at !== pane.root) grid.insertBefore(pane.root, at);
+    }
     pane.els.index.textContent = String(index + 1);
     updatePaneShell(pane, site, partition);
     syncPaneContent(pane, site, partition);

@@ -27,6 +27,19 @@
     <div id="closed-bar" class="closed-bar" hidden>
       <span class="closed-label">閉じているパネル</span>
       <span id="closed-list" class="closed-list"></span>
+
+      <form id="reopen-form" class="reopen-form" hidden>
+        <span id="reopen-title" class="reopen-title"></span>
+        <input id="reopen-name" type="text" class="reopen-input" placeholder="表示名" />
+        <input id="reopen-url" type="text" class="reopen-input reopen-url" placeholder="https://..." />
+        <label class="reopen-check">
+          <input id="reopen-wipe" type="checkbox" checked />
+          <span>前のサイトのログイン情報と DM 設定を消す</span>
+        </label>
+        <button type="submit" class="btn">開く</button>
+        <button type="button" id="reopen-cancel" class="btn">やめる</button>
+        <span id="reopen-status" class="reopen-status"></span>
+      </form>
     </div>
 
     <main id="grid" class="grid"></main>

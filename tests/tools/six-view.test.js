@@ -891,6 +891,56 @@ async function runTests() {
     assert.deepStrictEqual(closed.autofill, site.autofill);
   })) passed++; else failed++;
 
+  if (test('a closed pane can be reopened as a different site, forgetting the old one', () => {
+    const site = schema.normalizeSite(
+      {
+        name: '02 キャスト1',
+        url: 'https://m-sns.net/login',
+        enabled: false,
+        autofill: { usernameSelector: '#old-user', autoSubmit: true },
+        dm: { enabled: true, rowSelector: '.dm-row', inputSelector: '#reply' },
+      },
+      0,
+      new Set()
+    );
+
+    const result = schema.repointSite(site, { url: 'example.jp/login', name: 'べつのサイト' });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(site.url, 'https://example.jp/login', 'a bare host is given https');
+    assert.strictEqual(site.name, 'べつのサイト');
+    assert.strictEqual(site.enabled, true, 'the pane comes back to the grid');
+
+    // Everything that described the old site is gone: its login boxes are not
+    // where this site's are, and its DM rows are not this site's rows.
+    assert.strictEqual(site.autofill.usernameSelector, '');
+    assert.strictEqual(site.autofill.autoSubmit, false);
+    assert.strictEqual(site.dm.enabled, false);
+    assert.strictEqual(site.dm.rowSelector, '');
+    assert.strictEqual(site.dm.inputSelector, '');
+  })) passed++; else failed++;
+
+  if (test('reopening refuses a bad address, and can keep the settings on request', () => {
+    const site = schema.normalizeSite(
+      { name: 'A', url: 'https://a.jp', dm: { enabled: true, rowSelector: '.row' } },
+      0,
+      new Set()
+    );
+
+    const bad = schema.repointSite(site, { url: 'javascript:alert(1)' });
+    assert.strictEqual(bad.ok, false);
+    assert.strictEqual(bad.reason, 'bad-url');
+    assert.strictEqual(site.url, 'https://a.jp/', 'a refused address changes nothing');
+
+    const blank = schema.repointSite(site, { url: '   ' });
+    assert.strictEqual(blank.reason, 'bad-url');
+
+    // Same site, new address: the DM setup is still the right one.
+    const moved = schema.repointSite(site, { url: 'https://a.jp/new', keep: true });
+    assert.strictEqual(moved.ok, true);
+    assert.strictEqual(site.dm.rowSelector, '.row');
+    assert.strictEqual(site.name, 'A', 'no name given, so the name stays');
+  })) passed++; else failed++;
+
   if (test('a closed pane leaves the grid without reshaping it around a gap', () => {
     const config = schema.createDefaultConfig('msns');
     assert.strictEqual(config.sites.length, 9);

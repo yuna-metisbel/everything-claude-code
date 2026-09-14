@@ -23,6 +23,7 @@ const {
   getBrand,
   normalizeUrl,
   partitionForSite,
+  repointSite,
   resolveColumns,
   resolveUserAgent,
   resolveZoomFactor,
@@ -627,6 +628,43 @@ function registerIpc() {
     if (dmService) dmService.refresh();
     sendToMain('app:config-changed', bootstrapPayload());
     return { ok: true };
+  });
+
+  /**
+   * Bring a closed pane back as a *different* site.
+   *
+   * The chip in the closed bar reopens a pane as it was; this is the other
+   * case - the tile is wanted, the site it used to hold is not. Unless the
+   * caller asks to keep it, everything that belonged to the old site goes:
+   * its saved password, its cookies, its login and DM selectors.
+   */
+  ipcMain.handle('pane:reopen-as', async (_event, payload) => {
+    if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    const site = getSite(payload.siteId);
+    if (!site) return { ok: false, reason: 'unknown-site' };
+
+    const keep = payload.keep === true;
+    const result = repointSite(site, { url: payload.url, name: payload.name, keep });
+    if (!result.ok) return result;
+
+    if (!keep) {
+      if (secrets) secrets.clear(site.id);
+      const pane = panes.get(site.id);
+      // Closed panes keep their session, so the cookies are still here to clear.
+      if (pane && pane.session) {
+        try {
+          await pane.session.clearStorageData();
+        } catch (err) {
+          log('reopen-as: could not clear the old session', err);
+        }
+      }
+    }
+
+    config = saveConfig(userDataDir, config, BRAND.id);
+    if (dmService) dmService.refresh();
+    setupPaneSessions();
+    sendToMain('app:config-changed', bootstrapPayload());
+    return { ok: true, url: site.url, name: site.name };
   });
 
   ipcMain.handle('pane:command', (_event, payload) => {

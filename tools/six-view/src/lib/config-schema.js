@@ -289,6 +289,36 @@ function duplicateSite(site, takenIds = []) {
   return normalizeSite(copy, takenIds.length, used);
 }
 
+/**
+ * Point an existing pane at a different site.
+ *
+ * A pane remembers where its login boxes are, where its DM rows are, and (in
+ * the vault, which the caller clears separately) a password. All of that
+ * describes the site the pane used to hold, so carrying it over to a different
+ * site would mean typing one site's password into another's login form. Pass
+ * `keep: true` only when the pane is being re-pointed within the same site.
+ *
+ * @returns {{ok: boolean, reason?: string}}
+ */
+function repointSite(site, { url, name, keep = false } = {}) {
+  if (!isPlainObject(site)) return { ok: false, reason: 'unknown-site' };
+
+  const next = normalizeUrl(url);
+  if (!next) return { ok: false, reason: 'bad-url' };
+
+  const label = toTrimmedString(name);
+  if (label) site.name = label;
+  site.url = next;
+  site.enabled = true;
+
+  if (!keep) {
+    site.autofill = normalizeAutofill(null);
+    site.dm = normalizeDm(null);
+  }
+
+  return { ok: true };
+}
+
 /** Columns for a pane count, honouring an explicit override. */
 function resolveColumns(config) {
   const explicit = config && config.layout ? Number(config.layout.columns) : 0;
@@ -421,6 +451,7 @@ module.exports = {
   normalizeSite,
   normalizeUrl,
   partitionForSite,
+  repointSite,
   paneSlots,
   resolveUserAgent,
   resolveZoomFactor,
