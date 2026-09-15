@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('sixview', {
     ipcRenderer.invoke('dm:pick', { siteId, label, relativeTo }),
   dmScan: (siteId) => ipcRenderer.invoke('dm:scan', { siteId }),
   dmStatus: () => ipcRenderer.invoke('dm:status'),
+  boostPress: (siteId) => ipcRenderer.invoke('boost:press', { siteId }),
+  boostStatus: () => ipcRenderer.invoke('boost:status'),
   setTelegramToken: (token) => ipcRenderer.invoke('telegram:set-token', { token }),
   testTelegram: (token, chatId) => ipcRenderer.invoke('telegram:test', { token, chatId }),
   discoverChatId: (token) => ipcRenderer.invoke('telegram:discover-chat', { token }),

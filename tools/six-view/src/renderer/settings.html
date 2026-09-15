@@ -206,7 +206,7 @@
         </details>
 
 
-        <details class="sub">
+        <details class="sub" data-section="dm">
           <summary>DM の通知と返信（Telegram）</summary>
           <div class="row">
             <label class="check">
@@ -275,6 +275,57 @@
             <span class="dm-status hint"></span>
           </div>
         </details>
+        <details class="sub" data-section="boost">
+          <summary>ブーストの自動クリック</summary>
+          <div class="row">
+            <label class="check">
+              <input type="checkbox" data-field="boost.enabled" />
+              <span>ブーストのボタンを自動で押す</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" data-field="boost.notify" />
+              <span>押したら Telegram で知らせる</span>
+            </label>
+          </div>
+          <p class="hint">
+            ボタンが押せる状態になったら押します。押せないとき（時間が来ていないとき）は何もしません。
+            パネルにそのページを表示した状態で「指定」を押し、パネルの中のブーストのボタンをクリックしてください。
+          </p>
+          <div class="dm-pickers">
+            <div class="row dm-pick" data-pick="boost.selector" data-label="ブーストのボタンをクリックしてください">
+              <span class="dm-pick-name">ブーストのボタン<em>必須</em></span>
+              <input type="text" data-field="boost.selector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+          </div>
+          <div class="row">
+            <label class="field narrow">
+              <span>確認する間隔（分）</span>
+              <input type="number" data-field="boost.checkMinutes" min="3" max="720" step="1" />
+            </label>
+            <label class="field narrow">
+              <span>連続で押さない間隔（分）</span>
+              <input type="number" data-field="boost.minGapMinutes" min="5" max="1440" step="5" />
+            </label>
+            <label class="field narrow">
+              <span>押す時間帯（開始）</span>
+              <input type="number" data-field="boost.fromHour" min="0" max="23" step="1" />
+            </label>
+            <label class="field narrow">
+              <span>押す時間帯（終了）</span>
+              <input type="number" data-field="boost.toHour" min="1" max="24" step="1" />
+            </label>
+          </div>
+          <p class="hint">
+            時間帯は 0〜24 で指定します（例: 10 と 24 なら朝10時から深夜まで）。
+            開始と終了が同じなら24時間いつでも押します。
+          </p>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="boost-test">今すぐ押してみる</button>
+            <span class="boost-status hint"></span>
+          </div>
+        </details>
+
         <details class="sub">
           <summary>ユーザーエージェント（任意）</summary>
           <label class="field grow">

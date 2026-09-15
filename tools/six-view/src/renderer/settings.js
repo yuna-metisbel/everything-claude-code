@@ -139,15 +139,14 @@ const SCAN_PROBLEMS = {
 };
 
 /**
- * Fill the DM selectors by clicking the real elements in the pane.
+ * Wire every "指定" button under one section: the user clicks the real element
+ * inside the pane and its selector is recorded.
  *
  * Row-relative fields record their selector relative to the row, so the same
  * one selector works for every conversation in the list.
  */
-function wireDmPickers(card, site) {
-  const status = card.querySelector('.dm-status');
-
-  card.querySelectorAll('.dm-pick').forEach((rowEl) => {
+function wirePickerRows(root, site, status) {
+  root.querySelectorAll('.dm-pick').forEach((rowEl) => {
     const field = rowEl.dataset.pick;
     const input = rowEl.querySelector(`[data-field="${field}"]`);
     const relativeField = rowEl.dataset.relative;
@@ -177,8 +176,14 @@ function wireDmPickers(card, site) {
         : '指定しました。';
     });
   });
+}
 
-  card.querySelector('[data-action="dm-test"]').addEventListener('click', async () => {
+function wireDmPickers(card, site) {
+  const root = card.querySelector('[data-section="dm"]');
+  const status = root.querySelector('.dm-status');
+  wirePickerRows(root, site, status);
+
+  root.querySelector('[data-action="dm-test"]').addEventListener('click', async () => {
     status.textContent = '読み取り中…';
     const result = await window.sixview.dmScan(site.id);
     if (!result || !result.ok) {
@@ -191,6 +196,40 @@ function wireDmPickers(card, site) {
     status.textContent = first
       ? `${rows.length}件を読み取りました（未読 ${unread}件）。先頭: ${first.name || '名前なし'} / ${first.preview || '本文なし'}`
       : '行が見つかりませんでした。';
+  });
+}
+
+const BOOST_PROBLEMS = {
+  'not-configured': 'ボタンの場所がまだ指定されていません。',
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。',
+  'not-found': 'ボタンが見つかりません。指定し直してください。',
+  'not-visible': 'ボタンが画面に出ていません。そのページを表示してから試してください。',
+  'not-ready': 'まだ押せる状態ではないようです（時間が来ていません）。',
+  busy: '確認中です。少し待ってから試してください。',
+  'script-error': 'ページを読み取れませんでした。',
+  'no-result': 'ページを読み取れませんでした。',
+};
+
+function wireBoost(card, site) {
+  const root = card.querySelector('[data-section="boost"]');
+  const status = root.querySelector('.boost-status');
+  wirePickerRows(root, site, status);
+
+  root.querySelector('[data-action="boost-test"]').addEventListener('click', async () => {
+    if (!site.boost || !site.boost.selector) {
+      status.textContent = '先にブーストのボタンを「指定」してください。';
+      return;
+    }
+    status.textContent = '確認中…';
+    const result = await window.sixview.boostPress(site.id);
+
+    if (result && result.pressed) {
+      status.textContent = result.confirmed
+        ? '押しました。'
+        : '押しましたが、反映されたかは確認できませんでした。画面を見て確かめてください。';
+      return;
+    }
+    status.textContent = BOOST_PROBLEMS[result && result.reason] || '押せませんでした。';
   });
 }
 
@@ -275,6 +314,7 @@ function buildSiteCard(site, index, hasCredential) {
   });
 
   wireDmPickers(card, site);
+  wireBoost(card, site);
 
   const usernameInput = card.querySelector('[data-cred="username"]');
   const passwordInput = card.querySelector('[data-cred="password"]');

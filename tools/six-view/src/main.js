@@ -30,6 +30,7 @@ const {
 } = require('./lib/config-schema');
 const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
 const { DmService } = require('./dm-service');
+const { BoostService } = require('./boost-service');
 const { buildMenu } = require('./menu');
 
 /**
@@ -71,6 +72,7 @@ let configError = null;
 let secrets = null;
 /** @type {DmService|null} */
 let dmService = null;
+let boostService = null;
 
 /** siteId -> pane runtime */
 const panes = new Map();
@@ -339,6 +341,21 @@ function createDmService() {
     log,
   });
   dmService.refresh();
+
+  boostService = new BoostService({
+    getConfig: () => config,
+    getSite: (siteId) => getSite(siteId),
+    getContents: (siteId) => {
+      const pane = panes.get(siteId);
+      return pane && pane.contents && !pane.contents.isDestroyed() ? pane.contents : null;
+    },
+    // Boost notices go out over the same bot as the DM bridge; nothing is
+    // routed back, so a reply to one of them is simply ignored.
+    announce: (text) => (dmService ? dmService.announce(text) : Promise.resolve({ ok: false })),
+    onStatus: (status) => sendToMain('boost:status', status),
+    log,
+  });
+  boostService.refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +583,7 @@ function registerIpc() {
     applyLoginItemSetting();
     setupPaneSessions();
     if (dmService) dmService.refresh();
+    if (boostService) boostService.refresh();
     sendToMain('app:config-changed', bootstrapPayload());
     return bootstrapPayload();
   });
@@ -626,6 +644,7 @@ function registerIpc() {
 
     config = saveConfig(userDataDir, config, BRAND.id);
     if (dmService) dmService.refresh();
+    if (boostService) boostService.refresh();
     sendToMain('app:config-changed', bootstrapPayload());
     return { ok: true };
   });
@@ -662,6 +681,7 @@ function registerIpc() {
 
     config = saveConfig(userDataDir, config, BRAND.id);
     if (dmService) dmService.refresh();
+    if (boostService) boostService.refresh();
     setupPaneSessions();
     sendToMain('app:config-changed', bootstrapPayload());
     return { ok: true, url: site.url, name: site.name };
@@ -707,6 +727,18 @@ function registerIpc() {
 
   ipcMain.handle('dm:status', () => (dmService ? dmService.status() : null));
 
+  /**
+   * Press a pane's boost button now, from the settings window. It still
+   * refuses a button the page is not offering - "now" skips our own hours
+   * window and gap guard, not the site's cooldown.
+   */
+  ipcMain.handle('boost:press', (_event, payload) => {
+    if (!payload || !payload.siteId || !boostService) return { ok: false, reason: 'bad-request' };
+    return boostService.check(payload.siteId, { force: true });
+  });
+
+  ipcMain.handle('boost:status', () => (boostService ? boostService.status() : null));
+
   ipcMain.handle('telegram:set-token', (_event, payload) => {
     if (!secrets) return { ok: false, reason: 'bad-request' };
     if (!secrets.isAvailable()) return { ok: false, reason: 'no-encryption' };
@@ -715,6 +747,7 @@ function registerIpc() {
       ? secrets.set(TELEGRAM_SECRET_ID, '', token)
       : secrets.clear(TELEGRAM_SECRET_ID) || true;
     if (dmService) dmService.refresh();
+    if (boostService) boostService.refresh();
     sendToMain('app:config-changed', bootstrapPayload());
     return { ok };
   });
@@ -811,6 +844,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     if (dmService) dmService.stop();
+    if (boostService) boostService.stop();
   });
 
   app.on('window-all-closed', () => {

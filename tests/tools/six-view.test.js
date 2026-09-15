@@ -15,9 +15,11 @@ const autofill = require(path.join(toolRoot, 'src/lib/autofill'));
 const configStore = require(path.join(toolRoot, 'src/lib/config-store'));
 const { SecretStore } = require(path.join(toolRoot, 'src/lib/secret-store'));
 const dmScript = require(path.join(toolRoot, 'src/lib/dm-script'));
+const boostScript = require(path.join(toolRoot, 'src/lib/boost-script'));
 const { DmBridge } = require(path.join(toolRoot, 'src/lib/dm-bridge'));
 const telegramLib = require(path.join(toolRoot, 'src/lib/telegram'));
 const { DmService } = require(path.join(toolRoot, 'src/dm-service'));
+const { BoostService } = require(path.join(toolRoot, 'src/boost-service'));
 
 function test(name, fn) {
   try {
@@ -876,6 +878,224 @@ async function runTests() {
     service.stop();
   })) passed++; else failed++;
 
+
+  // --- the boost button ---
+
+  if (test('boost settings default to off, and a pane is only watched once set up', () => {
+    const site = schema.normalizeSite({ name: 'A', url: 'https://a.jp' }, 0, new Set());
+    assert.strictEqual(site.boost.enabled, false, 'never presses anything unasked');
+    assert.strictEqual(site.boost.selector, '');
+    assert.strictEqual(schema.boostIsUsable(site), false);
+
+    // Turned on but with no button picked yet: still nothing to press.
+    site.boost.enabled = true;
+    assert.strictEqual(schema.boostIsUsable(site), false);
+
+    site.boost.selector = '#boost';
+    assert.strictEqual(schema.boostIsUsable(site), true);
+
+    // A closed pane is not on screen, so it is not pressed either.
+    site.enabled = false;
+    assert.strictEqual(schema.boostIsUsable(site), false);
+  })) passed++; else failed++;
+
+  if (test('boost intervals are clamped so a button cannot be hammered', () => {
+    const fast = schema.normalizeBoost({ checkMinutes: 0, minGapMinutes: 0 });
+    assert.strictEqual(fast.checkMinutes, 3, 'checks no more often than every 3 minutes');
+    assert.strictEqual(fast.minGapMinutes, 5, 'presses no closer together than 5 minutes');
+
+    const slow = schema.normalizeBoost({ checkMinutes: 99999, minGapMinutes: 99999 });
+    assert.strictEqual(slow.checkMinutes, 720);
+    assert.strictEqual(slow.minGapMinutes, 1440);
+
+    const hours = schema.normalizeBoost({ fromHour: -5, toHour: 99 });
+    assert.strictEqual(hours.fromHour, 0);
+    assert.strictEqual(hours.toHour, 24);
+  })) passed++; else failed++;
+
+  if (test('the hours window covers a whole day, a slice of one, and one that wraps', () => {
+    // The default is the whole day.
+    assert.strictEqual(schema.withinHours(3, 0, 24), true);
+    assert.strictEqual(schema.withinHours(23, 0, 24), true);
+
+    // A daytime window excludes the small hours.
+    assert.strictEqual(schema.withinHours(10, 10, 24), true);
+    assert.strictEqual(schema.withinHours(9, 10, 24), false);
+    assert.strictEqual(schema.withinHours(4, 10, 24), false);
+
+    // A window that runs past midnight wraps instead of reading as empty.
+    assert.strictEqual(schema.withinHours(23, 22, 6), true);
+    assert.strictEqual(schema.withinHours(2, 22, 6), true);
+    assert.strictEqual(schema.withinHours(12, 22, 6), false);
+
+    // Equal bounds mean any time.
+    assert.strictEqual(schema.withinHours(4, 9, 9), true);
+  })) passed++; else failed++;
+
+  if (test('the press script ends on the click, and refuses a button that is off', () => {
+    const press = boostScript.buildBoostPressScript('#boost');
+    assert.ok(press.includes('el.click()'));
+    // Everything after the click may never run, so nothing may be awaited there.
+    const afterClick = press.slice(press.indexOf('el.click()'));
+    assert.ok(!afterClick.includes('await'), 'nothing is awaited after the click');
+    assert.ok(press.includes("'not-ready'"), 'a greyed-out button is refused');
+    assert.ok(press.includes("'not-found'"));
+
+    const read = boostScript.buildBoostReadScript('#boost');
+    assert.ok(!read.includes('.click()'), 'reading never presses anything');
+    assert.ok(read.includes('pressable'));
+  })) passed++; else failed++;
+
+  if (test('a selector with a quote in it cannot break out of the script', () => {
+    const nasty = '#x\'];window.pwned=1;//';
+    const script = boostScript.buildBoostReadScript(nasty);
+    assert.ok(script.includes(JSON.stringify(nasty)), 'the selector is embedded as a literal');
+    assert.ok(!script.includes('window.pwned=1;//\''), 'it never lands as bare code');
+  })) passed++; else failed++;
+
+  if (await testAsync('the boost is skipped outside the chosen hours and just after a press', async () => {
+    const site = schema.normalizeSite(
+      {
+        name: 'A',
+        url: 'https://a.jp',
+        boost: { enabled: true, selector: '#boost', fromHour: 10, toHour: 18, minGapMinutes: 60 },
+      },
+      0,
+      new Set()
+    );
+
+    let clock = new Date('2026-09-15T04:00:00').getTime(); // 04:00 local
+    const contents = {
+      isDestroyed: () => false,
+      once: (_event, fn) => setTimeout(fn, 0),
+      removeListener: () => {},
+      executeJavaScript: async () => ({ ok: true, found: true, visible: true, disabled: false, pressable: true }),
+    };
+    const service = new BoostService({
+      getConfig: () => ({ sites: [site] }),
+      getSite: () => site,
+      getContents: () => contents,
+      now: () => clock,
+    });
+
+    const night = await service.check(site.id);
+    assert.strictEqual(night.pressed, false);
+    assert.strictEqual(night.reason, 'outside-hours');
+
+    // Inside the window it presses.
+    clock = new Date('2026-09-15T11:00:00').getTime();
+    const noon = await service.check(site.id);
+    assert.strictEqual(noon.pressed, true);
+
+    // Ten minutes later the gap guard holds it back, even though the page
+    // still says the button is pressable.
+    clock += 10 * 60 * 1000;
+    const again = await service.check(site.id);
+    assert.strictEqual(again.pressed, false);
+    assert.strictEqual(again.reason, 'too-soon');
+
+    // Past the gap it presses again.
+    clock += 55 * 60 * 1000;
+    assert.strictEqual((await service.check(site.id)).pressed, true);
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('a button the site is refusing is never pressed, even by "press it now"', async () => {
+    const site = schema.normalizeSite(
+      { name: 'A', url: 'https://a.jp', boost: { enabled: true, selector: '#boost', fromHour: 10, toHour: 18 } },
+      0,
+      new Set()
+    );
+
+    const calls = [];
+    const contents = {
+      isDestroyed: () => false,
+      executeJavaScript: async (script) => {
+        calls.push(script);
+        return { ok: true, found: true, visible: true, disabled: true, pressable: false };
+      },
+    };
+    const service = new BoostService({
+      getConfig: () => ({ sites: [site] }),
+      getSite: () => site,
+      getContents: () => contents,
+      // 04:00, so "now" is also proving it overrides the hours window.
+      now: () => new Date('2026-09-15T04:00:00').getTime(),
+    });
+
+    const result = await service.check(site.id, { force: true });
+    assert.strictEqual(result.pressed, false);
+    assert.strictEqual(result.reason, 'not-ready');
+    assert.ok(calls.every((script) => !script.includes('el.click()')), 'the press script never ran');
+    assert.strictEqual(service.pressedCount, 0);
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('a press that navigates still counts, and is announced once', async () => {
+    const site = schema.normalizeSite(
+      { name: '02 キャスト1', url: 'https://a.jp', boost: { enabled: true, selector: '#boost', notify: true } },
+      0,
+      new Set()
+    );
+
+    const announced = [];
+    let pressedOnPage = false;
+    const contents = {
+      isDestroyed: () => false,
+      once: (_event, fn) => setTimeout(fn, 0),
+      removeListener: () => {},
+      executeJavaScript: async (script) => {
+        if (script.includes('el.click()')) {
+          pressedOnPage = true;
+          // The click navigated: the context is gone before it can answer.
+          throw new Error('Script failed to execute, this normally means an error was thrown');
+        }
+        return pressedOnPage
+          ? { ok: true, found: true, visible: true, disabled: true, pressable: false }
+          : { ok: true, found: true, visible: true, disabled: false, pressable: true };
+      },
+    };
+
+    const service = new BoostService({
+      getConfig: () => ({ sites: [site] }),
+      getSite: () => site,
+      getContents: () => contents,
+      announce: async (text) => {
+        announced.push(text);
+        return { ok: true };
+      },
+    });
+
+    const result = await service.check(site.id, { force: true });
+    assert.strictEqual(result.pressed, true, 'a lost context after the click is a press, not a failure');
+    assert.strictEqual(result.confirmed, true, 'the button went grey, which confirms it');
+    assert.strictEqual(announced.length, 1);
+    assert.ok(announced[0].includes('02 キャスト1') && announced[0].includes('ブースト'), announced[0]);
+    service.stop();
+  })) passed++; else failed++;
+
+  if (await testAsync('only panes that are set up get a timer', async () => {
+    const sites = [
+      schema.normalizeSite({ id: 'a', name: 'A', url: 'https://a.jp', boost: { enabled: true, selector: '#b' } }, 0, new Set()),
+      schema.normalizeSite({ id: 'b', name: 'B', url: 'https://b.jp', boost: { enabled: true } }, 1, new Set()),
+      schema.normalizeSite({ id: 'c', name: 'C', url: 'https://c.jp' }, 2, new Set()),
+    ];
+    const service = new BoostService({
+      getConfig: () => ({ sites }),
+      getSite: (id) => sites.find((s) => s.id === id) || null,
+      getContents: () => null,
+    });
+
+    service.refresh();
+    assert.strictEqual(service.status().watching, 1, 'only the pane with a picked button');
+
+    sites[1].boost.selector = '#b2';
+    service.refresh();
+    assert.strictEqual(service.status().watching, 2);
+
+    service.stop();
+    assert.strictEqual(service.status().watching, 0);
+  })) passed++; else failed++;
 
   // --- closing a pane ---
 

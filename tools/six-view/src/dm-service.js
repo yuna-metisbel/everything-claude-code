@@ -26,6 +26,7 @@ const {
   buildPickerScript,
 } = require('./lib/dm-script');
 const { dmCanSend, dmIsUsable } = require('./lib/config-schema');
+const { run, settle } = require('./lib/page-runner');
 
 /** Give a pane a moment after launch before the first scan. */
 const FIRST_SCAN_DELAY_MS = 8000;
@@ -33,43 +34,6 @@ const FIRST_SCAN_DELAY_MS = 8000;
 const DEFAULT_POLL_SECONDS = 30;
 /** Back off this long after a failed poll so a bad token does not spin. */
 const POLL_ERROR_BACKOFF_MS = 15000;
-/** How long to let a page settle after a click that navigates. */
-const NAVIGATION_SETTLE_MS = 2000;
-
-/**
- * Run a script in a pane.
- *
- * A click that navigates tears the page's JS context down, which rejects the
- * pending call. That is an expected outcome here, not a failure: it is reported
- * as `context-lost` so the caller can confirm by looking at the page instead.
- */
-async function run(contents, script) {
-  try {
-    const result = await contents.executeJavaScript(script, true);
-    return result && typeof result === 'object' ? result : { ok: false, reason: 'no-result' };
-  } catch (err) {
-    const message = String((err && err.message) || err);
-    if (/destroyed|Script failed to execute|context/i.test(message)) {
-      return { ok: false, reason: 'context-lost' };
-    }
-    return { ok: false, reason: 'script-error', message };
-  }
-}
-
-/** Wait for a navigation to finish, or for the settle window to lapse. */
-function settle(contents, ms = NAVIGATION_SETTLE_MS) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      contents.removeListener('did-stop-loading', finish);
-      resolve();
-    };
-    contents.once('did-stop-loading', finish);
-    setTimeout(finish, ms);
-  });
-}
 
 /** Plain-language reasons, for the message that goes back to Telegram. */
 const SEND_PROBLEMS = {
@@ -467,6 +431,28 @@ class DmService {
    * Check a token and chat id by actually sending a message, so the user sees
    * the bridge work end to end before any customer message goes near it.
    */
+  /**
+   * Send a plain message to the configured chat.
+   *
+   * Used by features that have something to report but no conversation behind
+   * it - a reply to one of these is not routed anywhere, by design.
+   */
+  async announce(text) {
+    const telegram = this.telegramConfig;
+    if (!telegram.enabled || !telegram.chatId || !this.client.configured) {
+      return { ok: false, reason: 'not-configured' };
+    }
+    const res = await this.client.sendMessage(telegram.chatId, text);
+    if (!res.ok) {
+      this.lastError = `Telegram送信に失敗: ${res.error}`;
+      this.emitStatus();
+      return { ok: false, reason: res.error };
+    }
+    this.sentCount += 1;
+    this.emitStatus();
+    return { ok: true };
+  }
+
   async testToken(token, chatId) {
     const probe = new TelegramClient({ token, fetchImpl: this.client.fetchImpl });
     if (!probe.configured) return { ok: false, reason: 'bad-token' };

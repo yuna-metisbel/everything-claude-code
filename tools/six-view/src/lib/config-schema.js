@@ -98,6 +98,25 @@ const DEFAULT_DM = {
 };
 
 /**
+ * Pressing the "boost" button for a pane.
+ *
+ * The site's own cooldown decides when the button is pressable, so this polls
+ * and presses whenever it is offered rather than keeping a schedule of its
+ * own. `minGapMinutes` is the guard for sites that never grey the button out:
+ * without it, a button that always looks ready would be pressed every check.
+ */
+const DEFAULT_BOOST = {
+  enabled: false,
+  selector: '',
+  checkMinutes: 10,
+  minGapMinutes: 60,
+  // 0-24 covering the whole day. Equal values also mean "any time".
+  fromHour: 0,
+  toHour: 24,
+  notify: true,
+};
+
+/**
  * The Telegram side of the bridge. The bot token is NOT here - it lives in the
  * safeStorage vault next to the passwords, so the config file stays shareable.
  */
@@ -179,6 +198,20 @@ function normalizeUrl(value) {
   }
 }
 
+function normalizeBoost(raw) {
+  const source = isPlainObject(raw) ? raw : {};
+  return {
+    enabled: toBoolean(source.enabled, DEFAULT_BOOST.enabled),
+    selector: toTrimmedString(source.selector, DEFAULT_BOOST.selector),
+    // Three minutes is already far more often than any boost comes back.
+    checkMinutes: clampNumber(source.checkMinutes, 3, 720, DEFAULT_BOOST.checkMinutes),
+    minGapMinutes: clampNumber(source.minGapMinutes, 5, 1440, DEFAULT_BOOST.minGapMinutes),
+    fromHour: clampNumber(source.fromHour, 0, 23, DEFAULT_BOOST.fromHour),
+    toHour: clampNumber(source.toHour, 1, 24, DEFAULT_BOOST.toHour),
+    notify: toBoolean(source.notify, DEFAULT_BOOST.notify),
+  };
+}
+
 function normalizeAutofill(raw) {
   const source = isPlainObject(raw) ? raw : {};
   return {
@@ -226,6 +259,25 @@ function isPaneVisible(site) {
 }
 
 /** Enough selectors present to actually watch a pane's message list. */
+/** A pane whose boost button is on screen and configured to be pressed. */
+function boostIsUsable(site) {
+  return Boolean(isPaneVisible(site) && site.boost && site.boost.enabled && site.boost.selector);
+}
+
+/**
+ * Is `hour` inside the window the user chose?
+ *
+ * Equal bounds mean "any time", and a window that runs past midnight (22 to 6)
+ * wraps rather than being read as empty.
+ */
+function withinHours(hour, fromHour, toHour) {
+  const from = Number(fromHour);
+  const to = Number(toHour);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return true;
+  if (from < to) return hour >= from && hour < to;
+  return hour >= from || hour < to;
+}
+
 function dmIsUsable(site) {
   // A closed pane has no page loaded, so there is nothing to read.
   return Boolean(isPaneVisible(site) && site.dm && site.dm.enabled && site.dm.rowSelector);
@@ -257,6 +309,7 @@ function normalizeSite(raw, index, usedIds) {
     userAgent: toTrimmedString(source.userAgent),
     autofill: normalizeAutofill(source.autofill),
     dm: normalizeDm(source.dm),
+    boost: normalizeBoost(source.boost),
   };
 }
 
@@ -429,9 +482,13 @@ module.exports = {
   DEFAULT_DM,
   DEFAULT_TELEGRAM,
   TELEGRAM_SECRET_ID,
+  DEFAULT_BOOST,
+  boostIsUsable,
+  withinHours,
   dmCanSend,
   dmIsUsable,
   isPaneVisible,
+  normalizeBoost,
   normalizeDm,
   normalizeTelegram,
   DEFAULT_BRAND,
