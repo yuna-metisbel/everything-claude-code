@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>SixView 設定</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <header class="head">
+      <h1><span class="brand-name">SixView</span> 設定</h1>
+      <p class="head-note">
+        6つのパネルに表示するサイトと、自動ログイン用の情報を設定します。パスワードは OS
+        のキーチェーン（macOS Keychain / Windows 資格情報マネージャー）で暗号化して保存されます。
+      </p>
+      <p id="encryption-warning" class="warning" hidden>
+        この環境では OS の安全な保存領域が使えないため、ID/パスワードは保存できません。
+      </p>
+    </header>
+
+    <div class="scroll">
+    <section class="card">
+      <h2>全体設定</h2>
+      <div class="row">
+        <label class="field">
+          <span>既定の拡大率</span>
+          <input type="number" id="default-zoom" min="0.25" max="2" step="0.05" />
+          <small>6分割は画面が狭いので 0.6〜0.75 がおすすめです。</small>
+        </label>
+        <label class="field grow">
+          <span>既定のユーザーエージェント（空欄で標準）</span>
+          <input type="text" id="default-ua" placeholder="例: Mozilla/5.0 ... Chrome/120.0.0.0 Safari/537.36" />
+          <small>サイトに「対応していないブラウザ」と言われる場合のみ設定します。</small>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field narrow">
+          <span>横に並べる数</span>
+          <select id="columns">
+            <option value="0">自動</option>
+            <option value="2">2列</option>
+            <option value="3">3列</option>
+            <option value="4">4列</option>
+            <option value="5">5列</option>
+          </select>
+          <small>自動なら 6画面は3列、8画面は4列になります。</small>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="open-at-login" />
+          <span>パソコンの起動時に <span class="brand-name">SixView</span> を自動で開く</span>
+        </label>
+        <span id="login-item-note" class="hint" hidden>この OS では自動起動を設定できません。</span>
+      </div>
+    </section>
+
+    <section class="card" id="telegram-card">
+      <h2>Telegram 連携（DMの通知と返信）</h2>
+      <p class="hint">
+        パネルの新着メッセージを Telegram に通知し、Telegram でその通知に「返信」すると、
+        そのお客様にそのまま送信されます。ボットのトークンはパスワードと同じく OS
+        のキーチェーンに暗号化して保存され、設定ファイルには書き込まれません。
+      </p>
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="tg-enabled" />
+          <span>Telegram 連携を使う</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="tg-confirm" />
+          <span>02 に送信する前に PC で確認する（推奨）</span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field grow">
+          <span>ボットトークン（@BotFather で発行）</span>
+          <input type="password" id="tg-token" autocomplete="new-password" placeholder="123456789:AA..." />
+          <small id="tg-token-status">未登録</small>
+        </label>
+        <label class="field">
+          <span>チャット ID</span>
+          <input type="text" id="tg-chat" placeholder="例: 123456789" />
+          <small>ボットに一度話しかけてから「ID を取得」を押すと自動で入ります。</small>
+        </label>
+        <span class="cred-actions">
+          <button type="button" id="tg-find-chat" class="btn">ID を取得</button>
+          <button type="button" id="tg-save" class="btn">トークンを保存</button>
+          <button type="button" id="tg-test" class="btn btn-primary">接続テスト</button>
+        </span>
+      </div>
+      <p id="tg-status" class="cred-status"></p>
+    </section>
+
+    <section class="card">
+      <h2>パネル<span id="pane-count" class="pane-count"></span></h2>
+      <div class="row">
+        <label class="field">
+          <span>追加するサイト</span>
+          <select id="preset"></select>
+        </label>
+        <button type="button" id="add-pane" class="btn btn-primary">パネルを追加</button>
+        <button type="button" id="enable-all-autofill" class="btn">すべてのパネルで自動ログインをオンにする</button>
+        <span class="hint">
+          同じサイトの別アカウントを開きたいときは、そのパネルの「複製」を使ってください。
+          パネルごとにログイン状態が分かれているので、同じサイトに同時に別アカウントでログインできます。
+        </span>
+      </div>
+    </section>
+
+    <main id="sites"></main>
+    </div>
+
+    <footer class="foot">
+      <span id="config-path" class="config-path"></span>
+      <span class="foot-actions">
+        <span id="save-status" class="save-status"></span>
+        <button type="button" id="close" class="btn">閉じる</button>
+        <button type="button" id="save" class="btn btn-primary">保存して反映</button>
+      </span>
+    </footer>
+
+    <template id="site-template">
+      <section class="card site">
+        <h2>
+          <span class="site-index"></span>
+          <span class="site-title"></span>
+          <span class="site-actions">
+            <button type="button" class="btn" data-action="duplicate" title="このサイトの別アカウント用にコピー">複製</button>
+            <button type="button" class="btn btn-danger" data-action="remove">削除</button>
+          </span>
+        </h2>
+
+        <div class="row">
+          <label class="field">
+            <span>表示名</span>
+            <input type="text" data-field="name" />
+          </label>
+          <label class="field grow">
+            <span>ログインページ URL</span>
+            <input type="text" data-field="url" placeholder="https://example.co.jp/login" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="check">
+            <input type="checkbox" data-field="enabled" />
+            <span>このパネルを表示する（外すと画面から閉じます。設定とログイン状態は残ります）</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-field="incognito" />
+            <span>シークレット（毎回ログアウト状態で開く）</span>
+          </label>
+          <label class="field narrow">
+            <span>拡大率（0 で既定）</span>
+            <input type="number" data-field="zoomFactor" min="0" max="2" step="0.05" />
+          </label>
+        </div>
+
+        <details class="sub">
+          <summary>自動ログイン</summary>
+          <div class="row">
+            <label class="check">
+              <input type="checkbox" data-field="autofill.enabled" />
+              <span>このサイトで自動入力する</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" data-field="autofill.autoSubmit" />
+              <span>入力後にログインボタンも押す</span>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>ID 入力欄のセレクタ（任意）</span>
+              <input type="text" data-field="autofill.usernameSelector" placeholder="#username" />
+            </label>
+            <label class="field">
+              <span>パスワード入力欄のセレクタ（任意）</span>
+              <input type="text" data-field="autofill.passwordSelector" placeholder="input[type=password]" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>ログインボタンのセレクタ（任意）</span>
+              <input type="text" data-field="autofill.submitSelector" placeholder="button[type=submit]" />
+            </label>
+            <label class="field">
+              <span>ログインページの判定（URL の一部 / 空欄で全ページ）</span>
+              <input type="text" data-field="autofill.urlPattern" placeholder="login" />
+            </label>
+            <label class="field narrow">
+              <span>入力までの待機 (ms)</span>
+              <input type="number" data-field="autofill.delayMs" min="0" max="15000" step="100" />
+            </label>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="detect">ログイン欄を自動検出</button>
+            <span class="detect-status hint"></span>
+          </div>
+          <p class="hint">
+            <strong>ふつうは、下の「ログイン ID」と「パスワード」を保存するだけで動きます。</strong>
+            セレクタは空欄のままで構いません（パスワード欄と、その直前の入力欄を自動で探します）。
+            うまく入らないサイトだけ、ログイン画面を表示した状態で「自動検出」を押してください。
+          </p>
+        </details>
+
+
+        <details class="sub" data-section="dm">
+          <summary>DM の通知と返信（Telegram）</summary>
+          <div class="row">
+            <label class="check">
+              <input type="checkbox" data-field="dm.enabled" />
+              <span>このパネルの新着メッセージを監視する</span>
+            </label>
+            <label class="field narrow">
+              <span>確認する間隔（秒）</span>
+              <input type="number" data-field="dm.intervalSeconds" min="20" max="3600" step="10" />
+            </label>
+          </div>
+          <p class="hint">
+            パネルに 02 のメッセージ一覧を表示した状態で、下の「指定」を押してから、
+            パネルの中の実際の場所をクリックしてください。中止したいときは Esc キーです。
+            <strong>「1件の行」を最初に指定してください。</strong>名前・本文・未読の指定は、その行を基準に記録されます。
+          </p>
+          <div class="dm-pickers">
+            <div class="row dm-pick" data-pick="dm.rowSelector" data-label="メッセージ一覧の「1件の行」をクリックしてください">
+              <span class="dm-pick-name">1件の行<em>必須</em></span>
+              <input type="text" data-field="dm.rowSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.nameSelector" data-label="その行の中の「相手の名前」をクリックしてください" data-relative="dm.rowSelector">
+              <span class="dm-pick-name">相手の名前</span>
+              <input type="text" data-field="dm.nameSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.previewSelector" data-label="その行の中の「メッセージ本文」をクリックしてください" data-relative="dm.rowSelector">
+              <span class="dm-pick-name">メッセージ本文</span>
+              <input type="text" data-field="dm.previewSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.unreadSelector" data-label="その行の中の「未読バッジ（赤い数字）」をクリックしてください" data-relative="dm.rowSelector">
+              <span class="dm-pick-name">未読バッジ</span>
+              <input type="text" data-field="dm.unreadSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.openSelector" data-label="下のメニューの「DM」ボタンをクリックしてください">
+              <span class="dm-pick-name">DM を開くボタン</span>
+              <input type="text" data-field="dm.openSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+          </div>
+          <p class="hint">
+            ここから下は「返信」に使います。<strong>会話を1つ開いた画面</strong>にしてから指定してください。
+          </p>
+          <div class="dm-pickers">
+            <div class="row dm-pick" data-pick="dm.inputSelector" data-label="返信を書く「入力欄」をクリックしてください">
+              <span class="dm-pick-name">返信の入力欄<em>返信に必須</em></span>
+              <input type="text" data-field="dm.inputSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.sendSelector" data-label="「送信」ボタンをクリックしてください">
+              <span class="dm-pick-name">送信ボタン</span>
+              <input type="text" data-field="dm.sendSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+            <div class="row dm-pick" data-pick="dm.backSelector" data-label="一覧に「戻る」ボタンをクリックしてください">
+              <span class="dm-pick-name">一覧に戻るボタン</span>
+              <input type="text" data-field="dm.backSelector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="dm-test">今すぐ読み取ってみる</button>
+            <span class="dm-status hint"></span>
+          </div>
+        </details>
+        <details class="sub" data-section="boost">
+          <summary>ブーストの自動クリック</summary>
+          <div class="row">
+            <label class="check">
+              <input type="checkbox" data-field="boost.enabled" />
+              <span>ブーストのボタンを自動で押す</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" data-field="boost.notify" />
+              <span>押したら Telegram で知らせる</span>
+            </label>
+          </div>
+          <p class="hint">
+            ボタンが押せる状態になったら押します。押せないとき（時間が来ていないとき）は何もしません。
+            パネルにそのページを表示した状態で「指定」を押し、パネルの中のブーストのボタンをクリックしてください。
+          </p>
+          <div class="dm-pickers">
+            <div class="row dm-pick" data-pick="boost.selector" data-label="ブーストのボタンをクリックしてください">
+              <span class="dm-pick-name">ブーストのボタン<em>必須</em></span>
+              <input type="text" data-field="boost.selector" placeholder="未設定" />
+              <button type="button" class="btn" data-action="pick">指定</button>
+            </div>
+          </div>
+          <div class="row">
+            <label class="field narrow">
+              <span>確認する間隔（分）</span>
+              <input type="number" data-field="boost.checkMinutes" min="3" max="720" step="1" />
+            </label>
+            <label class="field narrow">
+              <span>連続で押さない間隔（分）</span>
+              <input type="number" data-field="boost.minGapMinutes" min="5" max="1440" step="5" />
+            </label>
+            <label class="field narrow">
+              <span>押す時間帯（開始）</span>
+              <input type="number" data-field="boost.fromHour" min="0" max="23" step="1" />
+            </label>
+            <label class="field narrow">
+              <span>押す時間帯（終了）</span>
+              <input type="number" data-field="boost.toHour" min="1" max="24" step="1" />
+            </label>
+          </div>
+          <p class="hint">
+            時間帯は 0〜24 で指定します（例: 10 と 24 なら朝10時から深夜まで）。
+            開始と終了が同じなら24時間いつでも押します。
+          </p>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="boost-test">今すぐ押してみる</button>
+            <span class="boost-status hint"></span>
+          </div>
+        </details>
+
+        <details class="sub">
+          <summary>ユーザーエージェント（任意）</summary>
+          <label class="field grow">
+            <span>このサイト専用の UA（空欄で既定）</span>
+            <input type="text" data-field="userAgent" />
+          </label>
+        </details>
+
+        <div class="creds">
+          <div class="row">
+            <label class="field">
+              <span>ログイン ID</span>
+              <input type="text" data-cred="username" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>パスワード</span>
+              <input type="password" data-cred="password" autocomplete="new-password" />
+            </label>
+            <span class="cred-actions">
+              <button type="button" class="btn" data-cred-action="save">認証情報を保存</button>
+              <button type="button" class="btn btn-danger" data-cred-action="clear">削除</button>
+            </span>
+          </div>
+          <p class="cred-status"></p>
+        </div>
+      </section>
+    </template>
+
+    <script src="settings.js"></script>
+  </body>
+</html>
