@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>SixView</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">6</span>
+        <span class="brand-name">SixView</span>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" id="login-all" class="btn btn-primary">すべて自動ログイン</button>
+        <button type="button" id="reload-all" class="btn">すべて再読み込み</button>
+        <button type="button" id="open-settings" class="btn">設定</button>
+      </div>
+    </header>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <div id="closed-bar" class="closed-bar" hidden>
+      <span class="closed-label">閉じているパネル</span>
+      <span id="closed-list" class="closed-list"></span>
+
+      <form id="reopen-form" class="reopen-form" hidden>
+        <span id="reopen-title" class="reopen-title"></span>
+        <input id="reopen-name" type="text" class="reopen-input" placeholder="表示名" />
+        <input id="reopen-url" type="text" class="reopen-input reopen-url" placeholder="https://..." />
+        <label class="reopen-check">
+          <input id="reopen-wipe" type="checkbox" checked />
+          <span>前のサイトのログイン情報と DM 設定を消す</span>
+        </label>
+        <button type="submit" class="btn">開く</button>
+        <button type="button" id="reopen-cancel" class="btn">やめる</button>
+        <span id="reopen-status" class="reopen-status"></span>
+      </form>
+    </div>
+
+    <main id="grid" class="grid"></main>
+
+    <template id="pane-template">
+      <section class="pane">
+        <header class="pane-head">
+          <span class="pane-index"></span>
+          <span class="pane-name"></span>
+          <span class="pane-badge pane-private" hidden>シークレット</span>
+          <span class="pane-status" title="状態"></span>
+          <span class="pane-url" title="クリックするとアドレスを変更できます"></span>
+          <input
+            type="text"
+            class="pane-url-input"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="https://..."
+            hidden
+          />
+          <span class="pane-buttons">
+            <button type="button" class="icon-btn" data-command="back" title="戻る">‹</button>
+            <button type="button" class="icon-btn" data-command="forward" title="進む">›</button>
+            <button type="button" class="icon-btn" data-command="reload" title="再読み込み">⟳</button>
+            <button type="button" class="icon-btn" data-command="home" title="トップページへ">⌂</button>
+            <button type="button" class="icon-btn" data-command="login" title="自動ログイン">🔑</button>
+            <button type="button" class="icon-btn" data-command="zoom-out" title="縮小">−</button>
+            <button type="button" class="icon-btn" data-command="zoom-in" title="拡大">＋</button>
+            <button type="button" class="icon-btn" data-action="maximize" title="このパネルを拡大 / 元に戻す">⤢</button>
+            <button type="button" class="icon-btn" data-command="external" title="既定のブラウザで開く">↗</button>
+            <button type="button" class="icon-btn" data-action="logout" title="ログイン状態を消去">⎋</button>
+            <button
+              type="button"
+              class="icon-btn"
+              data-action="set-home"
+              title="今開いているページを、このパネルの最初のページにする"
+            >☆</button>
+            <button type="button" class="icon-btn" data-action="close" title="このパネルを閉じる">✕</button>
+          </span>
+        </header>
+        <div class="pane-body">
+          <div class="pane-empty" hidden>
+            <p class="pane-empty-title">URL が未設定です</p>
+            <p class="pane-empty-text">設定画面でこのパネルのログインページ URL を登録してください。</p>
+            <button type="button" class="btn btn-primary" data-action="settings">設定を開く</button>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
