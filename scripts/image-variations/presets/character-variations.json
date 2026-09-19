@@ -1,0 +1,57 @@
+{
+  "name": "character-variations",
+  "base": "the same character as the reference image, preserving facial features, eye colour, body proportions and overall identity exactly",
+  "template": "{base}, {pose}, {hair}, {outfit}, {background}, {style}",
+  "fixed": {
+    "style": "high quality illustration, clean lineart, soft natural lighting, full body framing, single subject"
+  },
+  "categories": {
+    "pose": [
+      "standing straight with arms relaxed at the sides",
+      "standing with arms crossed, confident expression",
+      "sitting on a chair, legs crossed, leaning slightly forward",
+      "walking mid-stride, looking over the shoulder",
+      "hands on hips, chin slightly raised",
+      "leaning against a wall with one hand in a pocket",
+      "waving at the viewer with a bright smile",
+      "crouching low, one hand on the ground"
+    ],
+    "hair": [
+      "long straight hair falling past the shoulders",
+      "shoulder-length bob with a straight fringe",
+      "high ponytail tied with a simple band",
+      "twin braids resting over the shoulders",
+      "short pixie cut with a side-swept fringe",
+      "loose wavy hair with a half-up bun"
+    ],
+    "outfit": [
+      "casual white blouse and blue denim jeans",
+      "navy school uniform with a pleated skirt and ribbon tie",
+      "oversized knit sweater and pleated midi skirt",
+      "tailored business suit in charcoal grey",
+      "summer sundress with a wide-brim straw hat",
+      "sporty hoodie and jogger trousers with sneakers",
+      "traditional Japanese kimono with a floral pattern"
+    ],
+    "background": [
+      "plain light grey studio backdrop",
+      "sunlit city street with soft bokeh",
+      "quiet cafe interior with warm lighting",
+      "cherry blossom park in full bloom",
+      "modern office with large windows",
+      "seaside boardwalk at golden hour",
+      "cosy bedroom with bookshelves"
+    ]
+  },
+  "request": {
+    "quality": "auto"
+  },
+  "wire": {
+    "model": "grok-imagine-image-2.0",
+    "generateEndpoint": "https://api.x.ai/v1/images/generations",
+    "editEndpoint": "https://api.x.ai/v1/images/edits",
+    "imageField": "image",
+    "imageStyle": "object",
+    "responseFormat": "b64_json"
+  }
+}
