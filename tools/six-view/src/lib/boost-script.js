@@ -82,4 +82,50 @@ function buildBoostPressScript(selector) {
 })();`;
 }
 
-module.exports = { buildBoostReadScript, buildBoostPressScript };
+/**
+ * Find the boost button by what it says.
+ *
+ * A boost button announces itself - in its label, or in the class the site
+ * author gave it - so it can be proposed rather than pointed at. It reads
+ * only: a button found here is reported, never pressed, and one the site is
+ * currently refusing is still reported, because the selector is right even
+ * when the moment is not.
+ *
+ * @returns {string} an IIFE resolving to `{ ok, selector, text, pressable }`
+ */
+function buildBoostDetectScript() {
+  return `(() => {
+  ${HELPERS}
+  ${OFF}
+  const WORDS = /ブースト|boost|急上昇|上位表示|アップ|押し上げ/i;
+
+  const hintOf = (el) => {
+    const cls = el.className && el.className.baseVal !== undefined
+      ? el.className.baseVal
+      : String(el.className || '');
+    return [cls, el.id || '', el.getAttribute('aria-label') || '', el.value || ''].join(' ');
+  };
+
+  const candidates = Array.from(
+    document.querySelectorAll('button, a, [role="button"], input[type="submit"], input[type="button"]')
+  ).filter(visible);
+
+  const matches = candidates.filter(
+    (el) => WORDS.test(textOf(el)) || WORDS.test(hintOf(el))
+  );
+  if (matches.length === 0) return { ok: false, reason: 'not-found' };
+
+  // An offered button beats one in cooldown when the page shows both, since
+  // that is the one whose selector was meant.
+  const el = matches.find((candidate) => !looksOff(candidate)) || matches[0];
+
+  return {
+    ok: true,
+    selector: selectorFor(el),
+    text: textOf(el).slice(0, 80),
+    pressable: !looksOff(el),
+  };
+})();`;
+}
+
+module.exports = { buildBoostReadScript, buildBoostPressScript, buildBoostDetectScript };

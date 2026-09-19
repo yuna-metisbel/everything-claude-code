@@ -16,6 +16,7 @@ const configStore = require(path.join(toolRoot, 'src/lib/config-store'));
 const { SecretStore } = require(path.join(toolRoot, 'src/lib/secret-store'));
 const dmScript = require(path.join(toolRoot, 'src/lib/dm-script'));
 const boostScript = require(path.join(toolRoot, 'src/lib/boost-script'));
+const dmDetectScript = require(path.join(toolRoot, 'src/lib/dm-detect-script'));
 const { DmBridge } = require(path.join(toolRoot, 'src/lib/dm-bridge'));
 const telegramLib = require(path.join(toolRoot, 'src/lib/telegram'));
 const { DmService } = require(path.join(toolRoot, 'src/dm-service'));
@@ -944,6 +945,55 @@ async function runTests() {
     const read = boostScript.buildBoostReadScript('#boost');
     assert.ok(!read.includes('.click()'), 'reading never presses anything');
     assert.ok(read.includes('pressable'));
+  })) passed++; else failed++;
+
+  if (test('detection only ever reads the page', () => {
+    // Auto-detection runs against a live, logged-in account. A stray click in
+    // it would send a message or spend a boost, so the scripts are held to
+    // reading: no clicking, no submitting, no typing, no navigating.
+    const forbidden = ['.click(', '.submit(', 'dispatchEvent', 'location.href =', 'setValue('];
+    for (const [name, script] of [
+      ['DM', dmDetectScript.buildDmDetectScript()],
+      ['boost', boostScript.buildBoostDetectScript()],
+    ]) {
+      // The shared HELPERS block carries typing and clicking for the scripts
+      // that do act; what matters here is that detection's own code never
+      // reaches for any of it.
+      const body = script.split(dmScript.HELPERS).join('');
+      assert.ok(body.length < script.length, `${name} detection reuses the shared helpers`);
+      for (const bad of forbidden) {
+        assert.ok(!body.includes(bad), `${name} detection must not use ${bad}`);
+      }
+      assert.ok(script.startsWith('(() => {'), `${name} detection is a plain expression`);
+    }
+  })) passed++; else failed++;
+
+  if (test('DM detection reports every field the settings window fills', () => {
+    const script = dmDetectScript.buildDmDetectScript();
+    for (const field of [
+      'rowSelector',
+      'nameSelector',
+      'previewSelector',
+      'unreadSelector',
+      'openSelector',
+      'inputSelector',
+      'sendSelector',
+      'backSelector',
+    ]) {
+      assert.ok(script.includes(field), `${field} is reported`);
+    }
+    // A guess is only useful if it can be checked, so a sample of what was
+    // read comes back with it.
+    assert.ok(script.includes('sample'));
+    assert.ok(script.includes("'not-found'"));
+  })) passed++; else failed++;
+
+  if (test('boost detection finds a button by its label and says whether it is offered', () => {
+    const script = boostScript.buildBoostDetectScript();
+    assert.ok(script.includes('ブースト'), 'it knows the Japanese label');
+    assert.ok(/boost/i.test(script), 'and the English one');
+    assert.ok(script.includes('looksOff'), 'it reuses the same "is it off" reading as the presser');
+    assert.ok(script.includes('pressable'));
   })) passed++; else failed++;
 
   if (test('a selector with a quote in it cannot break out of the script', () => {

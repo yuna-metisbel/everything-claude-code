@@ -218,9 +218,19 @@
               <input type="number" data-field="dm.intervalSeconds" min="20" max="3600" step="10" />
             </label>
           </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="dm-detect">自動でさがす</button>
+            <span class="dm-detect-status hint"></span>
+          </div>
           <p class="hint">
-            パネルに 02 のメッセージ一覧を表示した状態で、下の「指定」を押してから、
-            パネルの中の実際の場所をクリックしてください。中止したいときは Esc キーです。
+            <strong>まずはこれだけ試してください。</strong>
+            パネルにメッセージ一覧を表示して「自動でさがす」を押すと、下の欄が埋まります。
+            そのあと会話を1つ開いてもう一度押すと、返信側も埋まります。
+            読み取るだけなので、メッセージが送られたり既読になったりはしません。
+          </p>
+          <p class="hint">
+            うまく埋まらない欄だけ、手で指定してください。「指定」を押してから、
+            パネルの中の実際の場所をクリックします。中止したいときは Esc キーです。
             <strong>「1件の行」を最初に指定してください。</strong>名前・本文・未読の指定は、その行を基準に記録されます。
           </p>
           <div class="dm-pickers">
@@ -287,9 +297,14 @@
               <span>押したら Telegram で知らせる</span>
             </label>
           </div>
+          <div class="row">
+            <button type="button" class="btn btn-primary" data-action="boost-detect">自動でさがす</button>
+            <span class="boost-detect-status hint"></span>
+          </div>
           <p class="hint">
             ボタンが押せる状態になったら押します。押せないとき（時間が来ていないとき）は何もしません。
-            パネルにそのページを表示した状態で「指定」を押し、パネルの中のブーストのボタンをクリックしてください。
+            パネルにそのページを表示して「自動でさがす」を押してください。
+            見つからないときだけ「指定」を押して、パネルの中のブーストのボタンをクリックします。
           </p>
           <div class="dm-pickers">
             <div class="row dm-pick" data-pick="boost.selector" data-label="ブーストのボタンをクリックしてください">

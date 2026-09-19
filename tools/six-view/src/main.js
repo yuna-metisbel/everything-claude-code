@@ -29,6 +29,8 @@ const {
   resolveZoomFactor,
 } = require('./lib/config-schema');
 const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
+const { buildDmDetectScript } = require('./lib/dm-detect-script');
+const { buildBoostDetectScript } = require('./lib/boost-script');
 const { DmService } = require('./dm-service');
 const { BoostService } = require('./boost-service');
 const { buildMenu } = require('./menu');
@@ -292,6 +294,29 @@ async function detectLoginFields(siteId) {
     return result && typeof result === 'object' ? result : { ok: false, reason: 'no-result' };
   } catch (err) {
     log(`login detection failed for ${siteId}: ${err.message}`);
+    return { ok: false, reason: 'script-error' };
+  }
+}
+
+/**
+ * Run a read-only detection script in a pane and hand back what it saw.
+ *
+ * Shared by the DM and boost detectors. Both only read, so unlike the pickers
+ * this never brings the window forward and never has to survive a navigation:
+ * if the page moves under it, the caller simply gets `script-error` and can
+ * run it again.
+ */
+async function detectInPane(siteId, script, label) {
+  const pane = panes.get(siteId);
+  if (!pane || !pane.contents || pane.contents.isDestroyed()) {
+    return { ok: false, reason: 'pane-not-loaded' };
+  }
+
+  try {
+    const result = await pane.contents.executeJavaScript(script, true);
+    return result && typeof result === 'object' ? result : { ok: false, reason: 'no-result' };
+  } catch (err) {
+    log(`${label} detection failed for ${siteId}: ${err.message}`);
     return { ok: false, reason: 'script-error' };
   }
 }
@@ -718,6 +743,21 @@ function registerIpc() {
       label: payload.label || '',
       relativeTo: payload.relativeTo || '',
     });
+  });
+
+  /**
+   * Propose DM selectors for whatever the pane currently shows, so the usual
+   * setup is a button rather than eight picks. It reads only - nothing is
+   * clicked, sent or marked as read - and every field it fills stays editable.
+   */
+  ipcMain.handle('dm:detect', (_event, payload) => {
+    if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    return detectInPane(payload.siteId, buildDmDetectScript(), 'DM');
+  });
+
+  ipcMain.handle('boost:detect', (_event, payload) => {
+    if (!payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    return detectInPane(payload.siteId, buildBoostDetectScript(), 'boost');
   });
 
   ipcMain.handle('dm:scan', (_event, payload) => {

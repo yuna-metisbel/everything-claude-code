@@ -178,10 +178,80 @@ function wirePickerRows(root, site, status) {
   });
 }
 
+const DETECT_PROBLEMS = {
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。先にそのページを表示してください。',
+  'not-found': '見つかりませんでした。そのページを表示してから、もう一度押してください。',
+  'script-error': 'ページを読み取れませんでした。',
+  'no-result': 'ページを読み取れませんでした。',
+  'bad-request': 'ページを読み取れませんでした。',
+};
+
+/**
+ * Fill a selector field from a detection result.
+ *
+ * A guess never overwrites something already set: a field the user picked by
+ * hand is the one that was verified against the real page, so it wins.
+ */
+function fillSelector(card, site, field, value) {
+  if (!value || getPath(site, field)) return false;
+  const input = card.querySelector(`[data-field="${field}"]`);
+  if (!input) return false;
+  writeInput(input, value);
+  setPath(site, field, value);
+  return true;
+}
+
+/** Japanese for what a detection pass managed to fill in. */
+function describeDmDetection(found, filled) {
+  if (filled === 0) {
+    return found.screen === 'list'
+      ? '新しく埋まった欄はありません（すでに指定済みのようです）。'
+      : '新しく埋まった欄はありません。メッセージ一覧を表示して、もう一度押してください。';
+  }
+  if (found.screen === 'list') {
+    const sample = found.sample || {};
+    const read = sample.name || sample.preview
+      ? `先頭は「${sample.name || '名前なし'} / ${sample.preview || '本文なし'}」と読めました。`
+      : '';
+    return `一覧から ${found.rows} 件の行を見つけ、${filled} か所を埋めました。${read}`
+      + '次に会話を1つ開いて、もう一度押してください。';
+  }
+  return `${filled} か所を埋めました（返信側）。「保存して反映」を押してください。`;
+}
+
+function wireDmDetect(card, site, root, status) {
+  const detectStatus = root.querySelector('.dm-detect-status');
+
+  root.querySelector('[data-action="dm-detect"]').addEventListener('click', async () => {
+    detectStatus.textContent = 'さがしています…';
+    const found = await window.sixview.dmDetect(site.id);
+
+    if (!found || !found.ok) {
+      detectStatus.textContent = DETECT_PROBLEMS[found && found.reason] || '見つかりませんでした。';
+      return;
+    }
+
+    const filled = [
+      ['dm.rowSelector', found.rowSelector],
+      ['dm.nameSelector', found.nameSelector],
+      ['dm.previewSelector', found.previewSelector],
+      ['dm.unreadSelector', found.unreadSelector],
+      ['dm.openSelector', found.openSelector],
+      ['dm.inputSelector', found.inputSelector],
+      ['dm.sendSelector', found.sendSelector],
+      ['dm.backSelector', found.backSelector],
+    ].filter(([field, value]) => fillSelector(card, site, field, value)).length;
+
+    detectStatus.textContent = describeDmDetection(found, filled);
+    if (filled > 0) status.textContent = '「今すぐ読み取ってみる」で確かめられます。';
+  });
+}
+
 function wireDmPickers(card, site) {
   const root = card.querySelector('[data-section="dm"]');
   const status = root.querySelector('.dm-status');
   wirePickerRows(root, site, status);
+  wireDmDetect(card, site, root, status);
 
   root.querySelector('[data-action="dm-test"]').addEventListener('click', async () => {
     status.textContent = '読み取り中…';
@@ -214,6 +284,28 @@ function wireBoost(card, site) {
   const root = card.querySelector('[data-section="boost"]');
   const status = root.querySelector('.boost-status');
   wirePickerRows(root, site, status);
+
+  const detectStatus = root.querySelector('.boost-detect-status');
+  root.querySelector('[data-action="boost-detect"]').addEventListener('click', async () => {
+    detectStatus.textContent = 'さがしています…';
+    const found = await window.sixview.boostDetect(site.id);
+
+    if (!found || !found.ok) {
+      detectStatus.textContent = DETECT_PROBLEMS[found && found.reason] || '見つかりませんでした。';
+      return;
+    }
+
+    // Unlike the DM fields this one replaces what is there: there is a single
+    // boost button, so a fresh reading of the live page is the better value.
+    const input = root.querySelector('[data-field="boost.selector"]');
+    writeInput(input, found.selector);
+    setPath(site, 'boost.selector', found.selector);
+
+    const label = found.text ? `「${found.text}」` : 'ボタン';
+    detectStatus.textContent = found.pressable
+      ? `${label} を見つけました。「このパネルのブーストを自動で押す」にチェックして保存してください。`
+      : `${label} を見つけました（今は押せない状態です）。チェックして保存すれば、押せるようになったときに押します。`;
+  });
 
   root.querySelector('[data-action="boost-test"]').addEventListener('click', async () => {
     if (!site.boost || !site.boost.selector) {
