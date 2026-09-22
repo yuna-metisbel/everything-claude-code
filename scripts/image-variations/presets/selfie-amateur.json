@@ -41,35 +41,11 @@
       },
       {
         "label": "lean-forward",
-        "text": "少し前屈みになる"
+        "text": "上半身を少しカメラ側へ寄せる"
       },
       {
         "label": "body-angled",
         "text": "身体を斜めに向けて顔だけカメラを見る"
-      },
-      {
-        "label": "knee-up-sit",
-        "text": "片膝を立てて座る"
-      },
-      {
-        "label": "cross-legged",
-        "text": "あぐらに近い自然な姿勢で座る"
-      },
-      {
-        "label": "kneel-bed",
-        "text": "ベッドの上で膝立ちになる"
-      },
-      {
-        "label": "lying-side",
-        "text": "ベッドに横向きに寝転がる"
-      },
-      {
-        "label": "prone-elbows",
-        "text": "うつ伏せで肘をつく"
-      },
-      {
-        "label": "sofa-perch",
-        "text": "ソファに浅く腰掛ける"
       },
       {
         "label": "look-back",
@@ -128,12 +104,8 @@
         "text": "ベッドの中央に座っている"
       },
       {
-        "label": "sofa",
-        "text": "ソファに座っている"
-      },
-      {
-        "label": "floor",
-        "text": "床に座っている"
+        "label": "bed-knee-up",
+        "text": "ベッドの上で片膝を立てて座っている"
       },
       {
         "label": "bed-kneeling",
@@ -141,23 +113,39 @@
       },
       {
         "label": "bed-lying",
-        "text": "ベッドに横になっている"
+        "text": "ベッドに横向きに寝転がっている"
+      },
+      {
+        "label": "bed-prone",
+        "text": "ベッドにうつ伏せになり肘をついている"
       },
       {
         "label": "white-duvet",
         "text": "白い布団の上で寝転がっている"
       },
       {
-        "label": "by-wall",
-        "text": "部屋の壁際に立っている"
-      },
-      {
         "label": "hotel-bed",
         "text": "ホテルのベッドに腰掛けている"
       },
       {
+        "label": "sofa",
+        "text": "ソファに浅く腰掛けている"
+      },
+      {
+        "label": "floor",
+        "text": "床に座っている"
+      },
+      {
+        "label": "floor-cross-legged",
+        "text": "床にあぐらに近い自然な姿勢で座っている"
+      },
+      {
         "label": "chair",
         "text": "椅子に浅く腰掛けている"
+      },
+      {
+        "label": "by-wall",
+        "text": "部屋の壁際に立っている"
       }
     ]
   }

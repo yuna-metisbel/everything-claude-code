@@ -59,13 +59,20 @@ node scripts/image-variations/cli.js --image ./ref.png -n 6 --seed 3f9a1c2b7d04
 
 | Preset | Categories | Combinations | For |
 |--------|-----------|--------------|-----|
-| `selfie-amateur` | pose 15, angle 10, setting 10 | 1,500 | An amateur phone selfie of the person in the reference |
+| `selfie-amateur` | pose 9, angle 10, setting 13 | 1,170 | An amateur phone selfie of the person in the reference |
 | `edit-all` | pose 10, background 10, outfit 10, color 10 | 10,000 | Change pose, background, outfit and outfit colour at once |
 | `edit-pose` | pose 10 | 10 | Change only the pose, keep the rest of the photo |
 | `edit-background` | background 10 | 10 | Change only the background |
 | `edit-outfit` | outfit 10 | 10 | Change only the outfit |
 | `edit-outfit-color` | color 10 | 10 | Recolour the outfit, keep its shape and fabric |
 | `character-variations` | pose 8, hair 6, outfit 7, background 7 | 2,352 | The original sample set |
+
+In `selfie-amateur`, `pose` holds only what the upper body is doing and
+`setting` holds the posture along with the place. Splitting them that way is
+what makes the two safe to sample independently: a category of postures
+crossed with a category of places-and-postures contradicts itself - "lying
+face down" with "sitting on the edge of the bed" - for a large share of the
+combinations.
 
 The `edit-*` presets share a preamble that holds the person's identity, keeps
 an obscured face obscured, and forbids added text or watermarks. The
