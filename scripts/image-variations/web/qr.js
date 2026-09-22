@@ -383,12 +383,51 @@ function encode(text) {
 }
 
 /**
- * Render for a terminal: one character per module across, two modules per
- * line down, with an explicit black-on-white so the polarity is right
- * whatever colour scheme the terminal uses.
+ * Render for a terminal.
+ *
+ * Two spaces per module, coloured by background only. Terminals paint the
+ * background across the whole line height, so the modules tile with no seam;
+ * a block glyph would leave the line spacing unpainted and slice every row
+ * in half, which no scanner forgives. Two cells wide against one cell tall
+ * also lands close to square, since a character cell is about twice as tall
+ * as it is wide.
  */
-function render(text, { quietZone = 4 } = {}) {
-  const { modules } = encode(text);
+const DARK = '\u001b[40m';
+const LIGHT = '\u001b[47m';
+const RESET = '\u001b[0m';
+
+function renderBlocks(modules, quietZone) {
+  const size = modules.length;
+  const padded = size + quietZone * 2;
+  const at = (row, col) => {
+    const r = row - quietZone;
+    const c = col - quietZone;
+    return r >= 0 && r < size && c >= 0 && c < size ? modules[r][c] : 0;
+  };
+
+  const lines = [];
+  for (let row = 0; row < padded; row++) {
+    let line = '';
+    let current = null;
+    for (let col = 0; col < padded; col++) {
+      const colour = at(row, col) ? DARK : LIGHT;
+      if (colour !== current) {
+        line += colour;
+        current = colour;
+      }
+      line += '  ';
+    }
+    lines.push(line + RESET);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Half the width and a quarter of the area, for a terminal too narrow for
+ * the other one. Block glyphs make this vulnerable to line spacing, so it
+ * is the fallback rather than the default.
+ */
+function renderCompact(modules, quietZone) {
   const size = modules.length;
   const padded = size + quietZone * 2;
   const at = (row, col) => {
@@ -403,14 +442,28 @@ function render(text, { quietZone = 4 } = {}) {
     for (let col = 0; col < padded; col++) {
       const top = at(row, col);
       const bottom = row + 1 < padded ? at(row + 1, col) : 0;
-      if (top && bottom) line += '█';
-      else if (top) line += '▀';
-      else if (bottom) line += '▄';
+      if (top && bottom) line += '\u2588';
+      else if (top) line += '\u2580';
+      else if (bottom) line += '\u2584';
       else line += ' ';
     }
-    lines.push(`${line}\u001b[0m`);
+    lines.push(`${line}${RESET}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Columns the default rendering needs, quiet zone included.
+ */
+function renderedWidth(text, { quietZone = 4 } = {}) {
+  return (encode(text).modules.length + quietZone * 2) * 2;
+}
+
+function render(text, { quietZone = 4, style = 'blocks' } = {}) {
+  const { modules } = encode(text);
+  return style === 'compact'
+    ? renderCompact(modules, quietZone)
+    : renderBlocks(modules, quietZone);
 }
 
 module.exports = {
@@ -422,5 +475,6 @@ module.exports = {
   toCodewords,
   formatBits,
   encode,
-  render
+  render,
+  renderedWidth
 };

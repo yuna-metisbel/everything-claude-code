@@ -131,10 +131,32 @@ async function run() {
   });
   await test('draws a QR code for the LAN address by default', () => {
     const text = server.banner({
-      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k', addresses: ['192.168.1.23']
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k',
+      addresses: ['192.168.1.23'], columns: 120
     });
     assert.match(text, /scan from a phone/);
-    assert.match(text, /[\u2580\u2584\u2588]/, 'the QR code should be drawn');
+    assert.match(text, new RegExp(`${String.fromCharCode(27)}\\[40m`), 'the QR code should be drawn');
+  });
+  await test('falls back to the narrow drawing rather than wrapping', () => {
+    const wide = server.banner({
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k',
+      addresses: ['192.168.1.23'], columns: 120
+    });
+    const narrow = server.banner({
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k',
+      addresses: ['192.168.1.23'], columns: 60
+    });
+    assert.ok(!/[\u2580\u2584\u2588]/.test(wide), 'a wide window gets the block drawing');
+    assert.match(narrow, /[\u2580\u2584\u2588]/, 'a narrow window gets the compact drawing');
+    assert.match(narrow, /widen it past/, 'and is told why');
+  });
+  await test('a token stays short enough for a QR code that fits 80 columns', () => {
+    const token = require('crypto').randomBytes(server.TOKEN_BYTES).toString('base64url');
+    const url = `http://192.168.100.100:8787/?t=${token}`;
+    assert.ok(
+      require('../../scripts/image-variations/web/qr').renderedWidth(url) <= 80,
+      `a ${token.length}-character token pushes the QR code past 80 columns`
+    );
   });
   await test('omits the QR code when asked', () => {
     const text = server.banner({
@@ -142,7 +164,7 @@ async function run() {
       addresses: ['192.168.1.23'], qrCode: false
     });
     assert.ok(!/scan from a phone/.test(text));
-    assert.ok(!/[\u2580\u2584\u2588]/.test(text));
+    assert.ok(!new RegExp(`${String.fromCharCode(27)}\\[40m`).test(text));
   });
   await test('says so when the machine has no network address', () => {
     const text = server.banner({
@@ -152,7 +174,8 @@ async function run() {
   });
   await test('never draws a QR code on loopback', () => {
     const text = server.banner({ host: '127.0.0.1', port: 8787, token: '', apiKey: 'k' });
-    assert.ok(!/[\u2580\u2584\u2588]/.test(text));
+    assert.ok(!/scan from a phone/.test(text));
+    assert.ok(!new RegExp(`${String.fromCharCode(27)}\\[40m`).test(text));
   });
 
   console.log('\nreachable addresses:');

@@ -195,28 +195,100 @@ test('still produces the grid a real decoder accepted', () => {
 
 console.log('\nrendering:');
 
-test('draws a quiet zone around the symbol', () => {
-  const lines = qr.render('HELLO').split('\n');
-  const plain = lines.map(line => stripAnsi(line));
-  assert.ok(/^ +$/.test(plain[0]), 'the first row should be blank');
-  assert.ok(/^ +$/.test(plain[plain.length - 1]), 'the last row should be blank');
-  assert.ok(plain.every(line => line.startsWith('    ')), 'every row needs a left margin');
-});
-test('is one character per module wide, two modules per line', () => {
+/**
+ * Read the drawn output back the way a terminal would: follow the background
+ * colour and record one module per pair of spaces. If this cannot recover the
+ * grid, neither can a camera.
+ */
+function parseBlocks(text) {
+  return text.split('\n').map(line => {
+    const row = [];
+    let dark = false;
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === ESC) {
+        const end = line.indexOf('m', i);
+        const code = line.slice(i + 2, end);
+        if (code === '40') dark = true;
+        else if (code === '47') dark = false;
+        i = end + 1;
+        continue;
+      }
+      if (line[i] === ' ') {
+        row.push(dark ? 1 : 0);
+        i += 2;
+        continue;
+      }
+      i++;
+    }
+    return row;
+  }).filter(row => row.length > 0);
+}
+
+test('draws the grid back exactly, quiet zone included', () => {
   const { modules } = qr.encode('HELLO');
-  const plain = qr.render('HELLO').split('\n').map(l => stripAnsi(l));
-  const padded = modules.length + 8;
-  assert.strictEqual(plain[0].length, padded);
-  assert.strictEqual(plain.length, Math.ceil(padded / 2));
+  const drawn = parseBlocks(qr.render('HELLO'));
+  const quiet = 4;
+
+  assert.strictEqual(drawn.length, modules.length + quiet * 2);
+  assert.strictEqual(drawn[0].length, modules.length + quiet * 2);
+
+  for (let r = 0; r < drawn.length; r++) {
+    for (let c = 0; c < drawn[r].length; c++) {
+      const inside = r >= quiet && r < quiet + modules.length &&
+        c >= quiet && c < quiet + modules.length;
+      const expected = inside ? modules[r - quiet][c - quiet] : 0;
+      assert.strictEqual(drawn[r][c], expected, `module ${r},${c}`);
+    }
+  }
 });
-test('sets an explicit black-on-white so the polarity does not depend on the theme', () => {
-  const line = qr.render('HELLO').split('\n')[0];
-  assert.ok(line.startsWith(`${ESC}[30;47m`), 'each line should open black-on-white');
-  assert.ok(line.endsWith(`${ESC}[0m`), 'and reset at the end');
+test('paints by background only, so line spacing cannot slice a row', () => {
+  // A block glyph leaves the line-height padding unpainted and cuts every
+  // module row in half; a background colour fills the whole cell.
+  const drawn = qr.render('HELLO');
+  assert.ok(!/[\u2580\u2584\u2588]/.test(drawn), 'the default style must not use glyphs');
+  assert.match(drawn, new RegExp(`${ESC}\\[40m`), 'dark modules need a background');
+  assert.match(drawn, new RegExp(`${ESC}\\[47m`), 'light modules need a background');
+  assert.ok(
+    stripAnsi(drawn).split('\n').every(line => /^ *$/.test(line)),
+    'nothing but spaces should be drawn'
+  );
+});
+test('is two cells per module, which is about square on a terminal', () => {
+  const { modules } = qr.encode('HELLO');
+  const padded = modules.length + 8;
+  const lines = qr.render('HELLO').split('\n');
+  assert.strictEqual(lines.length, padded, 'one line per module row');
+  assert.strictEqual(stripAnsi(lines[0]).length, padded * 2, 'two columns per module');
+});
+test('reports the width it needs before drawing it', () => {
+  const url = 'http://192.168.1.23:8787/?t=g0zOoDdR38cxfZZb';
+  assert.strictEqual(qr.renderedWidth(url), (qr.encode(url).modules.length + 8) * 2);
+  assert.ok(qr.renderedWidth(url) <= 80, `a LAN address needs ${qr.renderedWidth(url)} columns`);
+});
+test('resets the colour at the end of every line', () => {
+  for (const line of qr.render('HELLO').split('\n')) {
+    assert.ok(line.endsWith(`${ESC}[0m`), 'a line must not leak its background');
+  }
+});
+
+console.log('\ncompact rendering:');
+
+test('halves the width for a narrow window', () => {
+  const { modules } = qr.encode('HELLO');
+  const padded = modules.length + 8;
+  const lines = qr.render('HELLO', { style: 'compact' }).split('\n');
+  assert.strictEqual(stripAnsi(lines[0]).length, padded);
+  assert.strictEqual(lines.length, Math.ceil(padded / 2));
 });
 test('uses only block characters and spaces', () => {
-  const plain = stripAnsi(qr.render('HELLO')).replace(/\n/g, '');
-  assert.match(plain, /^[▀▄█ ]+$/);
+  const plain = stripAnsi(qr.render('HELLO', { style: 'compact' })).replace(/\n/g, '');
+  assert.match(plain, /^[\u2580\u2584\u2588 ]+$/);
+});
+test('sets black-on-white so the polarity does not depend on the theme', () => {
+  const line = qr.render('HELLO', { style: 'compact' }).split('\n')[0];
+  assert.ok(line.startsWith(`${ESC}[30;47m`));
+  assert.ok(line.endsWith(`${ESC}[0m`));
 });
 
 console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);

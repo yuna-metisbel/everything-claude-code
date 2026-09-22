@@ -276,6 +276,15 @@ correction level L, versions 1 to 5. Those versions hold a single
 error-correction block, so there is no interleaving, and 106 bytes is well
 past what an address with a token needs.
 
+It draws with background colour rather than block glyphs. A glyph leaves the
+terminal's line spacing unpainted, which slices every module row in half and
+stops the code scanning; a background fills the whole cell. Two cells per
+module also lands close to square, since a character cell is about twice as
+tall as it is wide. That needs 74 columns for a typical address - the token
+is 96 bits as base64url rather than hex to keep it there. In a narrower
+window the server falls back to a half-height drawing and says so, since a
+wrapped QR code is an unreadable one.
+
 ### Language
 
 The UI ships in Japanese and English and follows the browser, so a Japanese

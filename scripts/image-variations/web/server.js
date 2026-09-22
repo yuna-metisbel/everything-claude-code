@@ -27,6 +27,9 @@ const DEFAULT_PORT = 8787;
 const DEFAULT_HOST = '127.0.0.1';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const TOKEN_HEADER = 'x-ecc-token';
+// 96 bits, base64url, so the address stays short enough for a QR code that
+// fits an 80-column terminal - hex at the same strength would not.
+const TOKEN_BYTES = 12;
 
 const USAGE = `image-variations web server
 
@@ -219,7 +222,15 @@ function reachableUrls({ host, port, token, addresses = lanAddresses() }) {
   return hosts.map(entry => `http://${entry}:${port}${query}`);
 }
 
-function banner({ host, port, token, apiKey, addresses = lanAddresses(), qrCode = true }) {
+function banner({
+  host,
+  port,
+  token,
+  apiKey,
+  addresses = lanAddresses(),
+  qrCode = true,
+  columns = process.stdout.columns
+}) {
   const lines = [];
   const exposed = !LOOPBACK_HOSTS.has(host);
   const urls = reachableUrls({ host, port, token, addresses });
@@ -242,7 +253,18 @@ function banner({ host, port, token, apiKey, addresses = lanAddresses(), qrCode 
       lines.push('[image-variations] scan from a phone on the same network:');
       lines.push('');
       try {
-        lines.push(qr.render(lan));
+        // The wide drawing is the reliable one; fall back only if it would
+        // wrap, because a wrapped QR code is an unreadable QR code.
+        const needed = qr.renderedWidth(lan);
+        const narrow = Number.isInteger(columns) && columns > 0 && columns < needed;
+        lines.push(qr.render(lan, { style: narrow ? 'compact' : 'blocks' }));
+        if (narrow) {
+          lines.push('');
+          lines.push(
+            `[image-variations] this window is ${columns} columns; widen it past ${needed} ` +
+            'for a QR code that scans more reliably'
+          );
+        }
       } catch (error) {
         lines.push(`[image-variations] (could not draw the QR code: ${error.message})`);
       }
@@ -274,7 +296,7 @@ function main() {
 
   const apiKey = readApiKey();
   const exposed = !LOOPBACK_HOSTS.has(options.host);
-  const token = exposed ? (options.token || crypto.randomBytes(16).toString('hex')) : options.token;
+  const token = exposed ? (options.token || crypto.randomBytes(TOKEN_BYTES).toString('base64url')) : options.token;
 
   const server = createServer({ presetsDir: options.presets, apiKey, token });
 
@@ -303,6 +325,7 @@ module.exports = {
   DEFAULT_PORT,
   DEFAULT_HOST,
   TOKEN_HEADER,
+  TOKEN_BYTES,
   parseServerArgs,
   readApiKey,
   lanAddresses,
