@@ -13,7 +13,10 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const os = require('os');
 const path = require('path');
+
+const qr = require('./qr');
 
 const { handleApiRequest, HttpError, MAX_BODY_BYTES } = require('./api');
 const { serveStatic } = require('./static');
@@ -35,6 +38,7 @@ Options:
                         Use 0.0.0.0 to reach it from a phone on the same network.
       --presets <dir>   Directory of preset JSON files (default: ../presets)
       --token <value>   Fixed access token for non-loopback binds (default: random)
+      --no-qr           Do not print a QR code for the address
   -h, --help            Show this help
 
 The xAI key is read from XAI_API_KEY (or GROK_API_KEY) and never leaves
@@ -47,6 +51,7 @@ function parseServerArgs(argv) {
     host: DEFAULT_HOST,
     presets: DEFAULT_PRESETS_DIR,
     token: '',
+    qr: true,
     help: false
   };
 
@@ -78,6 +83,9 @@ function parseServerArgs(argv) {
         break;
       case '--token':
         options.token = next();
+        break;
+      case '--no-qr':
+        options.qr = false;
         break;
       case '-h':
       case '--help':
@@ -182,20 +190,66 @@ function createServer({ presetsDir = DEFAULT_PRESETS_DIR, apiKey = '', token = '
   });
 }
 
-function banner({ host, port, token, apiKey }) {
+/**
+ * Every IPv4 address this machine answers on beyond loopback - which is
+ * what another device on the same network has to type.
+ */
+function lanAddresses(interfaces = os.networkInterfaces()) {
+  const addresses = [];
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      const family = entry.family === 4 || entry.family === 'IPv4';
+      if (family && !entry.internal) {
+        addresses.push(entry.address);
+      }
+    }
+  }
+  return addresses;
+}
+
+/**
+ * Where the app can be reached. Binding to 0.0.0.0 means every interface,
+ * so the wildcard is expanded into the addresses someone could actually use.
+ */
+function reachableUrls({ host, port, token, addresses = lanAddresses() }) {
+  const query = token ? `/?t=${token}` : '/';
+  const hosts = host === '0.0.0.0' || host === '::'
+    ? ['127.0.0.1', ...addresses]
+    : [host];
+  return hosts.map(entry => `http://${entry}:${port}${query}`);
+}
+
+function banner({ host, port, token, apiKey, addresses = lanAddresses(), qrCode = true }) {
   const lines = [];
   const exposed = !LOOPBACK_HOSTS.has(host);
-  const shown = host === '0.0.0.0' ? '<this-machine-lan-ip>' : host;
-  const query = token ? `/?t=${token}` : '/';
+  const urls = reachableUrls({ host, port, token, addresses });
 
-  lines.push(`[image-variations] listening on http://${shown}:${port}${query}`);
+  for (const url of urls) {
+    lines.push(`[image-variations] listening on ${url}`);
+  }
 
   if (!apiKey) {
     lines.push('[image-variations] warning: XAI_API_KEY is not set - planning works, generating will fail');
   }
 
   if (exposed) {
-    lines.push('[image-variations] bound beyond loopback: the access token above is required for /api/*');
+    const lan = urls.find(url => !url.includes('127.0.0.1'));
+
+    if (!lan) {
+      lines.push('[image-variations] no non-loopback address found - is this machine on a network?');
+    } else if (qrCode) {
+      lines.push('');
+      lines.push('[image-variations] scan from a phone on the same network:');
+      lines.push('');
+      try {
+        lines.push(qr.render(lan));
+      } catch (error) {
+        lines.push(`[image-variations] (could not draw the QR code: ${error.message})`);
+      }
+      lines.push('');
+    }
+
+    lines.push('[image-variations] the access token in that URL is required for /api/* - treat it as the password');
     lines.push('[image-variations] note: over plain http on a LAN address browsers refuse to install the PWA');
     lines.push('[image-variations]       (service workers need a secure context) - the page itself still works');
   }
@@ -230,7 +284,13 @@ function main() {
   });
 
   server.listen(options.port, options.host, () => {
-    process.stdout.write(`${banner({ host: options.host, port: options.port, token, apiKey })}\n`);
+    process.stdout.write(`${banner({
+      host: options.host,
+      port: options.port,
+      token,
+      apiKey,
+      qrCode: options.qr
+    })}\n`);
   });
 }
 
@@ -245,6 +305,8 @@ module.exports = {
   TOKEN_HEADER,
   parseServerArgs,
   readApiKey,
+  lanAddresses,
+  reachableUrls,
   readJsonBody,
   createServer,
   banner

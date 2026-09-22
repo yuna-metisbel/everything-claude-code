@@ -78,6 +78,10 @@ async function run() {
   await test('rejects a non-numeric port', () => {
     assert.throws(() => server.parseServerArgs(['--port', 'abc']), /between 1 and 65535/);
   });
+  await test('accepts --no-qr', () => {
+    assert.strictEqual(server.parseServerArgs([]).qr, true);
+    assert.strictEqual(server.parseServerArgs(['--no-qr']).qr, false);
+  });
   await test('rejects an unknown option', () => {
     assert.throws(() => server.parseServerArgs(['--nope']), /unknown option/);
   });
@@ -116,6 +120,71 @@ async function run() {
     const text = server.banner({ host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k' });
     assert.match(text, /secure context/);
     assert.match(text, /\?t=tok/);
+  });
+  await test('prints the address another device would actually type', () => {
+    const text = server.banner({
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k',
+      addresses: ['192.168.1.23'], qrCode: false
+    });
+    assert.match(text, /http:\/\/192\.168\.1\.23:8787\/\?t=tok/);
+    assert.match(text, /http:\/\/127\.0\.0\.1:8787/, 'loopback still works on this machine');
+  });
+  await test('draws a QR code for the LAN address by default', () => {
+    const text = server.banner({
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k', addresses: ['192.168.1.23']
+    });
+    assert.match(text, /scan from a phone/);
+    assert.match(text, /[\u2580\u2584\u2588]/, 'the QR code should be drawn');
+  });
+  await test('omits the QR code when asked', () => {
+    const text = server.banner({
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k',
+      addresses: ['192.168.1.23'], qrCode: false
+    });
+    assert.ok(!/scan from a phone/.test(text));
+    assert.ok(!/[\u2580\u2584\u2588]/.test(text));
+  });
+  await test('says so when the machine has no network address', () => {
+    const text = server.banner({
+      host: '0.0.0.0', port: 8787, token: 'tok', apiKey: 'k', addresses: []
+    });
+    assert.match(text, /no non-loopback address found/);
+  });
+  await test('never draws a QR code on loopback', () => {
+    const text = server.banner({ host: '127.0.0.1', port: 8787, token: '', apiKey: 'k' });
+    assert.ok(!/[\u2580\u2584\u2588]/.test(text));
+  });
+
+  console.log('\nreachable addresses:');
+
+  await test('keeps only external IPv4 addresses', () => {
+    const found = server.lanAddresses({
+      lo: [{ family: 'IPv4', address: '127.0.0.1', internal: true }],
+      en0: [
+        { family: 'IPv4', address: '192.168.1.23', internal: false },
+        { family: 'IPv6', address: 'fe80::1', internal: false }
+      ]
+    });
+    assert.deepStrictEqual(found, ['192.168.1.23']);
+  });
+  await test('accepts the numeric family Node now reports', () => {
+    const found = server.lanAddresses({ en0: [{ family: 4, address: '10.0.0.7', internal: false }] });
+    assert.deepStrictEqual(found, ['10.0.0.7']);
+  });
+  await test('survives an interface with no entries', () => {
+    assert.deepStrictEqual(server.lanAddresses({ utun0: null }), []);
+  });
+  await test('expands the wildcard bind into usable addresses', () => {
+    assert.deepStrictEqual(
+      server.reachableUrls({ host: '0.0.0.0', port: 8787, token: 't', addresses: ['192.168.1.23'] }),
+      ['http://127.0.0.1:8787/?t=t', 'http://192.168.1.23:8787/?t=t']
+    );
+  });
+  await test('leaves a specific bind alone and omits an absent token', () => {
+    assert.deepStrictEqual(
+      server.reachableUrls({ host: '127.0.0.1', port: 9000, token: '', addresses: ['192.168.1.23'] }),
+      ['http://127.0.0.1:9000/']
+    );
   });
   await test('stays quiet about tokens on loopback', () => {
     const text = server.banner({ host: '127.0.0.1', port: 8787, token: '', apiKey: 'k' });

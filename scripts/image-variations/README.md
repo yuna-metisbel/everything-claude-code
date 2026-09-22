@@ -232,6 +232,7 @@ loads offline - generating still needs the server running.
 | `--host <addr>` | Address to bind (default `127.0.0.1`, loopback only) |
 | `--presets <dir>` | Directory of preset JSON files (default `../presets`) |
 | `--token <value>` | Fixed access token for non-loopback binds (default: random) |
+| `--no-qr` | Do not print a QR code for the address |
 
 ### Reaching it from a phone
 
@@ -239,20 +240,41 @@ loads offline - generating still needs the server running.
 node scripts/image-variations/web/server.js --host 0.0.0.0
 ```
 
+The server prints every address it can be reached on, and a QR code for the
+one another device would use:
+
+```text
+[image-variations] listening on http://127.0.0.1:8787/?t=...
+[image-variations] listening on http://192.168.1.23:8787/?t=...
+
+[image-variations] scan from a phone on the same network:
+
+   <QR code>
+```
+
+Point the phone's camera at it. Nothing has to be typed, which matters
+because the token is 32 characters.
+
 Binding beyond loopback puts an API-key-holding proxy on the network, so the
-server then mints an access token and prints the URL carrying it
-(`http://<lan-ip>:8787/?t=...`). The page adopts the token on first load,
-stores it per origin and strips it from the address bar; `/api/*` rejects
-requests without it. The static shell stays open, since it holds nothing.
+server mints that access token and `/api/*` rejects a request without it.
+The page adopts the token on first load, keeps it per origin and strips it
+from the address bar. The static shell stays open, since it holds nothing.
+`--token <value>` pins a token of your own, and `--no-qr` skips the drawing
+for a terminal that mangles it.
 
 Two things to expect over a LAN address:
 
-- **It will not install as an app.** Service workers need a secure context, and
-  `http://192.168.x.x` is not one. The page itself works normally; only the
-  install and offline shell are unavailable. Put it behind HTTPS (a tunnel such
-  as Tailscale or cloudflared) to get those back.
-- **Anyone on that network who has the token can spend your API budget.** Stop
-  the server when you are done.
+- **It will not install as an app.** Service workers need a secure context,
+  and `http://192.168.x.x` is not one. The page itself works normally; only
+  the install and offline shell are unavailable. Put it behind HTTPS (a
+  tunnel such as Tailscale or cloudflared) to get those back.
+- **Anyone on that network who has the token can spend your API budget.**
+  Stop the server when you are done.
+
+The QR encoder in `web/qr.js` is written for this one job: byte mode, error
+correction level L, versions 1 to 5. Those versions hold a single
+error-correction block, so there is no interleaving, and 106 bytes is well
+past what an address with a token needs.
 
 ### Language
 
@@ -302,6 +324,7 @@ node tests/image-variations/cli.test.js
 node tests/image-variations/web-api.test.js
 node tests/image-variations/web-server.test.js
 node tests/image-variations/web-i18n.test.js
+node tests/image-variations/web-qr.test.js
 ```
 
 They all run as part of `node tests/run-all.js`; no test makes a network call.
