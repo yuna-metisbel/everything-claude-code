@@ -41,6 +41,12 @@ fs.writeFileSync(path.join(presetsDir, 'tiny.json'), JSON.stringify({
   }
 }));
 
+fs.writeFileSync(path.join(presetsDir, 'labelled.json'), JSON.stringify({
+  template: '{pose}',
+  categories: { pose: ['standing', 'sitting'] },
+  labels: { pose: '\u30dd\u30fc\u30ba' }
+}));
+
 const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
 
 function okFetch(payload, capture = {}) {
@@ -70,7 +76,7 @@ async function run() {
   console.log('listPresets / resolvePreset:');
 
   await test('lists preset ids without the .json suffix', () => {
-    assert.deepStrictEqual(api.listPresets(presetsDir), [{ id: 'tiny' }]);
+    assert.deepStrictEqual(api.listPresets(presetsDir), [{ id: 'labelled' }, { id: 'tiny' }]);
   });
   await test('returns an empty list for a missing directory', () => {
     assert.deepStrictEqual(api.listPresets(path.join(presetsDir, 'nope')), []);
@@ -98,6 +104,10 @@ async function run() {
     assert.strictEqual(body.name, 'tiny');
     assert.strictEqual(body.categories.pose.length, 3);
     assert.deepStrictEqual(body.categories.background[0], { text: 'a park', weight: 1, label: null });
+  });
+  await test('passes category display names through to the UI', async () => {
+    const { body } = await call({ method: 'GET', pathname: '/api/config', query: { preset: 'labelled' } });
+    assert.strictEqual(body.labels.pose, '\u30dd\u30fc\u30ba');
   });
   await test('never exposes the endpoints or a key in the config payload', async () => {
     const { body } = await call({ method: 'GET', pathname: '/api/config', query: { preset: 'tiny' } });

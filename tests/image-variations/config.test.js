@@ -118,5 +118,100 @@ test('the bundled preset loads and is usable', () => {
   }
 });
 
+console.log('\ncategory display names:');
+
+test('defaults to no labels', () => {
+  const config = normalizeConfig({ template: '{pose}', categories: { pose: ['standing'] } });
+  assert.deepStrictEqual(config.labels, {});
+});
+test('keeps a display name for a category', () => {
+  const config = normalizeConfig({
+    template: '{pose}',
+    categories: { pose: ['standing'] },
+    labels: { pose: '\u30dd\u30fc\u30ba' }
+  });
+  assert.strictEqual(config.labels.pose, '\u30dd\u30fc\u30ba');
+});
+test('trims a display name', () => {
+  const config = normalizeConfig({
+    template: '{pose}',
+    categories: { pose: ['standing'] },
+    labels: { pose: '  Pose  ' }
+  });
+  assert.strictEqual(config.labels.pose, 'Pose');
+});
+test('rejects a label for an unknown category', () => {
+  assert.throws(() => normalizeConfig({
+    template: '{pose}',
+    categories: { pose: ['standing'] },
+    labels: { nope: 'x' }
+  }), /no such category/);
+});
+test('rejects a blank label', () => {
+  assert.throws(() => normalizeConfig({
+    template: '{pose}',
+    categories: { pose: ['standing'] },
+    labels: { pose: '   ' }
+  }), /non-empty string/);
+});
+test('rejects labels that are not an object', () => {
+  assert.throws(() => normalizeConfig({
+    template: '{pose}',
+    categories: { pose: ['standing'] },
+    labels: ['pose']
+  }), /must be an object/);
+});
+
+console.log('\nbundled presets:');
+
+test('every bundled preset loads without a warning', () => {
+  const dir = path.join(__dirname, '../../scripts/image-variations/presets');
+  const files = fs.readdirSync(dir).filter(name => name.endsWith('.json'));
+  assert.ok(files.length > 0, 'there should be at least one preset');
+
+  for (const file of files) {
+    const config = loadConfig(path.join(dir, file));
+    assert.deepStrictEqual(config.warnings, [], `${file}: ${config.warnings.join('; ')}`);
+    assert.ok(Object.keys(config.categories).length > 0, `${file} has no categories`);
+    for (const [name, options] of Object.entries(config.categories)) {
+      assert.ok(options.length >= 2 || files.length > 0, `${file}.${name} is empty`);
+    }
+  }
+});
+
+test('every bundled preset renders a prompt with no placeholder left behind', () => {
+  const dir = path.join(__dirname, '../../scripts/image-variations/presets');
+  const { sampleCombinations } = require('../../scripts/image-variations/lib/sampler');
+  const { buildPrompt } = require('../../scripts/image-variations/lib/prompt');
+
+  for (const file of fs.readdirSync(dir).filter(name => name.endsWith('.json'))) {
+    const config = loadConfig(path.join(dir, file));
+    const sampled = sampleCombinations({ categories: config.categories, count: 5, seed: file });
+    for (const picks of sampled.combinations) {
+      const prompt = buildPrompt(config, picks);
+      assert.ok(prompt.length > 0, `${file} produced an empty prompt`);
+      assert.strictEqual(
+        prompt.match(/\{[a-zA-Z0-9_]+\}/g),
+        null,
+        `${file} left a placeholder unresolved: ${prompt.slice(0, 120)}`
+      );
+    }
+  }
+});
+
+test('every option that carries a label keeps it filesystem-safe', () => {
+  const dir = path.join(__dirname, '../../scripts/image-variations/presets');
+  for (const file of fs.readdirSync(dir).filter(name => name.endsWith('.json'))) {
+    const config = loadConfig(path.join(dir, file));
+    for (const [name, options] of Object.entries(config.categories)) {
+      for (const option of options) {
+        if (option.label !== undefined) {
+          assert.match(option.label, /^[a-z0-9-]+$/, `${file}.${name}: "${option.label}" is not a slug`);
+        }
+      }
+    }
+  }
+});
+
 console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);
 if (failed > 0) process.exit(1);

@@ -55,6 +55,27 @@ node scripts/image-variations/cli.js --image ./ref.png -n 6 --seed 3f9a1c2b7d04
 | `--dry-run` | Print prompts and the request body, call no API |
 | `--json` | Print the run manifest as JSON |
 
+## Bundled presets
+
+| Preset | Categories | Combinations | For |
+|--------|-----------|--------------|-----|
+| `selfie-amateur` | pose 15, angle 10, setting 10 | 1,500 | An amateur phone selfie of the person in the reference |
+| `edit-all` | pose 10, background 10, outfit 10, color 10 | 10,000 | Change pose, background, outfit and outfit colour at once |
+| `edit-pose` | pose 10 | 10 | Change only the pose, keep the rest of the photo |
+| `edit-background` | background 10 | 10 | Change only the background |
+| `edit-outfit` | outfit 10 | 10 | Change only the outfit |
+| `edit-outfit-color` | color 10 | 10 | Recolour the outfit, keep its shape and fabric |
+| `character-variations` | pose 8, hair 6, outfit 7, background 7 | 2,352 | The original sample set |
+
+The `edit-*` presets share a preamble that holds the person's identity, keeps
+an obscured face obscured, and forbids added text or watermarks. The
+single-axis ones exist because "change only the pose" and "change the pose,
+the background and the outfit" are different instructions: combining the
+single-axis wordings into one prompt would contradict itself.
+
+Only `character-variations` carries a `wire` block; the rest inherit the
+defaults in `lib/config.js`, so a wire-format correction is a one-place edit.
+
 ## Your prompt patterns
 
 Everything that varies lives in a JSON config. Copy the bundled preset and
@@ -91,6 +112,28 @@ node scripts/image-variations/cli.js -i ./ref.png -c ./my-patterns.json -n 8
   category, `fixed` entry, or `base` is rejected at load time rather than
   silently rendering as literal text.
 - **`fixed`** holds values that never vary (style, quality wording).
+
+### Naming a category for the reader
+
+Template placeholders are ASCII (`{pose}`), but a category can show a
+different name in the web UI:
+
+```json
+{
+  "categories": { "pose": ["..."], "angle": ["..."] },
+  "labels": { "pose": "ポーズ", "angle": "画角" }
+}
+```
+
+Output filenames come from each option's `label`, so give the options an
+ASCII slug when their text is not ASCII:
+
+```json
+{ "label": "cheek-touch", "text": "片手を頬に軽く添える" }
+```
+
+Without a label the slug is derived from the text, which for non-ASCII text
+collapses to `na`.
 
 ## Output
 

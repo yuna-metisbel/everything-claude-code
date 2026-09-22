@@ -150,6 +150,12 @@ async function addFiles(fileList) {
 
 /* ---------- pattern set ---------- */
 
+/** A preset may rename a category for display; the ASCII key is the fallback. */
+function categoryLabel(name) {
+  const labels = state.config && state.config.labels;
+  return (labels && labels[name]) || name;
+}
+
 function renderCategories() {
   if (!state.config) {
     return;
@@ -162,7 +168,7 @@ function renderCategories() {
     chip.setAttribute('aria-pressed', String(state.vary.has(name)));
 
     const label = document.createElement('span');
-    label.textContent = name;
+    label.textContent = categoryLabel(name);
     const count = document.createElement('small');
     count.textContent = t('optionCount', { n: state.config.categories[name].length });
     chip.append(label, count);
@@ -245,7 +251,9 @@ function renderPlan() {
   ui.prompts.replaceChildren(...plan.items.map(item => {
     const entry = document.createElement('li');
     const picks = document.createElement('b');
-    picks.textContent = Object.entries(item.picks).map(([key, value]) => `${key}: ${value}`).join(' / ');
+    picks.textContent = Object.entries(item.picks)
+      .map(([key, value]) => `${categoryLabel(key)}: ${value}`)
+      .join(' / ');
     const prompt = document.createElement('span');
     prompt.textContent = item.prompt;
     entry.append(picks, prompt);
@@ -292,7 +300,7 @@ function tileFor(item) {
     const row = document.createElement('div');
     row.className = 'pick';
     const name = document.createElement('span');
-    name.textContent = key;
+    name.textContent = categoryLabel(key);
     const text = document.createElement('span');
     text.textContent = value;
     row.append(name, text);

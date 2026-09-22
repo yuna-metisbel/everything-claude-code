@@ -83,6 +83,7 @@ function describeConfig(config) {
     name: config.name,
     base: config.base,
     template: config.template,
+    labels: config.labels,
     fixed: config.fixed,
     warnings: config.warnings,
     model: config.wire.model,

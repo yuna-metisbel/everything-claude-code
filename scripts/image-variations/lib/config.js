@@ -72,6 +72,36 @@ function normalizeCategories(rawCategories) {
 }
 
 /**
+ * Optional display names for the categories.
+ *
+ * Template placeholders are ASCII (`{pose}`), but the name a person reads in
+ * the UI does not have to be - this is where a category gets called
+ * "\u30dd\u30fc\u30ba" while the template still says `{pose}`.
+ */
+function normalizeLabels(rawLabels, categories) {
+  if (rawLabels === undefined || rawLabels === null) {
+    return {};
+  }
+  if (typeof rawLabels !== 'object' || Array.isArray(rawLabels)) {
+    throw new Error('config.labels must be an object of { categoryName: "display name" }');
+  }
+
+  const labels = {};
+  for (const [name, label] of Object.entries(rawLabels)) {
+    if (!Object.prototype.hasOwnProperty.call(categories, name)) {
+      throw new Error(
+        `config.labels.${name}: no such category. Known: ${Object.keys(categories).sort().join(', ')}`
+      );
+    }
+    if (typeof label !== 'string' || label.trim().length === 0) {
+      throw new Error(`config.labels.${name} must be a non-empty string`);
+    }
+    labels[name] = label.trim();
+  }
+  return labels;
+}
+
+/**
  * Placeholders in the template must resolve to a category, a fixed value,
  * or the built-in {base}. Catching this at load time beats a confusing
  * half-rendered prompt after the API bill.
@@ -107,6 +137,7 @@ function normalizeConfig(raw, source = '<inline>') {
   }
 
   const categories = normalizeCategories(raw.categories);
+  const labels = normalizeLabels(raw.labels, categories);
   const fixed = raw.fixed && typeof raw.fixed === 'object' && !Array.isArray(raw.fixed) ? { ...raw.fixed } : {};
   const template = raw.template;
   const { unusedCategories } = validateTemplate(template, categories, fixed);
@@ -121,6 +152,7 @@ function normalizeConfig(raw, source = '<inline>') {
     base: typeof raw.base === 'string' ? raw.base : '',
     template,
     categories,
+    labels,
     fixed,
     request: raw.request && typeof raw.request === 'object' ? { ...raw.request } : {},
     wire,
@@ -152,6 +184,7 @@ module.exports = {
   PLACEHOLDER_RE,
   normalizeOption,
   normalizeCategories,
+  normalizeLabels,
   validateTemplate,
   normalizeConfig,
   loadConfig
