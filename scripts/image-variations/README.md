@@ -17,8 +17,10 @@ served by a small local server - see [Web UI](#web-ui-pwa).
 - An xAI API key
 
 ```bash
-export XAI_API_KEY="xai-..."
+export XAI_API_KEY="xai-your-real-key"
 ```
+
+Every command below is run from the repository root.
 
 ## Usage
 
@@ -139,8 +141,12 @@ The same engine behind a browser UI, for running it from a phone or without a
 terminal. A small local server holds the key and talks to xAI; the page never
 sees a credential.
 
+Run it from the repository root, with your own key in place of the
+placeholder:
+
 ```bash
-export XAI_API_KEY="xai-..."
+cd /path/to/everything-claude-code
+export XAI_API_KEY="xai-your-real-key"
 node scripts/image-variations/web/server.js
 # -> http://127.0.0.1:8787/
 ```
