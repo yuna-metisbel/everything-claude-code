@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Image Variations</title>
+<meta name="description" content="Generate prompt-pattern variations of one reference image.">
+<meta name="theme-color" content="#111420">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="bar">
+  <h1>Image Variations</h1>
+  <p class="status" id="status" role="status">Loading&hellip;</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. Reference image</h2>
+    <label class="drop" id="drop" for="file">
+      <input type="file" id="file" accept="image/*" multiple hidden>
+      <span id="drop-text">Tap to choose an image, or drop one here</span>
+    </label>
+    <ul class="refs" id="refs"></ul>
+    <p class="hint">Up to 5 reference images. They are read in the browser and
+      sent to the local server only when you generate.</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Pattern set</h2>
+    <label class="field">
+      <span>Preset</span>
+      <select id="preset"></select>
+    </label>
+
+    <div class="row">
+      <label class="field">
+        <span>Variations</span>
+        <input type="number" id="count" min="1" max="24" value="4" inputmode="numeric">
+      </label>
+      <label class="field">
+        <span>Seed <em>(blank = random)</em></span>
+        <input type="text" id="seed" placeholder="auto" autocomplete="off" spellcheck="false">
+      </label>
+    </div>
+
+    <fieldset class="vary">
+      <legend>What may vary</legend>
+      <p class="hint">Turn a category off to keep one value fixed across every image.</p>
+      <div class="chips" id="categories"></div>
+    </fieldset>
+
+    <details class="detail">
+      <summary>Prompt template</summary>
+      <pre id="template"></pre>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>3. Run</h2>
+    <div class="actions">
+      <button type="button" id="plan" class="ghost">Preview prompts</button>
+      <button type="button" id="generate" class="primary">Generate</button>
+    </div>
+    <p class="hint" id="run-hint"></p>
+  </section>
+
+  <section class="card" id="plan-card" hidden>
+    <h2>Planned prompts</h2>
+    <p class="hint" id="plan-summary"></p>
+    <ol class="prompts" id="prompts"></ol>
+  </section>
+
+  <section class="card" id="results-card" hidden>
+    <div class="results-head">
+      <h2>Results</h2>
+      <button type="button" id="download-all" class="ghost small">Download all</button>
+    </div>
+    <div class="grid" id="results"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>The xAI key stays on the machine running the server and never reaches this page.</p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

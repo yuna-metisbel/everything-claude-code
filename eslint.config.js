@@ -30,5 +30,17 @@ module.exports = [
         languageOptions: {
             sourceType: 'module'
         }
+    },
+    {
+        // The image-variations PWA front end: ES modules running in a browser
+        // and a service worker, not Node.
+        files: ['scripts/image-variations/web/public/**/*.js'],
+        languageOptions: {
+            sourceType: 'module',
+            globals: {
+                ...globals.browser,
+                ...globals.serviceworker
+            }
+        }
     }
 ];

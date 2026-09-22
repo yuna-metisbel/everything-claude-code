@@ -8,6 +8,9 @@ One reference image in, N images out - each with a different randomly drawn
 combination, a manifest recording exactly which options produced which file,
 and a fixed seed so any run can be reproduced.
 
+Two front ends over the same engine: a CLI, and an installable web UI (PWA)
+served by a small local server - see [Web UI](#web-ui-pwa).
+
 ## Requirements
 
 - Node.js >= 18 (uses the built-in `fetch`; no dependencies)
@@ -130,6 +133,64 @@ rather than a code change:
 
 Run `--dry-run` to see the exact body before sending anything.
 
+## Web UI (PWA)
+
+The same engine behind a browser UI, for running it from a phone or without a
+terminal. A small local server holds the key and talks to xAI; the page never
+sees a credential.
+
+```bash
+export XAI_API_KEY="xai-..."
+node scripts/image-variations/web/server.js
+# -> http://127.0.0.1:8787/
+```
+
+Open that URL and the browser offers to install it as an app (Chrome: *Install*
+in the address bar; Safari: *Share -> Add to Home Screen*). Installed, it keeps
+the reference image, the settings and the last run in IndexedDB, and the shell
+loads offline - generating still needs the server running.
+
+| Option | Meaning |
+|--------|---------|
+| `-p, --port <n>` | Port to listen on (default `8787`) |
+| `--host <addr>` | Address to bind (default `127.0.0.1`, loopback only) |
+| `--presets <dir>` | Directory of preset JSON files (default `../presets`) |
+| `--token <value>` | Fixed access token for non-loopback binds (default: random) |
+
+### Reaching it from a phone
+
+```bash
+node scripts/image-variations/web/server.js --host 0.0.0.0
+```
+
+Binding beyond loopback puts an API-key-holding proxy on the network, so the
+server then mints an access token and prints the URL carrying it
+(`http://<lan-ip>:8787/?t=...`). The page adopts the token on first load,
+stores it per origin and strips it from the address bar; `/api/*` rejects
+requests without it. The static shell stays open, since it holds nothing.
+
+Two things to expect over a LAN address:
+
+- **It will not install as an app.** Service workers need a secure context, and
+  `http://192.168.x.x` is not one. The page itself works normally; only the
+  install and offline shell are unavailable. Put it behind HTTPS (a tunnel such
+  as Tailscale or cloudflared) to get those back.
+- **Anyone on that network who has the token can spend your API budget.** Stop
+  the server when you are done.
+
+### What the UI does
+
+- Reads the reference images in the browser and sends them as data URIs only
+  when you generate; `/api/generate-one` accepts nothing but `data:image/*`, so
+  a request can never name a path on disk.
+- **Preview prompts** runs the sampler only - no API call, no cost.
+- Switching a category off holds it fixed, the UI equivalent of `--only`.
+- Generates two at a time, filling each tile as it arrives, and reports a
+  failed variation on its own tile instead of losing the run.
+- Shows the seed of every run so it can be typed back in to reproduce it.
+
+To change the icons, edit and re-run `node scripts/image-variations/web/make-icons.js`.
+
 ## Notes
 
 - The API key is read from `XAI_API_KEY` (or `GROK_API_KEY`) and is never
@@ -149,6 +210,8 @@ node tests/image-variations/prompt.test.js
 node tests/image-variations/xai.test.js
 node tests/image-variations/io.test.js
 node tests/image-variations/cli.test.js
+node tests/image-variations/web-api.test.js
+node tests/image-variations/web-server.test.js
 ```
 
 They all run as part of `node tests/run-all.js`; no test makes a network call.
