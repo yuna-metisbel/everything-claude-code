@@ -6,6 +6,8 @@
  * the query string only has to be used once.
  */
 
+import { t } from './i18n.js';
+
 const TOKEN_KEY = 'image-variations.token';
 
 function readStoredToken() {
@@ -61,7 +63,7 @@ async function request(path, { method = 'GET', body } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   } catch (error) {
-    throw new Error(`cannot reach the local server - is it still running? (${error.message})`);
+    throw new Error(t('unreachable', { detail: error.message }));
   }
 
   const payload = await response.json().catch(() => ({}));

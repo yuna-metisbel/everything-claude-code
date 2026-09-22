@@ -8,6 +8,7 @@
 
 import * as net from './net.js';
 import * as db from './db.js';
+import { LANGUAGES, applyStatic, detectLanguage, setLanguage, t } from './i18n.js';
 
 const MAX_REFERENCE_IMAGES = 5;
 const CONCURRENCY = 2;
@@ -15,8 +16,10 @@ const CONCURRENCY = 2;
 const el = id => document.getElementById(id);
 const ui = {
   status: el('status'),
+  lang: el('lang'),
   file: el('file'),
   drop: el('drop'),
+  dropText: el('drop-text'),
   refs: el('refs'),
   preset: el('preset'),
   count: el('count'),
@@ -38,14 +41,38 @@ const state = {
   references: [],
   config: null,
   vary: new Set(),
+  plan: null,
   items: [],
   results: new Map(),
+  hasApiKey: true,
+  status: null,
   busy: false
 };
 
-function setStatus(message, tone = '') {
-  ui.status.textContent = message;
-  ui.status.dataset.tone = tone;
+/* ---------- status ---------- */
+
+/**
+ * Statuses are kept as a key plus values rather than a finished string, so
+ * switching language re-renders the current one instead of stranding it.
+ */
+function setStatus(key, vars = {}, tone = '') {
+  state.status = { key, vars, tone };
+  renderStatus();
+}
+
+/** For text quoted from the server or the image API: shown exactly as received. */
+function setRawStatus(text, tone = '') {
+  state.status = { raw: text, tone };
+  renderStatus();
+}
+
+function renderStatus() {
+  if (!state.status) {
+    return;
+  }
+  const { key, vars, raw, tone } = state.status;
+  ui.status.textContent = raw === undefined ? t(key, vars) : raw;
+  ui.status.dataset.tone = tone || '';
 }
 
 function setBusy(busy) {
@@ -76,7 +103,7 @@ function renderReferences() {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.textContent = '×';
-    remove.title = `Remove ${reference.name}`;
+    remove.title = t('removeReference', { name: reference.name });
     remove.addEventListener('click', () => {
       state.references.splice(index, 1);
       renderReferences();
@@ -87,9 +114,9 @@ function renderReferences() {
     return item;
   }));
 
-  el('drop-text').textContent = state.references.length > 0
-    ? `${state.references.length} reference image(s) - tap to add more`
-    : 'Tap to choose an image, or drop one here';
+  ui.dropText.textContent = state.references.length > 0
+    ? t('dropSome', { n: state.references.length })
+    : t('dropEmpty');
 }
 
 function persistReferences() {
@@ -104,7 +131,7 @@ async function addFiles(fileList) {
 
   const room = MAX_REFERENCE_IMAGES - state.references.length;
   if (room <= 0) {
-    setStatus(`At most ${MAX_REFERENCE_IMAGES} reference images`, 'bad');
+    setStatus('referenceTooMany', { n: MAX_REFERENCE_IMAGES }, 'bad');
     return;
   }
 
@@ -112,21 +139,23 @@ async function addFiles(fileList) {
     try {
       state.references.push({ name: file.name, dataUrl: await readAsDataUrl(file) });
     } catch (error) {
-      setStatus(error.message, 'bad');
+      setRawStatus(error.message, 'bad');
     }
   }
 
   renderReferences();
   persistReferences();
-  setStatus('Reference ready', 'ok');
+  setStatus('referenceReady', {}, 'ok');
 }
 
 /* ---------- pattern set ---------- */
 
 function renderCategories() {
-  const names = Object.keys(state.config.categories);
+  if (!state.config) {
+    return;
+  }
 
-  ui.categories.replaceChildren(...names.map(name => {
+  ui.categories.replaceChildren(...Object.keys(state.config.categories).map(name => {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chip';
@@ -135,7 +164,7 @@ function renderCategories() {
     const label = document.createElement('span');
     label.textContent = name;
     const count = document.createElement('small');
-    count.textContent = `${state.config.categories[name].length} options`;
+    count.textContent = t('optionCount', { n: state.config.categories[name].length });
     chip.append(label, count);
 
     chip.addEventListener('click', () => {
@@ -180,6 +209,10 @@ function persistSettings() {
   });
 }
 
+function renderRunHint() {
+  ui.runHint.textContent = t(state.hasApiKey ? 'runHint' : 'runHintNoKey');
+}
+
 async function loadConfig(preset, restoredVary = null) {
   state.config = await net.getConfig(preset);
   state.vary = new Set(restoredVary && restoredVary.length > 0
@@ -190,16 +223,24 @@ async function loadConfig(preset, restoredVary = null) {
   renderCategories();
 
   const warning = state.config.warnings[0];
-  setStatus(warning ? `${state.config.name}: ${warning}` : `${state.config.name} - model ${state.config.model}`,
-    warning ? 'bad' : '');
+  if (warning) {
+    setRawStatus(`${state.config.name}: ${warning}`, 'bad');
+  } else {
+    setStatus('configReady', { name: state.config.name, model: state.config.model });
+  }
 }
 
 /* ---------- planning ---------- */
 
-function renderPlan(plan) {
+function renderPlan() {
+  const plan = state.plan;
+  if (!plan) {
+    return;
+  }
+
   ui.planSummary.textContent =
-    `seed ${plan.seed} - ${plan.items.length} of ${plan.space} possible combination(s)` +
-    (plan.exhausted ? ' - not enough distinct combinations, some prompts repeat' : '');
+    t('planSummary', { seed: plan.seed, n: plan.items.length, space: plan.space }) +
+    (plan.exhausted ? t('planExhausted') : '');
 
   ui.prompts.replaceChildren(...plan.items.map(item => {
     const entry = document.createElement('li');
@@ -212,19 +253,19 @@ function renderPlan(plan) {
   }));
 
   ui.planCard.hidden = false;
-  ui.seed.value = plan.seed;
 }
 
 async function runPlan() {
   setBusy(true);
-  setStatus('Planning…');
+  setStatus('planning');
   try {
-    const plan = await net.plan(currentRequest());
-    state.items = plan.items;
-    renderPlan(plan);
-    setStatus(`Planned ${plan.items.length} prompt(s)`, 'ok');
+    state.plan = await net.plan(currentRequest());
+    state.items = state.plan.items;
+    ui.seed.value = state.plan.seed;
+    renderPlan();
+    setStatus('planned', { n: state.plan.items.length }, 'ok');
   } catch (error) {
-    setStatus(error.message, 'bad');
+    setRawStatus(error.message, 'bad');
   } finally {
     setBusy(false);
   }
@@ -266,11 +307,11 @@ function fillTile(tile, item, result) {
   const figure = tile.querySelector('figure');
 
   if (!result.ok) {
-    const state_ = document.createElement('p');
-    state_.className = 'state';
-    state_.dataset.tone = 'bad';
-    state_.textContent = result.error;
-    figure.replaceChildren(state_);
+    const message = document.createElement('p');
+    message.className = 'state';
+    message.dataset.tone = 'bad';
+    message.textContent = result.error;
+    figure.replaceChildren(message);
     return;
   }
 
@@ -285,10 +326,26 @@ function fillTile(tile, item, result) {
   const download = document.createElement('button');
   download.type = 'button';
   download.className = 'ghost small';
-  download.textContent = 'Download';
+  download.textContent = t('download');
   download.addEventListener('click', () => downloadOne(item, result));
   tools.append(download);
   tile.append(tools);
+}
+
+function renderResults() {
+  if (state.items.length === 0) {
+    return;
+  }
+
+  ui.results.replaceChildren(...state.items.map(item => {
+    const tile = tileFor(item);
+    const result = state.results.get(item.index);
+    if (result) {
+      fillTile(tile, item, result);
+    }
+    return tile;
+  }));
+  ui.resultsCard.hidden = false;
 }
 
 function downloadOne(item, result) {
@@ -316,21 +373,23 @@ async function runPool(items, concurrency, worker) {
 
 async function runGenerate() {
   setBusy(true);
-  setStatus('Planning…');
+  setStatus('planning');
 
   try {
     const request = currentRequest();
     const plan = await net.plan(request);
+    state.plan = plan;
     state.items = plan.items;
     state.results = new Map();
-    renderPlan(plan);
+    ui.seed.value = plan.seed;
+    renderPlan();
 
     const referenceImages = state.references.map(reference => reference.dataUrl);
     ui.results.replaceChildren(...plan.items.map(tileFor));
     ui.resultsCard.hidden = false;
 
     let done = 0;
-    setStatus(`Generating 0/${plan.items.length}…`);
+    setStatus('generating', { done, total: plan.items.length });
 
     await runPool(plan.items, CONCURRENCY, async item => {
       let result;
@@ -348,20 +407,19 @@ async function runGenerate() {
       state.results.set(item.index, result);
       fillTile(document.getElementById(`tile-${item.index}`), item, result);
       done++;
-      setStatus(`Generating ${done}/${plan.items.length}…`);
+      setStatus('generating', { done, total: plan.items.length });
     });
 
     const failures = [...state.results.values()].filter(result => !result.ok).length;
-    setStatus(
-      failures === 0
-        ? `Done - ${plan.items.length} image(s), seed ${plan.seed}`
-        : `Done with ${failures} failure(s) of ${plan.items.length} - seed ${plan.seed}`,
-      failures === 0 ? 'ok' : 'bad'
-    );
+    if (failures === 0) {
+      setStatus('doneAll', { n: plan.items.length, seed: plan.seed }, 'ok');
+    } else {
+      setStatus('doneSome', { n: plan.items.length, failures, seed: plan.seed }, 'bad');
+    }
 
-    db.set('lastRun', { seed: plan.seed, items: plan.items, results: [...state.results] });
+    db.set('lastRun', { plan, results: [...state.results] });
   } catch (error) {
-    setStatus(error.message, 'bad');
+    setRawStatus(error.message, 'bad');
   } finally {
     setBusy(false);
   }
@@ -376,25 +434,41 @@ function downloadAll() {
   }
 }
 
+/* ---------- language ---------- */
+
+function renderLocalized() {
+  applyStatic();
+  renderStatus();
+  renderReferences();
+  renderCategories();
+  renderRunHint();
+  renderPlan();
+  renderResults();
+}
+
+function wireLanguage() {
+  const active = setLanguage(detectLanguage(), { persist: false });
+
+  ui.lang.replaceChildren(...LANGUAGES.map(({ code, label }) => new Option(label, code)));
+  ui.lang.value = active;
+
+  ui.lang.addEventListener('change', () => {
+    setLanguage(ui.lang.value);
+    renderLocalized();
+  });
+}
+
 /* ---------- restore + boot ---------- */
 
 function restoreLastRun(lastRun) {
-  if (!lastRun || !Array.isArray(lastRun.items) || lastRun.items.length === 0) {
+  if (!lastRun || !lastRun.plan || !Array.isArray(lastRun.plan.items) || lastRun.plan.items.length === 0) {
     return;
   }
 
-  state.items = lastRun.items;
+  state.plan = lastRun.plan;
+  state.items = lastRun.plan.items;
   state.results = new Map(lastRun.results || []);
-
-  ui.results.replaceChildren(...lastRun.items.map(item => {
-    const tile = tileFor(item);
-    const result = state.results.get(item.index);
-    if (result) {
-      fillTile(tile, item, result);
-    }
-    return tile;
-  }));
-  ui.resultsCard.hidden = false;
+  renderResults();
 }
 
 function wireEvents() {
@@ -424,7 +498,7 @@ function wireEvents() {
       await loadConfig(ui.preset.value);
       persistSettings();
     } catch (error) {
-      setStatus(error.message, 'bad');
+      setRawStatus(error.message, 'bad');
     }
   });
 
@@ -439,6 +513,9 @@ function wireEvents() {
 
 async function boot() {
   net.adoptTokenFromUrl();
+  wireLanguage();
+  applyStatic();
+  setStatus('loading');
   wireEvents();
 
   try {
@@ -450,10 +527,11 @@ async function boot() {
     ]);
 
     if (presets.length === 0) {
-      setStatus('no presets found on the server', 'bad');
+      setStatus('noPresets', {}, 'bad');
       return;
     }
 
+    state.hasApiKey = hasApiKey;
     ui.preset.replaceChildren(...presets.map(({ id }) => new Option(id, id)));
     if (settings && presets.some(preset => preset.id === settings.preset)) {
       ui.preset.value = settings.preset;
@@ -467,14 +545,12 @@ async function boot() {
 
     await loadConfig(ui.preset.value, settings ? settings.vary : null);
 
-    ui.runHint.textContent = hasApiKey
-      ? 'Preview costs nothing; Generate calls the image API once per variation.'
-      : 'XAI_API_KEY is not set on the server - preview works, generating will fail.';
+    renderRunHint();
     if (!hasApiKey) {
-      setStatus('server has no XAI_API_KEY', 'bad');
+      setStatus('noKey', {}, 'bad');
     }
   } catch (error) {
-    setStatus(error.message, 'bad');
+    setRawStatus(error.message, 'bad');
   }
 
   if ('serviceWorker' in navigator && window.isSecureContext) {

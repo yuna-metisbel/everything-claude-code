@@ -131,7 +131,7 @@ async function run() {
     assert.match(await response.text(), /Image Variations/);
   }));
   await test('serves the manifest and the module scripts', () => withServer({}, async base => {
-    for (const asset of ['manifest.webmanifest', 'app.js', 'net.js', 'db.js', 'styles.css', 'sw.js']) {
+    for (const asset of ['manifest.webmanifest', 'app.js', 'net.js', 'db.js', 'i18n.js', 'styles.css', 'sw.js']) {
       const response = await fetch(`${base}/${asset}`);
       assert.strictEqual(response.status, 200, `${asset} should be served`);
     }

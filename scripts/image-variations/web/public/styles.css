@@ -42,6 +42,17 @@ body {
 .status[data-tone="bad"] { color: var(--bad); }
 .status[data-tone="ok"] { color: var(--ok); }
 
+.lang {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+}
+
 main { max-width: 56rem; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem; }
 
 .card {

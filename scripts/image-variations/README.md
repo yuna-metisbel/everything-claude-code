@@ -184,6 +184,19 @@ Two things to expect over a LAN address:
 - **Anyone on that network who has the token can spend your API budget.** Stop
   the server when you are done.
 
+### Language
+
+The UI ships in Japanese and English and follows the browser, so a Japanese
+browser opens in Japanese with no setup. The switch in the header overrides
+that and the choice is remembered per origin.
+
+Only the interface is translated. Text quoted from the image API is passed
+through verbatim, because a diagnostic is more useful unmangled than
+translated - as are your own category names, which read exactly as you spell
+them in the preset. To add a language, add a block to `DICTIONARIES` in
+`web/public/i18n.js`; `tests/image-variations/web-i18n.test.js` fails if a
+key or a `{placeholder}` is missing from it.
+
 ### What the UI does
 
 - Reads the reference images in the browser and sends them as data URIs only
@@ -218,6 +231,7 @@ node tests/image-variations/io.test.js
 node tests/image-variations/cli.test.js
 node tests/image-variations/web-api.test.js
 node tests/image-variations/web-server.test.js
+node tests/image-variations/web-i18n.test.js
 ```
 
 They all run as part of `node tests/run-all.js`; no test makes a network call.
