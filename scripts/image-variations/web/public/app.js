@@ -230,9 +230,9 @@ async function loadConfig(preset, restoredVary = null) {
 
   const warning = state.config.warnings[0];
   if (warning) {
-    setRawStatus(`${state.config.name}: ${warning}`, 'bad');
+    setRawStatus(`${state.config.title}: ${warning}`, 'bad');
   } else {
-    setStatus('configReady', { name: state.config.name, model: state.config.model });
+    setStatus('configReady', { name: state.config.title, model: state.config.model });
   }
 }
 
@@ -540,7 +540,7 @@ async function boot() {
     }
 
     state.hasApiKey = hasApiKey;
-    ui.preset.replaceChildren(...presets.map(({ id }) => new Option(id, id)));
+    ui.preset.replaceChildren(...presets.map(({ id, title }) => new Option(title || id, id)));
     if (settings && presets.some(preset => preset.id === settings.preset)) {
       ui.preset.value = settings.preset;
       ui.count.value = settings.count;

@@ -1,7 +1,14 @@
 {
   "name": "character-variations",
+  "title": "キャラクター変化（サンプル）",
   "base": "the same character as the reference image, preserving facial features, eye colour, body proportions and overall identity exactly",
   "template": "{base}, {pose}, {hair}, {outfit}, {background}, {style}",
+  "labels": {
+    "pose": "ポーズ",
+    "hair": "髪型",
+    "outfit": "衣装",
+    "background": "背景"
+  },
   "fixed": {
     "style": "high quality illustration, clean lineart, soft natural lighting, full body framing, single subject"
   },

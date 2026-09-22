@@ -34,14 +34,27 @@ class HttpError extends Error {
   }
 }
 
+/**
+ * Each preset's id plus the name to show for it. A preset that will not
+ * parse still gets listed under its id rather than taking the whole
+ * listing down with it - the error belongs on the attempt to use it.
+ */
 function listPresets(presetsDir) {
   if (!fs.existsSync(presetsDir)) {
     return [];
   }
+
   return fs.readdirSync(presetsDir)
     .filter(name => name.endsWith('.json'))
     .sort()
-    .map(name => ({ id: path.basename(name, '.json') }));
+    .map(fileName => {
+      const id = path.basename(fileName, '.json');
+      try {
+        return { id, title: loadConfig(path.join(presetsDir, fileName)).title };
+      } catch {
+        return { id, title: id };
+      }
+    });
 }
 
 /**
@@ -81,6 +94,7 @@ function describeConfig(config) {
 
   return {
     name: config.name,
+    title: config.title,
     base: config.base,
     template: config.template,
     labels: config.labels,

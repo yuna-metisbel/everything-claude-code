@@ -147,8 +147,16 @@ function normalizeConfig(raw, source = '<inline>') {
     throw new Error(`${source}: config.wire.imageStyle must be "object" or "url"`);
   }
 
+  const name = typeof raw.name === 'string' ? raw.name : path.basename(source, '.json');
+  if (raw.title !== undefined && (typeof raw.title !== 'string' || raw.title.trim().length === 0)) {
+    throw new Error(`${source}: config.title must be a non-empty string`);
+  }
+
   return {
-    name: typeof raw.name === 'string' ? raw.name : path.basename(source, '.json'),
+    name,
+    // What a person sees in the UI; `name` stays the identifier used for
+    // filenames, the manifest and the CLI.
+    title: raw.title ? raw.title.trim() : name,
     base: typeof raw.base === 'string' ? raw.base : '',
     template,
     categories,

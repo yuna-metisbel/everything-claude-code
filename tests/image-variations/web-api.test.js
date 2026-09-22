@@ -44,7 +44,8 @@ fs.writeFileSync(path.join(presetsDir, 'tiny.json'), JSON.stringify({
 fs.writeFileSync(path.join(presetsDir, 'labelled.json'), JSON.stringify({
   template: '{pose}',
   categories: { pose: ['standing', 'sitting'] },
-  labels: { pose: '\u30dd\u30fc\u30ba' }
+  labels: { pose: '\u30dd\u30fc\u30ba' },
+  title: '\u30c6\u30b9\u30c8'
 }));
 
 const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
@@ -76,7 +77,10 @@ async function run() {
   console.log('listPresets / resolvePreset:');
 
   await test('lists preset ids without the .json suffix', () => {
-    assert.deepStrictEqual(api.listPresets(presetsDir), [{ id: 'labelled' }, { id: 'tiny' }]);
+    assert.deepStrictEqual(api.listPresets(presetsDir), [
+      { id: 'labelled', title: '\u30c6\u30b9\u30c8' },
+      { id: 'tiny', title: 'tiny' }
+    ]);
   });
   await test('returns an empty list for a missing directory', () => {
     assert.deepStrictEqual(api.listPresets(path.join(presetsDir, 'nope')), []);
@@ -104,6 +108,16 @@ async function run() {
     assert.strictEqual(body.name, 'tiny');
     assert.strictEqual(body.categories.pose.length, 3);
     assert.deepStrictEqual(body.categories.background[0], { text: 'a park', weight: 1, label: null });
+  });
+  await test('lists a preset that will not parse under its id rather than failing', () => {
+    const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'iv-broken-'));
+    fs.writeFileSync(path.join(broken, 'ok.json'), JSON.stringify({ template: '{a}', categories: { a: ['x'] }, title: 'Fine' }));
+    fs.writeFileSync(path.join(broken, 'busted.json'), '{ not json');
+    assert.deepStrictEqual(api.listPresets(broken), [
+      { id: 'busted', title: 'busted' },
+      { id: 'ok', title: 'Fine' }
+    ]);
+    fs.rmSync(broken, { recursive: true, force: true });
   });
   await test('passes category display names through to the UI', async () => {
     const { body } = await call({ method: 'GET', pathname: '/api/config', query: { preset: 'labelled' } });

@@ -160,7 +160,7 @@ async function run() {
 
   await test('answers /api/presets', () => withServer({ apiKey: 'k' }, async base => {
     const payload = await (await fetch(`${base}/api/presets`)).json();
-    assert.deepStrictEqual(payload.presets, [{ id: 'tiny' }]);
+    assert.deepStrictEqual(payload.presets, [{ id: 'tiny', title: 'tiny' }]);
     assert.strictEqual(payload.hasApiKey, true);
   }));
   await test('plans over POST', () => withServer({}, async base => {

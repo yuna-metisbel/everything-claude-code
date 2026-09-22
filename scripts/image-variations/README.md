@@ -120,17 +120,22 @@ node scripts/image-variations/cli.js -i ./ref.png -c ./my-patterns.json -n 8
   silently rendering as literal text.
 - **`fixed`** holds values that never vary (style, quality wording).
 
-### Naming a category for the reader
+### Naming things for the reader
 
-Template placeholders are ASCII (`{pose}`), but a category can show a
-different name in the web UI:
+A preset is identified by its file name and shown by its `title`; a category
+is referenced in the template by an ASCII key and shown by its `labels`
+entry. Neither display name reaches a filename, a prompt or the manifest.
 
 ```json
 {
+  "name": "edit-pose",
+  "title": "ポーズだけ変更",
   "categories": { "pose": ["..."], "angle": ["..."] },
   "labels": { "pose": "ポーズ", "angle": "画角" }
 }
 ```
+
+`title` defaults to `name`, so a preset without one still lists cleanly.
 
 Output filenames come from each option's `label`, so give the options an
 ASCII slug when their text is not ASCII:

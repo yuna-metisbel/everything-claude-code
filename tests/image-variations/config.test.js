@@ -162,6 +162,44 @@ test('rejects labels that are not an object', () => {
   }), /must be an object/);
 });
 
+console.log('\npreset display title:');
+
+test('falls back to the preset name when no title is given', () => {
+  const config = normalizeConfig({ template: '{pose}', categories: { pose: ['a'] }, name: 'tiny' });
+  assert.strictEqual(config.title, 'tiny');
+});
+test('keeps a title distinct from the identifier', () => {
+  const config = normalizeConfig({
+    template: '{pose}', categories: { pose: ['a'] },
+    name: 'edit-pose', title: '\u30dd\u30fc\u30ba\u3060\u3051\u5909\u66f4'
+  });
+  assert.strictEqual(config.name, 'edit-pose');
+  assert.strictEqual(config.title, '\u30dd\u30fc\u30ba\u3060\u3051\u5909\u66f4');
+});
+test('trims a title', () => {
+  const config = normalizeConfig({ template: '{pose}', categories: { pose: ['a'] }, title: '  T  ' });
+  assert.strictEqual(config.title, 'T');
+});
+test('rejects a blank title', () => {
+  assert.throws(() => normalizeConfig({
+    template: '{pose}', categories: { pose: ['a'] }, title: '   '
+  }), /title must be a non-empty string/);
+});
+
+test('every bundled preset names itself for the reader and for the filesystem', () => {
+  const dir = path.join(__dirname, '../../scripts/image-variations/presets');
+  for (const file of fs.readdirSync(dir).filter(name => name.endsWith('.json'))) {
+    const config = loadConfig(path.join(dir, file));
+    assert.strictEqual(config.name, path.basename(file, '.json'), `${file}: name should match the file`);
+    assert.ok(config.title.length > 0, `${file} has no title`);
+    assert.deepStrictEqual(
+      Object.keys(config.labels).sort(),
+      Object.keys(config.categories).sort(),
+      `${file}: every category needs a display name`
+    );
+  }
+});
+
 console.log('\nbundled presets:');
 
 test('every bundled preset loads without a warning', () => {
