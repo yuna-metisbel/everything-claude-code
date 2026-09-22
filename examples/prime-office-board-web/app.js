@@ -1109,17 +1109,25 @@ function noteRow(x, fromOther){
 }
 function taskSideSwitch(){
   if (!isHq()) return "";
-  const sides = [["team", "みんなの", S.tasks.length], ["mine", "自分用", myNotes().length + notesToMe().length]];
+  const myTeamCount = S.tasks.filter(t => taskIsMine(t) && t.status !== "done").length;
+  const sides = [["team", "みんなの", S.tasks.length], ["mine", "自分用", myNotes().length + notesToMe().length + myTeamCount]];
   return '<div class="site-switch">' + sides.map(function(c){
     return '<button class="btn sm' + (S.noteSide === c[0] ? " primary" : "") + '" data-act="note-side" data-v="' +
       c[0] + '">' + c[1] + (c[2] ? " " + c[2] : "") + "</button>"; }).join("") + "</div>";
 }
 function viewNotes(){
   const mine = sortNotes(myNotes()), shared = sortNotes(notesToMe());
+  const myTeamTasks = S.tasks.filter(t => taskIsMine(t) && t.status !== "done").sort((a,b) =>
+    (a.due || "9999").localeCompare(b.due || "9999") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   return '<section class="sec"><div class="sec-head"><h2>自分用</h2>' +
     '<span class="hint">既定では自分にしか見えません。1件ずつ、誰に見せるかを選べます。</span>' +
     '<div class="btn-row"><button class="btn primary" data-act="new-note">＋ 追加</button></div></div>' +
     taskSideSwitch() +
+    (myTeamTasks.length
+      ? '<div class="sec-head" style="margin-bottom:8px"><h2>引き受けている全体タスク</h2>' +
+        '<span class="hint">みんなのタスクの中で、自分が担当のもの。</span></div>' +
+        '<div class="panel" style="margin-bottom:18px">' + myTeamTasks.map(function(t){ return taskRow(t); }).join("") + "</div>"
+      : "") +
     '<div class="panel">' +
     (mine.length ? mine.map(function(x){ return noteRow(x, false); }).join("")
       : '<div class="empty">まだありません。やることでもメモでも、まず自分だけの場所に書けます。</div>') +
