@@ -31,8 +31,15 @@ function buildRequestBody({ config, prompt, referenceImages = [], n = 1 }) {
     body.response_format = wire.responseFormat;
   }
 
-  if (referenceImages.length > 0) {
-    body[wire.imageField] = referenceImages.map(reference => wrapImage(reference, wire.imageStyle));
+  // One reference goes in `image` as a single object; several go in `images`
+  // as an array. Sending a one-element array under `image` is not the same
+  // request, and it is the shape the API rejects.
+  if (referenceImages.length === 1) {
+    body[wire.imageField] = wrapImage(referenceImages[0], wire.imageStyle);
+  } else if (referenceImages.length > 1) {
+    body[wire.imageFieldMultiple] = referenceImages.map(
+      reference => wrapImage(reference, wire.imageStyle)
+    );
   }
 
   return body;
@@ -46,20 +53,37 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const MAX_LOGGED_STRING = 200;
+const LOGGED_STRING_HEAD = 120;
+
 /**
  * Redact everything that could carry a base64 payload or a key so failures
  * can be logged safely.
+ *
+ * A reference image is a nested object, so this has to recurse: a top-level
+ * scan would print the data URI in full.
  */
+function summarizeValue(value) {
+  if (Array.isArray(value)) {
+    return `[${value.length} item(s)]`;
+  }
+  if (value && typeof value === 'object') {
+    const copy = {};
+    for (const [key, nested] of Object.entries(value)) {
+      copy[key] = summarizeValue(nested);
+    }
+    return copy;
+  }
+  if (typeof value === 'string' && value.length > MAX_LOGGED_STRING) {
+    return `${value.slice(0, LOGGED_STRING_HEAD)}... (${value.length} chars)`;
+  }
+  return value;
+}
+
 function summarizeBody(body) {
   const copy = {};
   for (const [key, value] of Object.entries(body)) {
-    if (Array.isArray(value)) {
-      copy[key] = `[${value.length} item(s)]`;
-    } else if (typeof value === 'string' && value.length > 200) {
-      copy[key] = `${value.slice(0, 120)}... (${value.length} chars)`;
-    } else {
-      copy[key] = value;
-    }
+    copy[key] = summarizeValue(value);
   }
   return copy;
 }

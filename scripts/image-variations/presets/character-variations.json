@@ -50,9 +50,6 @@
       "cosy bedroom with bookshelves"
     ]
   },
-  "request": {
-    "quality": "auto"
-  },
   "wire": {
     "model": "grok-imagine-image-2.0",
     "generateEndpoint": "https://api.x.ai/v1/images/generations",

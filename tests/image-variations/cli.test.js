@@ -198,8 +198,9 @@ async function run() {
     try {
       await capture(() => main(['-i', refPath, '-n', '1', '-s', 'ref', '-o', outDir]));
       assert.ok(seenUrl.endsWith('/images/edits'), `unexpected endpoint: ${seenUrl}`);
-      assert.strictEqual(seenBody.image.length, 1);
-      assert.ok(seenBody.image[0].url.startsWith('data:image/png;base64,'));
+      assert.strictEqual(seenBody.images, undefined, 'one reference uses the singular field');
+      assert.strictEqual(seenBody.image.type, 'image_url');
+      assert.ok(seenBody.image.url.startsWith('data:image/png;base64,'));
     } finally {
       restore();
     }

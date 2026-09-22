@@ -167,26 +167,41 @@ prompts repeat.
 
 ## Adjusting the API wire format
 
-The request shape lives in `wire`, so a change on xAI's side is a config edit
-rather than a code change:
+The request shape lives in `wire`, so a change on the API side is a config
+edit rather than a code change. These are the defaults in `lib/config.js`;
+only override what differs.
 
 ```json
-"wire": {
-  "model": "grok-imagine-image-2.0",
-  "generateEndpoint": "https://api.x.ai/v1/images/generations",
-  "editEndpoint": "https://api.x.ai/v1/images/edits",
-  "imageField": "image",
-  "imageStyle": "object",
-  "responseFormat": "b64_json"
+{
+  "wire": {
+    "model": "grok-imagine-image-2.0",
+    "generateEndpoint": "https://api.x.ai/v1/images/generations",
+    "editEndpoint": "https://api.x.ai/v1/images/edits",
+    "imageField": "image",
+    "imageFieldMultiple": "images",
+    "imageStyle": "object",
+    "responseFormat": "b64_json"
+  }
 }
 ```
 
-- `editEndpoint` is used whenever `--image` is given; `generateEndpoint`
-  otherwise.
-- `imageStyle: "object"` sends `[{ "type": "image_url", "url": "data:..." }]`;
-  `"url"` sends bare strings instead.
-- Anything under `request` (for example `"quality"`, `"aspect_ratio"`) is
-  merged verbatim into the body.
+One reference image is sent as a single object under `imageField`; several
+are sent as an array under `imageFieldMultiple`. A one-element array under
+the singular field is a different request, and not the one the API accepts.
+
+`imageStyle` is `object` for `{ "type": "image_url", "url": "..." }` and
+`url` for a bare string.
+
+Anything under `request` is merged into the body verbatim, which is where
+parameters such as `aspect_ratio`, `resolution` and `quality` go:
+
+```json
+{ "request": { "aspect_ratio": "3:4" } }
+```
+
+No bundled preset sets one, so every run uses the API's own defaults.
+Because resolution and quality drive the per-image price, check the current
+reference before pinning a value.
 
 Run `--dry-run` to see the exact body before sending anything.
 

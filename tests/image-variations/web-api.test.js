@@ -251,7 +251,7 @@ async function run() {
       fetchImpl: okFetch({ data: [{ b64_json: 'AAAA' }] }, capture)
     });
     assert.match(capture.url, /images\/edits$/);
-    assert.strictEqual(capture.body.image[0].url, PIXEL);
+    assert.deepStrictEqual(capture.body.image, { type: 'image_url', url: PIXEL });
     assert.strictEqual(body.usedReference, true);
   });
   await test('returns the decoded image', async () => {

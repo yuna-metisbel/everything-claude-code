@@ -16,6 +16,7 @@ const DEFAULT_WIRE = {
   generateEndpoint: 'https://api.x.ai/v1/images/generations',
   editEndpoint: 'https://api.x.ai/v1/images/edits',
   imageField: 'image',
+  imageFieldMultiple: 'images',
   imageStyle: 'object',
   responseFormat: 'b64_json'
 };

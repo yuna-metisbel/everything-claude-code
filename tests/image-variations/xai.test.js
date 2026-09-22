@@ -57,9 +57,26 @@ async function run() {
   await test('omits the image field with no reference images', () => {
     assert.strictEqual(xai.buildRequestBody({ config, prompt: 'p' }).image, undefined);
   });
-  await test('wraps reference images as image_url objects', () => {
+  await test('sends a single reference as one object, not a one-element array', () => {
     const body = xai.buildRequestBody({ config, prompt: 'p', referenceImages: ['data:image/png;base64,AA'] });
-    assert.deepStrictEqual(body.image, [{ type: 'image_url', url: 'data:image/png;base64,AA' }]);
+    assert.deepStrictEqual(body.image, { type: 'image_url', url: 'data:image/png;base64,AA' });
+    assert.strictEqual(body.images, undefined, 'the plural field belongs to multi-image edits');
+  });
+  await test('sends several references as an array under the plural field', () => {
+    const body = xai.buildRequestBody({
+      config, prompt: 'p',
+      referenceImages: ['data:image/png;base64,AA', 'data:image/png;base64,BB']
+    });
+    assert.strictEqual(body.image, undefined, 'the singular field takes one image only');
+    assert.deepStrictEqual(body.images, [
+      { type: 'image_url', url: 'data:image/png;base64,AA' },
+      { type: 'image_url', url: 'data:image/png;base64,BB' }
+    ]);
+  });
+  await test('omits both reference fields with no reference images', () => {
+    const body = xai.buildRequestBody({ config, prompt: 'p' });
+    assert.strictEqual(body.image, undefined);
+    assert.strictEqual(body.images, undefined);
   });
   await test('imageStyle "url" sends bare strings', () => {
     const urlConfig = normalizeConfig({
@@ -68,7 +85,7 @@ async function run() {
       wire: { imageStyle: 'url', imageField: 'image_urls' }
     });
     const body = xai.buildRequestBody({ config: urlConfig, prompt: 'p', referenceImages: ['https://e.com/a.png'] });
-    assert.deepStrictEqual(body.image_urls, ['https://e.com/a.png']);
+    assert.strictEqual(body.image_urls, 'https://e.com/a.png');
   });
 
   console.log('\nresolveEndpoint:');
@@ -82,6 +99,17 @@ async function run() {
   console.log('\nsummarizeBody:');
   await test('replaces arrays with a count', () => {
     assert.strictEqual(xai.summarizeBody({ image: [1, 2] }).image, '[2 item(s)]');
+  });
+  await test('redacts a data URI nested inside the reference object', () => {
+    const dataUri = `data:image/png;base64,${'A'.repeat(5000)}`;
+    const summary = xai.summarizeBody({ image: { type: 'image_url', url: dataUri } });
+    assert.strictEqual(summary.image.type, 'image_url');
+    assert.ok(summary.image.url.length < 200, 'the payload must not be logged in full');
+    assert.match(summary.image.url, /\(5022 chars\)$/);
+  });
+  await test('leaves a short nested value readable', () => {
+    const summary = xai.summarizeBody({ image: { type: 'image_url', url: 'https://e.com/a.png' } });
+    assert.deepStrictEqual(summary.image, { type: 'image_url', url: 'https://e.com/a.png' });
   });
   await test('truncates long strings', () => {
     const summary = xai.summarizeBody({ prompt: 'x'.repeat(500) }).prompt;
