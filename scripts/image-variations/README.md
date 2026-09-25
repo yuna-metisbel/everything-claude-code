@@ -59,6 +59,7 @@ node scripts/image-variations/cli.js --image ./ref.png -n 6 --seed 3f9a1c2b7d04
 
 | Preset | Categories | Combinations | For |
 |--------|-----------|--------------|-----|
+| `selfie-natural` | background 10, angle 10, pose 10, color 10 | 10,000 | Natural amateur selfies from several reference photos |
 | `selfie-amateur` | pose 9, angle 10, setting 13 | 1,170 | An amateur phone selfie of the person in the reference |
 | `edit-all` | pose 10, background 10, color 10 | 1,000 | Change pose, background and the outfit's colour at once |
 | `edit-pose` | pose 10 | 10 | Change only the pose, keep the rest of the photo |
@@ -66,6 +67,24 @@ node scripts/image-variations/cli.js --image ./ref.png -n 6 --seed 3f9a1c2b7d04
 | `edit-outfit` | outfit 10 | 10 | Change only the outfit |
 | `edit-outfit-color` | color 10 | 10 | Recolour the outfit, keep its shape and fabric |
 | `character-variations` | pose 8, hair 6, outfit 7, background 7 | 2,352 | The original sample set |
+
+`selfie-natural` is the two families joined: the `edit-*` preamble that holds
+the person's identity, crossed with the amateur-selfie look. It expects
+several references of the same person - repeat `--image` up to five times, or
+add more than one in the web UI - and says so in the prompt, so the model
+reads the face, hair and build off all of them rather than off one frame.
+
+Its outfit axis is colour only, and the preamble states that the garment's
+shape, coverage, length, fabric and trim stay as they are in the reference.
+Colour is the one thing that moves; the preset never swaps the garment for
+another or reduces what it covers.
+
+```bash
+node scripts/image-variations/cli.js \
+  --config scripts/image-variations/presets/selfie-natural.json \
+  --image ./ref-1.jpg --image ./ref-2.jpg --image ./ref-3.jpg \
+  --count 8
+```
 
 In `selfie-amateur`, `pose` holds only what the upper body is doing and
 `setting` holds the posture along with the place. Splitting them that way is

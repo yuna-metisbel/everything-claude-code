@@ -251,5 +251,29 @@ test('every option that carries a label keeps it filesystem-safe', () => {
   }
 });
 
+test('selfie-natural varies four axes and keeps the outfit as it is but for colour', () => {
+  const file = path.join(__dirname, '../../scripts/image-variations/presets/selfie-natural.json');
+  const config = loadConfig(file);
+
+  assert.deepStrictEqual(
+    Object.keys(config.categories).sort(),
+    ['angle', 'background', 'color', 'pose']
+  );
+
+  // The preamble is the only thing standing between "recolour the outfit" and
+  // "put her in something else". A preset that reads several references and
+  // redraws the whole frame has no other guard, so the wording is pinned here:
+  // the garment's coverage comes from the reference and colour is the one axis
+  // that moves.
+  assert.match(config.base, /色だけ/);
+  assert.match(config.base, /露出を増やしたり/);
+  assert.match(config.base, /置き換えたりしないで/);
+  assert.match(config.base, /匿名性を維持/);
+
+  // Several references of one person is what this preset is for - if the
+  // prompt stops saying so, the model reads the face off one frame again.
+  assert.match(config.base, /複数枚/);
+});
+
 console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);
 if (failed > 0) process.exit(1);
