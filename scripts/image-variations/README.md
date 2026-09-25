@@ -1,0 +1,364 @@
+# image-variations
+
+Generate several variations of one reference image with Grok (xAI), randomly
+sampling a pose / hairstyle / outfit / background from your own prompt option
+patterns.
+
+One reference image in, N images out - each with a different randomly drawn
+combination, a manifest recording exactly which options produced which file,
+and a fixed seed so any run can be reproduced.
+
+Two front ends over the same engine: a CLI, and an installable web UI (PWA)
+served by a small local server - see [Web UI](#web-ui-pwa).
+
+## Requirements
+
+- Node.js >= 18 (uses the built-in `fetch`; no dependencies)
+- An xAI API key
+
+```bash
+export XAI_API_KEY="xai-your-real-key"
+```
+
+Every command below is run from the repository root.
+
+## Usage
+
+```bash
+# 8 variations from one reference image
+node scripts/image-variations/cli.js --image ./ref.png --count 8
+
+# See the prompts and the request body without spending anything
+node scripts/image-variations/cli.js --image ./ref.png --count 8 --dry-run
+
+# Vary only the background, keep pose / hair / outfit fixed
+node scripts/image-variations/cli.js --image ./ref.png -n 6 --only background
+
+# Reproduce an earlier run exactly
+node scripts/image-variations/cli.js --image ./ref.png -n 6 --seed 3f9a1c2b7d04
+```
+
+### Options
+
+| Flag | Meaning |
+|------|---------|
+| `-i, --image <path\|url>` | Reference image. Repeat for up to 5. |
+| `-n, --count <number>` | How many variations (default 4) |
+| `-c, --config <path>` | Your prompt-pattern config (default: bundled preset) |
+| `-o, --out <dir>` | Output directory (default `./out/image-variations/<timestamp>`) |
+| `-s, --seed <string>` | Seed for reproducible sampling |
+| `--lock <a,b>` | Sample these categories once and reuse them |
+| `--only <a,b>` | Vary only these; lock everything else |
+| `--concurrency <n>` | Parallel requests (default 2) |
+| `--model <id>` | Override the model |
+| `--endpoint <url>` | Override the endpoint |
+| `--dry-run` | Print prompts and the request body, call no API |
+| `--json` | Print the run manifest as JSON |
+
+## Bundled presets
+
+| Preset | Categories | Combinations | For |
+|--------|-----------|--------------|-----|
+| `selfie-natural` | background 10, angle 10, pose 10, color 10 | 10,000 | Natural amateur selfies from several reference photos |
+| `selfie-amateur` | pose 9, angle 10, setting 13 | 1,170 | An amateur phone selfie of the person in the reference |
+| `edit-all` | pose 10, background 10, color 10 | 1,000 | Change pose, background and the outfit's colour at once |
+| `edit-pose` | pose 10 | 10 | Change only the pose, keep the rest of the photo |
+| `edit-background` | background 10 | 10 | Change only the background |
+| `edit-outfit` | outfit 10 | 10 | Change only the outfit |
+| `edit-outfit-color` | color 10 | 10 | Recolour the outfit, keep its shape and fabric |
+| `character-variations` | pose 8, hair 6, outfit 7, background 7 | 2,352 | The original sample set |
+
+`selfie-natural` is the two families joined: the `edit-*` preamble that holds
+the person's identity, crossed with the amateur-selfie look. It expects
+several references of the same person - repeat `--image` up to five times, or
+add more than one in the web UI - and says so in the prompt, so the model
+reads the face, hair and build off all of them rather than off one frame.
+
+Its outfit axis is colour only, and the preamble states that the garment's
+shape, coverage, length, fabric and trim stay as they are in the reference.
+Colour is the one thing that moves; the preset never swaps the garment for
+another or reduces what it covers.
+
+```bash
+node scripts/image-variations/cli.js \
+  --config scripts/image-variations/presets/selfie-natural.json \
+  --image ./ref-1.jpg --image ./ref-2.jpg --image ./ref-3.jpg \
+  --count 8
+```
+
+In `selfie-amateur`, `pose` holds only what the upper body is doing and
+`setting` holds the posture along with the place. Splitting them that way is
+what makes the two safe to sample independently: a category of postures
+crossed with a category of places-and-postures contradicts itself - "lying
+face down" with "sitting on the edge of the bed" - for a large share of the
+combinations.
+
+`edit-all` recolours the outfit rather than replacing it. The garment
+descriptions each name a colour of their own, so combining them with the
+colour category put two contradictory colour instructions in every prompt;
+colour alone leaves the reference's shape, fabric and cut untouched.
+`edit-outfit` still replaces the garment for when that is what you want.
+
+The `edit-*` presets share a preamble that holds the person's identity, keeps
+an obscured face obscured, and forbids added text or watermarks. The
+single-axis ones exist because "change only the pose" and "change the pose,
+the background and the outfit" are different instructions: combining the
+single-axis wordings into one prompt would contradict itself.
+
+Only `character-variations` carries a `wire` block; the rest inherit the
+defaults in `lib/config.js`, so a wire-format correction is a one-place edit.
+
+## Your prompt patterns
+
+Everything that varies lives in a JSON config. Copy the bundled preset and
+replace the option lists with your own:
+
+```bash
+cp scripts/image-variations/presets/character-variations.json ./my-patterns.json
+node scripts/image-variations/cli.js -i ./ref.png -c ./my-patterns.json -n 8
+```
+
+```json
+{
+  "name": "my-patterns",
+  "base": "the same character as the reference image, preserving facial features and identity exactly",
+  "template": "{base}, {pose}, {hair}, {outfit}, {background}, {style}",
+  "fixed": {
+    "style": "high quality illustration, soft natural lighting"
+  },
+  "categories": {
+    "pose": ["standing with arms crossed", "sitting on a chair"],
+    "hair": ["long straight hair", { "text": "high ponytail", "weight": 3 }],
+    "outfit": ["casual blouse and jeans", "navy school uniform"],
+    "background": ["plain grey studio backdrop", "sunlit city street"]
+  }
+}
+```
+
+- **Category names are free.** Add `expression`, `camera_angle`, `lighting` -
+  anything - then reference it as `{expression}` in `template`.
+- **Options** are plain strings, or `{ "text": "...", "weight": 3 }` to make an
+  option appear more often. An optional `"label"` gives it a shorter name in
+  output filenames.
+- **`template`** controls the final prompt. A placeholder that matches no
+  category, `fixed` entry, or `base` is rejected at load time rather than
+  silently rendering as literal text.
+- **`fixed`** holds values that never vary (style, quality wording).
+
+### Naming things for the reader
+
+A preset is identified by its file name and shown by its `title`; a category
+is referenced in the template by an ASCII key and shown by its `labels`
+entry. Neither display name reaches a filename, a prompt or the manifest.
+
+```json
+{
+  "name": "edit-pose",
+  "title": "ポーズだけ変更",
+  "categories": { "pose": ["..."], "angle": ["..."] },
+  "labels": { "pose": "ポーズ", "angle": "画角" }
+}
+```
+
+`title` defaults to `name`, so a preset without one still lists cleanly.
+
+Output filenames come from each option's `label`, so give the options an
+ASCII slug when their text is not ASCII:
+
+```json
+{ "label": "cheek-touch", "text": "片手を頬に軽く添える" }
+```
+
+Without a label the slug is derived from the text, which for non-ASCII text
+collapses to `na`.
+
+## Output
+
+```text
+out/image-variations/2026-09-19T10-12-33/
+  001_background-sunlit-city__pose-arms-crossed.png
+  002_background-quiet-cafe__pose-sitting-on-a-ch.png
+  ...
+  manifest.json   which options produced which file, plus seed and model
+  prompts.md      the same thing as a readable sheet
+```
+
+Filenames show only the categories that actually varied, so a `--only pose`
+run reads as `001_pose-...`.
+
+The sampler avoids repeating a combination while distinct ones remain. If you
+ask for more variations than your patterns can produce, it says so and lets
+prompts repeat.
+
+## Adjusting the API wire format
+
+The request shape lives in `wire`, so a change on the API side is a config
+edit rather than a code change. These are the defaults in `lib/config.js`;
+only override what differs.
+
+```json
+{
+  "wire": {
+    "model": "grok-imagine-image-2.0",
+    "generateEndpoint": "https://api.x.ai/v1/images/generations",
+    "editEndpoint": "https://api.x.ai/v1/images/edits",
+    "imageField": "image",
+    "imageFieldMultiple": "images",
+    "imageStyle": "object",
+    "responseFormat": "b64_json"
+  }
+}
+```
+
+One reference image is sent as a single object under `imageField`; several
+are sent as an array under `imageFieldMultiple`. A one-element array under
+the singular field is a different request, and not the one the API accepts.
+
+`imageStyle` is `object` for `{ "type": "image_url", "url": "..." }` and
+`url` for a bare string.
+
+Anything under `request` is merged into the body verbatim, which is where
+parameters such as `aspect_ratio`, `resolution` and `quality` go:
+
+```json
+{ "request": { "aspect_ratio": "3:4" } }
+```
+
+No bundled preset sets one, so every run uses the API's own defaults.
+Because resolution and quality drive the per-image price, check the current
+reference before pinning a value.
+
+Run `--dry-run` to see the exact body before sending anything.
+
+## Web UI (PWA)
+
+The same engine behind a browser UI, for running it from a phone or without a
+terminal. A small local server holds the key and talks to xAI; the page never
+sees a credential.
+
+Run it from the repository root, with your own key in place of the
+placeholder:
+
+```bash
+cd /path/to/everything-claude-code
+export XAI_API_KEY="xai-your-real-key"
+node scripts/image-variations/web/server.js
+# -> http://127.0.0.1:8787/
+```
+
+Open that URL and the browser offers to install it as an app (Chrome: *Install*
+in the address bar; Safari: *Share -> Add to Home Screen*). Installed, it keeps
+the reference image, the settings and the last run in IndexedDB, and the shell
+loads offline - generating still needs the server running.
+
+| Option | Meaning |
+|--------|---------|
+| `-p, --port <n>` | Port to listen on (default `8787`) |
+| `--host <addr>` | Address to bind (default `127.0.0.1`, loopback only) |
+| `--presets <dir>` | Directory of preset JSON files (default `../presets`) |
+| `--token <value>` | Fixed access token for non-loopback binds (default: random) |
+| `--no-qr` | Do not print a QR code for the address |
+
+### Reaching it from a phone
+
+```bash
+node scripts/image-variations/web/server.js --host 0.0.0.0
+```
+
+The server prints every address it can be reached on, and a QR code for the
+one another device would use:
+
+```text
+[image-variations] listening on http://127.0.0.1:8787/?t=...
+[image-variations] listening on http://192.168.1.23:8787/?t=...
+
+[image-variations] scan from a phone on the same network:
+
+   <QR code>
+```
+
+Point the phone's camera at it. Nothing has to be typed, which matters
+because the token is 32 characters.
+
+Binding beyond loopback puts an API-key-holding proxy on the network, so the
+server mints that access token and `/api/*` rejects a request without it.
+The page adopts the token on first load, keeps it per origin and strips it
+from the address bar. The static shell stays open, since it holds nothing.
+`--token <value>` pins a token of your own, and `--no-qr` skips the drawing
+for a terminal that mangles it.
+
+Two things to expect over a LAN address:
+
+- **It will not install as an app.** Service workers need a secure context,
+  and `http://192.168.x.x` is not one. The page itself works normally; only
+  the install and offline shell are unavailable. Put it behind HTTPS (a
+  tunnel such as Tailscale or cloudflared) to get those back.
+- **Anyone on that network who has the token can spend your API budget.**
+  Stop the server when you are done.
+
+The QR encoder in `web/qr.js` is written for this one job: byte mode, error
+correction level L, versions 1 to 5. Those versions hold a single
+error-correction block, so there is no interleaving, and 106 bytes is well
+past what an address with a token needs.
+
+It draws with background colour rather than block glyphs. A glyph leaves the
+terminal's line spacing unpainted, which slices every module row in half and
+stops the code scanning; a background fills the whole cell. Two cells per
+module also lands close to square, since a character cell is about twice as
+tall as it is wide. That needs 74 columns for a typical address - the token
+is 96 bits as base64url rather than hex to keep it there. In a narrower
+window the server falls back to a half-height drawing and says so, since a
+wrapped QR code is an unreadable one.
+
+### Language
+
+The UI ships in Japanese and English and follows the browser, so a Japanese
+browser opens in Japanese with no setup. The switch in the header overrides
+that and the choice is remembered per origin.
+
+Only the interface is translated. Text quoted from the image API is passed
+through verbatim, because a diagnostic is more useful unmangled than
+translated - as are your own category names, which read exactly as you spell
+them in the preset. To add a language, add a block to `DICTIONARIES` in
+`web/public/i18n.js`; `tests/image-variations/web-i18n.test.js` fails if a
+key or a `{placeholder}` is missing from it.
+
+### What the UI does
+
+- Reads the reference images in the browser and sends them as data URIs only
+  when you generate; `/api/generate-one` accepts nothing but `data:image/*`, so
+  a request can never name a path on disk.
+- **Preview prompts** runs the sampler only - no API call, no cost.
+- Switching a category off holds it fixed, the UI equivalent of `--only`.
+- Generates two at a time, filling each tile as it arrives, and reports a
+  failed variation on its own tile instead of losing the run.
+- Shows the seed of every run so it can be typed back in to reproduce it.
+
+To change the icons, edit and re-run `node scripts/image-variations/web/make-icons.js`.
+
+## Notes
+
+- The API key is read from `XAI_API_KEY` (or `GROK_API_KEY`) and is never
+  written to the manifest or the logs.
+- Failures are per-image: one rejected prompt does not abort the run, and the
+  reason is recorded in the manifest. The exit code is 1 only if every
+  variation failed.
+- Requests retry with exponential backoff on 429 and 5xx responses.
+- Use reference images you have the rights to.
+
+## Tests
+
+```bash
+node tests/image-variations/sampler.test.js
+node tests/image-variations/config.test.js
+node tests/image-variations/prompt.test.js
+node tests/image-variations/xai.test.js
+node tests/image-variations/io.test.js
+node tests/image-variations/cli.test.js
+node tests/image-variations/web-api.test.js
+node tests/image-variations/web-server.test.js
+node tests/image-variations/web-i18n.test.js
+node tests/image-variations/web-qr.test.js
+```
+
+They all run as part of `node tests/run-all.js`; no test makes a network call.

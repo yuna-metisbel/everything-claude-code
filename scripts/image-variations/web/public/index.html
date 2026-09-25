@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Image Variations</title>
+<meta name="description" content="Generate prompt-pattern variations of one reference image.">
+<meta name="theme-color" content="#111420">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="bar">
+  <h1 data-i18n="title">Image Variations</h1>
+  <p class="status" id="status" role="status" data-i18n="loading">Loading&hellip;</p>
+  <select id="lang" class="lang" data-i18n-label="langLabel"></select>
+</header>
+
+<main>
+  <section class="card">
+    <h2 data-i18n="stepReference">1. Reference image</h2>
+    <label class="drop" id="drop" for="file">
+      <input type="file" id="file" accept="image/*" multiple hidden>
+      <span id="drop-text"></span>
+    </label>
+    <ul class="refs" id="refs"></ul>
+    <p class="hint" data-i18n="referenceHint"></p>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="stepPattern">2. Pattern set</h2>
+    <label class="field">
+      <span data-i18n="preset">Preset</span>
+      <select id="preset"></select>
+    </label>
+
+    <div class="row">
+      <label class="field">
+        <span data-i18n="variations">Variations</span>
+        <input type="number" id="count" min="1" max="24" value="4" inputmode="numeric">
+      </label>
+      <label class="field">
+        <span data-i18n="seed">Seed</span> <em data-i18n="seedNote"></em>
+        <input type="text" id="seed" data-i18n-placeholder="seedPlaceholder"
+               autocomplete="off" spellcheck="false">
+      </label>
+    </div>
+
+    <fieldset class="vary">
+      <legend data-i18n="whatMayVary">What may vary</legend>
+      <p class="hint" data-i18n="varyHint"></p>
+      <div class="chips" id="categories"></div>
+    </fieldset>
+
+    <details class="detail">
+      <summary data-i18n="promptTemplate">Prompt template</summary>
+      <pre id="template"></pre>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2 data-i18n="stepRun">3. Run</h2>
+    <div class="actions">
+      <button type="button" id="plan" class="ghost" data-i18n="preview">Preview prompts</button>
+      <button type="button" id="generate" class="primary" data-i18n="generate">Generate</button>
+    </div>
+    <p class="hint" id="run-hint"></p>
+  </section>
+
+  <section class="card" id="plan-card" hidden>
+    <h2 data-i18n="plannedPrompts">Planned prompts</h2>
+    <p class="hint" id="plan-summary"></p>
+    <ol class="prompts" id="prompts"></ol>
+  </section>
+
+  <section class="card" id="results-card" hidden>
+    <div class="results-head">
+      <h2 data-i18n="results">Results</h2>
+      <button type="button" id="download-all" class="ghost small" data-i18n="downloadAll"></button>
+    </div>
+    <div class="grid" id="results"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p data-i18n="footer"></p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
