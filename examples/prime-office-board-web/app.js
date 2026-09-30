@@ -60,6 +60,16 @@ function setFontSize(v){
   if (!FONT_SIZES.some(f => f[0] === v)) return;
   S.fontSize = v; ls("prime.fontsize", v); applyFontSize(); render();
 }
+// 下の帯の高さ。端末の縁の作りも持ち方も人それぞれで、こちらから当てにいくと
+// 何度も往復になる。文字の大きさと同じく選ばせる。
+const BAR_SIZES = [["s","低め"],["m","ふつう"],["l","高め"]];
+function applyBarSize(){
+  document.documentElement.setAttribute("data-bar", S.barSize);
+}
+function setBarSize(v){
+  if (!BAR_SIZES.some(x => x[0] === v)) return;
+  S.barSize = v; ls("prime.barsize", v); applyBarSize(); render();
+}
 function cycleTheme(){
   const i = THEMES.findIndex(t => t[0] === S.theme);
   S.theme = THEMES[(i + 1) % THEMES.length][0];
@@ -136,7 +146,8 @@ const S = {
   shops: [], notices: [], allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
-  theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m", tabBar: [],
+  theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
+  barSize: ls("prime.barsize") || "m", tabBar: [],
   settings: null, form: {}, mode: "",
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
@@ -427,6 +438,7 @@ async function pushTurnOff(){
 async function boot(){
   applyTheme();
   applyFontSize();
+  applyBarSize();
   S.tabBar = loadTabBar();
   S.siteCode = urlSiteCode();
   const { data } = await sb.auth.getSession();
@@ -2134,6 +2146,13 @@ function viewSettings(){
       '<span class="hint">スマホの下に出すタブを' + TAB_MAX + 'つまで選べます。この端末でだけ変わります。' +
       '外したものは「その他」から開けます。</span>' +
       '<div class="btn-row" style="margin-left:auto"><button class="btn sm ghost" data-act="tab-reset">初期に戻す</button></div></div>' +
+    '<div class="panel" style="margin-bottom:12px"><div style="padding:14px">' +
+      '<div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">帯の高さ（スマホ）</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      BAR_SIZES.map(function(x){
+        return '<button class="btn' + (S.barSize === x[0] ? " primary" : "") +
+          '" data-act="bar-size" data-v="' + x[0] + '">' + x[1] + "</button>";
+      }).join("") + "</div></div></div>" +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     S.tabBar.map(function(id, i){
       const t = TABS.find(function(x){ return x.id === id; });
@@ -2741,6 +2760,7 @@ document.addEventListener("click", async function(ev){
         break;
       }
       case "font-size": setFontSize(btn.dataset.v); break;
+      case "bar-size": setBarSize(btn.dataset.v); break;
       case "more-tabs": modalMoreTabs(); break;
       case "tab-up": moveTab(id, -1); break;
       case "tab-down": moveTab(id, 1); break;
