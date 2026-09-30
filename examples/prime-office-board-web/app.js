@@ -69,14 +69,14 @@ const PALETTE = ["#9C6C1F","#3E6497","#2C7A5B","#A63244","#6B4E8F","#B0670F","#2
 // Everyone is an independent contractor, so this says where they are working
 // from rather than whether they clocked in.
 const KINDS = {
-  office: { label:"事務所",   cell:"事務所", cls:"k-office", chip:"brass" },
+  office: { label:"事務所",   cell:"事務所", mini:"事",   cls:"k-office", chip:"brass" },
   // 半分は在宅で半分は事務所、という日。どちらか一方を選ばせると、
   // 選ばなかった側の時間が予定から消えてしまう。
-  both:   { label:"事務所＋在宅", cell:"事＋在", cls:"k-both", chip:"brass" },
-  home:   { label:"在宅",     cell:"在宅",   cls:"k-home",   chip:"cool" },
-  out:    { label:"外仕事",   cell:"外",     cls:"k-out",    chip:"warn" },
-  off:    { label:"休み",     cell:"休",     cls:"k-off",    chip:"bad" },
-  "":     { label:"未定",     cell:"",       cls:"",         chip:"" }
+  both:   { label:"事務所＋在宅", cell:"事＋在", mini:"事在", cls:"k-both", chip:"brass" },
+  home:   { label:"在宅",     cell:"在宅",   mini:"在",   cls:"k-home",   chip:"cool" },
+  out:    { label:"外仕事",   cell:"外",     mini:"外",   cls:"k-out",    chip:"warn" },
+  off:    { label:"休み",     cell:"休",     mini:"休",   cls:"k-off",    chip:"bad" },
+  "":     { label:"未定",     cell:"",       mini:"",     cls:"",         chip:"" }
 };
 const KIND_ORDER = ["", "office", "both", "home", "out", "off"];
 const VAULT_COLS = [
@@ -136,7 +136,7 @@ const S = {
   shops: [], notices: [], allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
-  theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
+  theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m", tabBar: [],
   settings: null, form: {}, mode: "",
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
@@ -427,6 +427,7 @@ async function pushTurnOff(){
 async function boot(){
   applyTheme();
   applyFontSize();
+  S.tabBar = loadTabBar();
   S.siteCode = urlSiteCode();
   const { data } = await sb.auth.getSession();
   S.user = data && data.session ? data.session.user : null;
@@ -535,6 +536,37 @@ async function signOut(){ await sb.auth.signOut(); S.reveal = {}; await refresh(
 const valOf = id => { const n = el(id); return n ? n.value.trim() : ""; };
 
 /* ============================ render: shell ============================ */
+// 下のメニューに出す並び。人によって毎日開くタブが違うので、決め打たずに選ばせる。
+// 端末ごとの好みなので、データベースではなくこの端末にだけ覚える。
+const TAB_MAX = 5;
+function tabIds(){ return TABS.map(function(t){ return t.id; }); }
+function loadTabBar(){
+  const saved = (ls("prime.tabbar") || "").split(",")
+    .filter(function(x){ return tabIds().indexOf(x) >= 0; });
+  const uniq = saved.filter(function(x, i){ return saved.indexOf(x) === i; });
+  return uniq.length ? uniq.slice(0, TAB_MAX) : tabIds().slice(0, TAB_MAX);
+}
+function saveTabBar(){ ls("prime.tabbar", S.tabBar.join(",")); render(); }
+function moveTab(id, delta){
+  const i = S.tabBar.indexOf(id), j = i + delta;
+  if (i < 0 || j < 0 || j >= S.tabBar.length) return;
+  S.tabBar.splice(j, 0, S.tabBar.splice(i, 1)[0]);
+  saveTabBar();
+}
+function showTab(id){
+  if (S.tabBar.indexOf(id) >= 0) return;
+  // 5つを超えると、1つあたりが狭くなって字が読めなくなる。
+  if (S.tabBar.length >= TAB_MAX){ toast("下のメニューは" + TAB_MAX + "つまでです。どれかを外してください。"); return; }
+  S.tabBar.push(id); saveTabBar();
+}
+function hideTab(id){
+  // 全部外すと行き先がなくなる。1つは残す。
+  if (S.tabBar.length <= 1){ toast("少なくとも1つは残してください。"); return; }
+  S.tabBar = S.tabBar.filter(function(x){ return x !== id; });
+  saveTabBar();
+}
+function resetTabBar(){ S.tabBar = tabIds().slice(0, TAB_MAX); saveTabBar(); }
+
 const TABS = [
   { id:"home",   label:"ホーム",         short:"ホーム" },
   { id:"sched",  label:"スケジュール",   short:"予定" },
@@ -652,13 +684,38 @@ function renderStaffTabs(){
     '<button class="tab" role="tab" aria-selected="' + (S.siteTab === t.id) + '" data-stab="' + t.id + '">' +
     '<span class="t-lg">' + h(t.label) + '</span><span class="t-sm">' + h(t.short) + "</span></button>").join("");
 }
-function renderTabs(){
-  const badges = { tasks: wantedTasks().length,
-                   pay: unpaid().filter(p => { const n = daysUntil(p.due); return n !== null && n <= 0; }).length };
-  el("tabs").innerHTML = TABS.map(t =>
-    '<button class="tab" role="tab" aria-selected="' + (S.tab === t.id) + '" data-tab="' + t.id + '">' +
+function tabBadges(){
+  return { tasks: wantedTasks().length,
+           pay: unpaid().filter(p => { const n = daysUntil(p.due); return n !== null && n <= 0; }).length };
+}
+function tabButton(t, badges){
+  return '<button class="tab" role="tab" aria-selected="' + (S.tab === t.id) + '" data-tab="' + t.id + '">' +
     '<span class="t-lg">' + h(t.label) + '</span><span class="t-sm">' + h(t.short) + "</span>" +
-    (badges[t.id] ? '<span class="badge num">' + badges[t.id] + "</span>" : "") + "</button>").join("");
+    (badges[t.id] ? '<span class="badge num">' + badges[t.id] + "</span>" : "") + "</button>";
+}
+function renderTabs(){
+  const badges = tabBadges();
+  const shown = S.tabBar.map(function(id){ return TABS.find(function(t){ return t.id === id; }); }).filter(Boolean);
+  const rest = TABS.filter(function(t){ return S.tabBar.indexOf(t.id) < 0; });
+  // 外したタブも「その他」から必ず開ける。設定を外して設定に戻れない、をなくす。
+  const restBadge = rest.reduce(function(a, t){ return a + (badges[t.id] || 0); }, 0);
+  el("tabs").innerHTML = shown.map(function(t){ return tabButton(t, badges); }).join("") +
+    (rest.length
+      ? '<button class="tab" role="tab" aria-selected="' +
+        rest.some(function(t){ return t.id === S.tab; }) + '" data-act="more-tabs">' +
+        '<span class="t-lg">その他</span><span class="t-sm">その他</span>' +
+        (restBadge ? '<span class="badge num">' + restBadge + "</span>" : "") + "</button>"
+      : "");
+}
+function modalMoreTabs(){
+  const badges = tabBadges();
+  showModal("ほかの画面",
+    '<div class="pick-list">' + TABS.map(function(t){
+      return '<button class="pick' + (S.tab === t.id ? " on" : "") + '" data-tab="' + t.id + '">' +
+        h(t.label) + (badges[t.id] ? ' <span class="badge num">' + badges[t.id] + "</span>" : "") +
+        (S.tabBar.indexOf(t.id) >= 0 ? ' <span class="chip">下のメニュー</span>' : "") + "</button>";
+    }).join("") + "</div>",
+    '<button class="btn" data-act="close-modal">閉じる</button>');
 }
 // 持ち出しの状態は列に持たず、最後の記録から決める（鍵と同じ考え方）。
 function deviceState(id){
@@ -897,10 +954,8 @@ function viewHome(){
         '<span class="hint">全体ミーティングや打ち合わせ、共有事項など。</span>' +
         '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
         '<div class="panel"><div class="rows" style="border-top:0">' +
-        (notices.length ? notices.slice(0, 5).map(noticeRow).join("")
+        (notices.length ? notices.map(function(x){ return noticeRow(x); }).join("")
           : '<div class="empty">お知らせはありません</div>') + "</div></div>" +
-        (notices.length > 5 ? '<p style="font-size:12px;color:var(--muted);margin-top:6px">ほか ' +
-          (notices.length - 5) + ' 件は「スケジュール」タブに表示されます。</p>' : "") +
       "</section>" +
       '<section class="sec"><div class="sec-head"><div class="eyebrow">' + h(today().replace(/-/g,"/")) + " (" + DOW[new Date().getDay()] + ")" +
         '</div><div class="spacer"></div><span class="hint">今日の全員の動き</span></div>' +
@@ -974,30 +1029,58 @@ function shiftMonth(delta){
   S.month = d.getFullYear() + "-" + pad(d.getMonth() + 1);
   loadAll().then(render);
 }
+// その日に出ているお知らせ・会議。カレンダーのマスと、開いた日の両方で使う。
+function noticesOn(date){
+  return sortedNotices().filter(function(n){ return n.date === date; });
+}
+// 月のマス1つ。誰がどう動くかを、名前と1〜2文字の区分で並べる。
+function monthCell(ym, d, t){
+  const date = ym + "-" + pad(d), w = dow(ym, d);
+  const who = S.members.map(function(m){
+    const day = dayOf(m.id, date);
+    if (!day) return "";
+    // 区分も中身も無い日は、書かれていないのと同じなので出さない。
+    if (!(day.kind || day.plan || day.done || day.ngFrom || day.ngTo || day.note || day.url)) return "";
+    const K = KINDS[day.kind || ""];
+    return '<span class="mc-who ' + K.cls + '">' +
+      '<span class="pip" style="background:' + h(m.color) + '"></span>' +
+      '<span class="mc-nm">' + h(m.name) + "</span>" +
+      // スマホの1マスに名前は入らないので、そこは頭の1文字に切り替える。
+      '<span class="mc-ab">' + h(String(m.name).slice(0, 1)) + "</span>" +
+      '<span class="mc-k">' + h(K.mini) + "</span>" +
+      ((day.ngFrom || day.ngTo) ? '<span class="m ngm"></span>' : "") +
+      (day.done ? '<span class="m donem"></span>' : "") + "</span>";
+  }).join("");
+  const nt = noticesOn(date);
+  return '<td class="mc' + (w === 0 ? " sun" : w === 6 ? " sat" : "") +
+    (date === t ? " today" : "") + '">' +
+    '<button class="mc-in" data-act="open-day" data-date="' + date + '" aria-label="' + h(date) + '">' +
+      '<span class="mc-d">' + d + "</span>" +
+      nt.map(function(x){
+        return '<span class="mc-nt' + (x.kind === "meeting" ? " meet" : "") + '">' +
+          h(x.at_time ? x.at_time + " " : "") + h(x.title) + "</span>"; }).join("") +
+      who +
+    "</button></td>";
+}
 function viewSched(){
   const ym = S.month, n = daysInMonth(ym), t = today();
-  let head = '<tr><th class="name">メンバー</th>';
-  for (let d = 1; d <= n; d++){
-    const w = dow(ym, d);
-    head += '<th class="' + (w === 0 ? "sun" : w === 6 ? "sat" : "") + '">' + d + "<br>" + DOW[w] + "</th>";
-  }
-  head += "</tr>";
-  const body = S.members.map(m => {
-    let r = '<td class="name"><span class="who"><span class="pip" style="background:' + h(m.color) + '"></span>' + h(m.name) + "</span></td>";
-    for (let d = 1; d <= n; d++){
-      const date = ym + "-" + pad(d), day = dayOf(m.id, date) || {};
-      const K = KINDS[day.kind || ""];
-      const marks = ((day.ngFrom || day.ngTo) ? '<span class="m ngm"></span>' : "") +
-        (day.done ? '<span class="m donem"></span>' : "") +
-        ((day.plan || day.note) ? '<span class="m notem"></span>' : "") +
-        (day.url ? '<span class="m linkm"></span>' : "");
-      r += '<td class="day ' + K.cls + (date === t ? " today-col" : "") + '">' +
-        '<button class="cell" data-act="edit-day" data-id="' + h(m.id) + '" data-date="' + date + '" title="' + h(m.name + " " + date) + '">' +
-        '<span class="k">' + h(day.kind ? K.cell : "") + '</span><span class="marks">' + marks + "</span></button></td>";
-    }
-    return "<tr>" + r + "</tr>";
-  }).join("");
   const label = ym.slice(0, 4) + "年" + Number(ym.slice(5, 7)) + "月";
+  // 1ヶ月をまるごと1画面に出す。横に長い表だとスマホで端が見えず、
+  // 「その月がどうなっているか」という一番読みたいことが読めない。
+  const rows = [];
+  let row = [];
+  for (let i = 0; i < dow(ym, 1); i++) row.push('<td class="mc pad"></td>');
+  for (let d = 1; d <= n; d++){
+    row.push(monthCell(ym, d, t));
+    if (row.length === 7){ rows.push(row); row = []; }
+  }
+  if (row.length){
+    while (row.length < 7) row.push('<td class="mc pad"></td>');
+    rows.push(row);
+  }
+  const head = "<tr>" + DOW.map(function(w, i){
+    return '<th class="' + (i === 0 ? "sun" : i === 6 ? "sat" : "") + '">' + w + "</th>"; }).join("") + "</tr>";
+
   const ngList = [], doneList = [];
   S.members.forEach(m => {
     for (let d = 1; d <= n; d++){
@@ -1007,32 +1090,30 @@ function viewSched(){
       if ((day.done || "").trim()) doneList.push({ m: m, date: date, d: day });
     }
   });
-  const monthNotices = sortedNotices().filter(function(n){ return !n.date || n.date.slice(0, 7) === ym; });
-  return '<section class="sec"><div class="sec-head"><h2>お知らせ・共通予定</h2>' +
-    '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
-    '<div class="panel"><div class="rows" style="border-top:0">' +
-    (monthNotices.length ? monthNotices.map(noticeRow).join("")
-      : '<div class="empty">この月のお知らせはありません</div>') + "</div></div></section>" +
-    '<section class="sec"><div class="sec-head"><h2>' + h(label) + " の予定</h2><div class=\"spacer\"></div>" +
-    '<button class="btn sm" data-act="month" data-delta="-1">← 前の月</button>' +
+
+  return '<section class="sec"><div class="sec-head"><h2>' + h(label) + "</h2>" +
+    '<span class="hint">日を押すと、その日の全員の動きが出ます。</span>' +
+    '<div class="btn-row month-nav">' +
+    '<button class="btn sm" data-act="month" data-delta="-1" aria-label="前の月">' +
+      '<span class="t-lg">← 前の月</span><span class="t-sm">←</span></button>' +
     '<button class="btn sm" data-act="month" data-delta="0">今月</button>' +
-    '<button class="btn sm" data-act="month" data-delta="1">次の月 →</button></div>' +
-    '<div class="cal-scroll"><table class="cal"><thead>' + head + "</thead><tbody>" +
-    (S.members.length ? body : '<tr><td class="name">—</td><td colspan="' + n + '" style="padding:18px;text-align:center;color:var(--muted)">メンバーがいません</td></tr>') +
-    "</tbody></table></div>" +
+    '<button class="btn sm" data-act="month" data-delta="1" aria-label="次の月">' +
+      '<span class="t-lg">次の月 →</span><span class="t-sm">→</span></button></div></div>' +
+    '<table class="mcal"><thead>' + head + "</thead><tbody>" +
+    rows.map(function(r){ return "<tr>" + r.join("") + "</tr>"; }).join("") +
+    "</tbody></table>" +
     '<div class="legend">' +
-      '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>事務所</span>' +
-      '<span><i class="k-both-sw" style="border:1px solid var(--line)"></i>事務所＋在宅</span>' +
-      '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>在宅</span>' +
-      '<span><i style="background:var(--warn-soft);border:1px solid var(--line)"></i>外仕事</span>' +
-      '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>休み</span>' +
+      '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>事＝事務所</span>' +
+      '<span><i class="k-both-sw" style="border:1px solid var(--line)"></i>事在＝事務所＋在宅</span>' +
+      '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>在＝在宅</span>' +
+      '<span><i style="background:var(--warn-soft);border:1px solid var(--line)"></i>外＝外仕事</span>' +
+      '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>休＝休み</span>' +
       '<span><i style="background:var(--bad);border-radius:50%"></i>連絡がつかない時間帯あり</span>' +
-      '<span><i style="background:var(--brass);border-radius:50%"></i>予定メモあり</span>' +
       '<span><i style="background:var(--ok);border-radius:50%"></i>やったこと記録あり</span>' +
-      '<span><i style="background:var(--cool);border-radius:50%"></i>関連リンクあり</span>' +
-      '<span style="margin-left:auto">マスを押すと編集できます</span></div></section>' +
+    "</div></section>" +
+
     '<section class="sec"><div class="sec-head"><h2>やったこと（今月）</h2>' +
-      '<span class="hint">日ごとの記録をまとめて読む場所です。直すときはカレンダーのマスから。</span></div>' +
+      '<span class="hint">日ごとの記録をまとめて読む場所です。直すときはカレンダーの日から。</span></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     (doneList.length
       ? doneList.sort((a, b) => b.date.localeCompare(a.date) ||
@@ -2049,6 +2130,35 @@ function viewSettings(){
         '" data-act="font-size" data-v="' + f[0] + '">' + f[1] + "</button>";
     }).join("") + "</div></div></section>" +
 
+    '<section class="sec"><div class="sec-head"><h2>下のメニュー</h2>' +
+      '<span class="hint">スマホの下に出すタブを' + TAB_MAX + 'つまで選べます。この端末でだけ変わります。' +
+      '外したものは「その他」から開けます。</span>' +
+      '<div class="btn-row" style="margin-left:auto"><button class="btn sm ghost" data-act="tab-reset">初期に戻す</button></div></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    S.tabBar.map(function(id, i){
+      const t = TABS.find(function(x){ return x.id === id; });
+      if (!t) return "";
+      return '<div class="row" style="align-items:center;gap:8px">' +
+        '<span class="num" style="width:22px;color:var(--muted)">' + (i + 1) + "</span>" +
+        '<span style="flex:1;font-weight:500">' + h(t.label) + "</span>" +
+        '<button class="btn sm ghost" data-act="tab-up" data-id="' + h(id) + '" aria-label="上へ"' +
+          (i === 0 ? " disabled" : "") + ">▲</button>" +
+        '<button class="btn sm ghost" data-act="tab-down" data-id="' + h(id) + '" aria-label="下へ"' +
+          (i === S.tabBar.length - 1 ? " disabled" : "") + ">▼</button>" +
+        '<button class="btn sm" data-act="tab-off" data-id="' + h(id) + '">外す</button></div>';
+    }).join("") + "</div></div>" +
+    (function(){
+      const rest = TABS.filter(function(t){ return S.tabBar.indexOf(t.id) < 0; });
+      if (!rest.length) return "";
+      return '<div class="sec-head" style="margin:14px 0 8px"><h2 style="font-size:14px">「その他」に入っているもの</h2></div>' +
+        '<div class="panel"><div class="rows" style="border-top:0">' +
+        rest.map(function(t){
+          return '<div class="row" style="align-items:center;gap:8px">' +
+            '<span style="flex:1;color:var(--muted)">' + h(t.label) + "</span>" +
+            '<button class="btn sm" data-act="tab-on" data-id="' + h(t.id) + '">下に出す</button></div>';
+        }).join("") + "</div></div>";
+    })() + "</section>" +
+
     '<section class="sec"><div class="sec-head"><h2>スマホの通知</h2>' +
       '<span class="hint">会議やお知らせが登録されたとき、決まったことが書かれたとき、' +
       "そして毎朝8時に「今日のこと」が届きます。端末ごとに設定します。</span></div>" +
@@ -2173,6 +2283,36 @@ function showModal(title, bodyHtml, footerHtml){
 function memberOptions(sel, blankLabel){
   return '<option value="">' + h(blankLabel || "— なし —") + "</option>" +
     S.members.map(m => '<option value="' + h(m.id) + '"' + (m.id === sel ? " selected" : "") + ">" + h(m.name) + "</option>").join("");
+}
+// カレンダーの日を押したとき。まずその日の全員を読ませ、直すのはそこから本人へ。
+// マスに全部は入らないので、読む場所と書く場所をここで分ける。
+function modalDayAll(date){
+  const ym = date.slice(0, 7), w = DOW[dow(ym, Number(date.slice(8, 10)))];
+  const nt = noticesOn(date);
+  const rows = S.members.map(function(m){
+    const d = dayOf(m.id, date) || {};
+    const K = KINDS[d.kind || ""];
+    const bits = [];
+    if (d.from || d.to) bits.push("事務所・現場 " + h((d.from || "--:--") + "〜" + (d.to || "--:--")));
+    if (d.ngFrom || d.ngTo) bits.push("連絡不可 " + h((d.ngFrom || "--:--") + "〜" + (d.ngTo || "--:--")));
+    return '<div class="row" style="align-items:flex-start;gap:10px">' +
+      '<span style="flex:1;min-width:0">' +
+        '<span class="who"><span class="pip" style="background:' + h(m.color) + '"></span>' + h(m.name) + "</span> " +
+        '<span class="chip ' + (K.chip || "") + '">' + h(K.label) + "</span>" +
+        (bits.length ? '<div style="margin-top:4px;font-size:12.5px;color:var(--muted)">' + bits.join(" ・ ") + "</div>" : "") +
+        (d.plan ? '<div class="today-plan" style="margin-top:4px">' + h(d.plan) + "</div>" : "") +
+        (d.done ? '<div class="done-body" style="margin-top:4px">✓ ' + h(d.done) + "</div>" : "") +
+        (d.note ? '<div style="margin-top:3px;font-size:12px;color:var(--muted)">' + h(d.note) + "</div>" : "") +
+        (d.url ? '<div class="note-link" style="margin-top:3px">' + linkify(d.url) + "</div>" : "") +
+      "</span>" +
+      '<button class="btn sm" data-act="edit-day" data-id="' + h(m.id) + '" data-date="' + date + '">編集</button></div>';
+  }).join("");
+  showModal(date.replace(/-/g, "/") + "（" + w + "）",
+    (nt.length ? '<div class="panel" style="margin-bottom:12px"><div class="rows" style="border-top:0">' +
+      nt.map(function(x){ return noticeRow(x); }).join("") + "</div></div>" : "") +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (S.members.length ? rows : '<div class="empty">メンバーがいません</div>') + "</div></div>",
+    '<button class="btn" data-act="close-modal">閉じる</button>');
 }
 function modalDay(memberId, date){
   const m = member(memberId) || {}, d = dayOf(memberId, date) || {};
@@ -2541,7 +2681,7 @@ async function saveShopFromModal(id){
 /* ============================ events ============================ */
 document.addEventListener("click", async function(ev){
   const tabBtn = ev.target.closest("[data-tab]");
-  if (tabBtn){ S.tab = tabBtn.dataset.tab; ls("prime.tab", S.tab); render(); return; }
+  if (tabBtn){ S.tab = tabBtn.dataset.tab; ls("prime.tab", S.tab); closeModal(); render(); return; }
   const sTabBtn = ev.target.closest("[data-stab]");
   if (sTabBtn){ S.siteTab = sTabBtn.dataset.stab; ls("prime.siteTab", S.siteTab); render(); return; }
   const btn = ev.target.closest("[data-act]");
@@ -2572,6 +2712,7 @@ document.addEventListener("click", async function(ev){
         else shiftMonth(Number(btn.dataset.delta));
         break;
 
+      case "open-day": modalDayAll(btn.dataset.date); break;
       case "edit-day": modalDay(id, btn.dataset.date); break;
       case "save-day":
         await saveDay(id, btn.dataset.date, { kind: valOf("d_kind"), plan: valOf("d_plan"),
@@ -2600,6 +2741,12 @@ document.addEventListener("click", async function(ev){
         break;
       }
       case "font-size": setFontSize(btn.dataset.v); break;
+      case "more-tabs": modalMoreTabs(); break;
+      case "tab-up": moveTab(id, -1); break;
+      case "tab-down": moveTab(id, 1); break;
+      case "tab-on": showTab(id); break;
+      case "tab-off": hideTab(id); break;
+      case "tab-reset": resetTabBar(); break;
       case "push-on": await pushTurnOn(); break;
       case "push-off": await pushTurnOff(); break;
       case "new-device": {

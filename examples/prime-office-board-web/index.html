@@ -234,6 +234,60 @@ label.f{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(
 .fields.two{grid-template-columns:1fr 1fr}
 @media (max-width:560px){ .fields.two{grid-template-columns:1fr} }
 
+/* 月カレンダー（予定タブ）。1ヶ月を横スクロールなしで1画面に出す。 */
+.mcal{
+  width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
+}
+.mcal th{
+  background:var(--surface-2); font-size:11px; font-weight:700; color:var(--muted);
+  padding:6px 0; border-bottom:1px solid var(--line);
+}
+.mcal th.sat{color:var(--cool)}
+.mcal th.sun{color:var(--bad)}
+.mcal td.mc{
+  vertical-align:top; padding:0; height:94px;
+  border-bottom:1px solid var(--line); border-right:1px solid var(--line);
+}
+.mcal tr td.mc:last-child{border-right:0}
+.mcal tr:last-child td.mc{border-bottom:0}
+.mcal td.mc.pad{background:var(--surface-2)}
+.mc-in{
+  width:100%; height:100%; border:0; background:none; cursor:pointer;
+  display:flex; flex-direction:column; align-items:stretch; gap:2px;
+  padding:4px 5px; text-align:left; font:inherit; overflow:hidden;
+}
+.mc-in:hover{background:var(--surface-2)}
+.mc-d{font-family:var(--mono); font-size:12px; font-weight:700; color:var(--muted); line-height:1.5}
+.mc.sun .mc-d{color:var(--bad)}
+.mc.sat .mc-d{color:var(--cool)}
+.mc.today .mc-d{
+  background:var(--brass); color:#fff; border-radius:999px;
+  width:20px; height:20px; display:grid; place-items:center; line-height:1;
+}
+.mc-nt{
+  display:block; font-size:10.5px; line-height:1.5; border-radius:3px; padding:0 4px;
+  background:var(--surface-2); color:var(--ink-2);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.mc-nt.meet{background:var(--cool-soft); color:var(--ink)}
+.mc-who{
+  display:flex; align-items:center; gap:3px; font-size:11px; line-height:1.6;
+  border-radius:3px; padding:0 3px; min-width:0;
+}
+.mc-who .pip{flex:none}
+.mc-nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+.mc-ab{display:none; flex:none; font-weight:700}
+.month-nav{margin-left:auto}
+.btn .t-sm{display:none}
+.mc-k{font-weight:700; flex:none; font-size:10px}
+.mc-who .m{width:5px; height:5px; border-radius:50%; flex:none}
+.mc-who.k-office{background:var(--brass-soft)}
+.mc-who.k-home{background:var(--cool-soft)}
+.mc-who.k-out{background:var(--warn-soft)}
+.mc-who.k-off{background:var(--bad-soft)}
+.mc-who.k-both{background:linear-gradient(112deg, var(--brass-soft) 0 50%, var(--cool-soft) 50% 100%)}
+
 /* calendar */
 .cal-scroll{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); background:var(--surface)}
 table.cal{border-collapse:separate; border-spacing:0; font-size:12px; min-width:100%}
@@ -512,16 +566,30 @@ tr.paid td:not(.acts){opacity:.55}
   .themebtn{width:29px; height:29px; font-size:13px}
   .stale-bar, #bannerBox .banner{font-size:calc(15px * var(--fs))}
   .tiles > .tile:last-child:nth-child(odd){grid-column:1 / -1}
+  /* 下のメニューのぶん、中身の下に余白をとる。最後の行が帯に隠れないように。
+     置き場所は body。main には .wrap の padding 一括指定（クラスのほうが強い）が
+     かかっていて下の余白が効かず、さらに #view は zoom の内側なので、
+     そこに書くと帯の高さと目盛りが合わない。 */
+  body{padding-bottom:calc(46px + env(safe-area-inset-bottom))}
   main{padding:14px 0 40px}
   .sec{margin-bottom:20px}
 
-  /* タブは PC と同じく上に置く。下固定だと、押した指で中身が隠れるうえ、
-     画面ごとに場所が変わって覚え直しになる。 */
-  .tabs-in{padding:0; gap:0}
-  .tab{
-    flex:1 1 0; padding:8px 2px 7px; font-size:calc(12.2px * var(--fs)); letter-spacing:-.02em;
-    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
+  /* スマホではタブを画面の下に固定する。片手で持ったときに親指が届くのは下で、
+     指を伸ばして画面上部を押させると、そのたびに持ち替えになる。 */
+  .tabs{
+    position:fixed; top:auto; left:0; right:0; bottom:0; z-index:40;
+    border-bottom:0; border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom);
+    box-shadow:0 -2px 10px rgba(20,16,22,.06);
   }
+  .tabs-in{padding:0; gap:0; overflow-x:visible}
+  .tab{
+    flex:1 1 0; padding:9px 2px; font-size:calc(12.2px * var(--fs)); letter-spacing:-.02em;
+    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
+    /* 選んでいる印は下端ではなく上端に。下端は画面の縁と重なって見えない。 */
+    border-bottom:0; border-top:2px solid transparent;
+  }
+  .tab[aria-selected="true"]{border-bottom-color:transparent; border-top-color:var(--brass); background:var(--brass-soft)}
   .tab .t-lg{display:none}
   .tab .t-sm{display:inline}
   /* 件数は文字の幅を食わない場所に。並べて置くと「タスク」が切れる */
@@ -585,6 +653,22 @@ tr.paid td:not(.acts){opacity:.55}
   .tick{width:26px; height:26px}
   .cell{height:48px}
   table.cal thead th{min-width:38px}
+  .mcal th{font-size:10px; padding:5px 0}
+  .mcal td.mc{height:70px}
+  .mc-in{padding:3px 2px; gap:1px}
+  .mc-d{font-size:11px}
+  .mc.today .mc-d{width:17px; height:17px}
+  .mc-nm{display:none}
+  .mc-ab{display:inline}
+  .mc-who{font-size:10px; gap:2px; padding:0 2px; line-height:1.55}
+  .mc-k{font-size:9.5px}
+  .mc-nt{font-size:9px; padding:0 2px}
+  /* 月送りは見出しと同じ行に納める。3つを横いっぱいに広げると、
+     カレンダー本体が1画面に収まらなくなる。 */
+  .sec-head .btn-row.month-nav{flex:0 1 auto; margin-left:auto}
+  .sec-head .btn-row.month-nav .btn{flex:0 0 auto}
+  .btn .t-lg{display:none}
+  .btn .t-sm{display:inline}
   .lockbox{padding:22px 16px}
   .gate-card{padding:22px 18px}
 }
