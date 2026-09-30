@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="description" content="メンズエステプライムグループ スタッフ用 共有ボード">
 <meta name="robots" content="noindex, nofollow">
@@ -566,11 +566,19 @@ tr.paid td:not(.acts){opacity:.55}
   .themebtn{width:29px; height:29px; font-size:13px}
   .stale-bar, #bannerBox .banner{font-size:calc(15px * var(--fs))}
   .tiles > .tile:last-child:nth-child(odd){grid-column:1 / -1}
-  /* 下のメニューのぶん、中身の下に余白をとる。最後の行が帯に隠れないように。
+  /* 帯そのものの高さ。指で押せる大きさ（46px前後）を下回らせない。 */
+  :root{--bar:48px}
+  /* 画面のいちばん下は、機種によって OS のジェスチャーバーやブラウザの下ツールバーが
+     重なる。viewport-fit=cover を外してあるので、ブラウザは最初からそこを避けた
+     範囲を画面として渡してくる。そのうえで最低 12px は必ず空ける——Android の
+     Chrome は env(safe-area-inset-bottom) を 0 で返すので、env() だけに任せると
+     帯が画面のいちばん端に貼り付いて、押しにくく見えなくなる。
+
+     下のメニューのぶん、中身の下に余白をとる。最後の行が帯に隠れないように。
      置き場所は body。main には .wrap の padding 一括指定（クラスのほうが強い）が
      かかっていて下の余白が効かず、さらに #view は zoom の内側なので、
      そこに書くと帯の高さと目盛りが合わない。 */
-  body{padding-bottom:calc(46px + env(safe-area-inset-bottom))}
+  body{padding-bottom:calc(var(--bar) + 14px + max(12px, env(safe-area-inset-bottom)))}
   main{padding:14px 0 40px}
   .sec{margin-bottom:20px}
 
@@ -579,13 +587,15 @@ tr.paid td:not(.acts){opacity:.55}
   .tabs{
     position:fixed; top:auto; left:0; right:0; bottom:0; z-index:40;
     border-bottom:0; border-top:1px solid var(--line);
-    padding-bottom:env(safe-area-inset-bottom);
+    padding-bottom:max(12px, env(safe-area-inset-bottom));
     box-shadow:0 -2px 10px rgba(20,16,22,.06);
   }
   .tabs-in{padding:0; gap:0; overflow-x:visible}
   .tab{
-    flex:1 1 0; padding:9px 2px; font-size:calc(12.2px * var(--fs)); letter-spacing:-.02em;
-    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.5;
+    flex:1 1 0; min-height:var(--bar); padding:6px 2px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:calc(12.2px * var(--fs)); letter-spacing:-.02em;
+    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.4;
     /* 選んでいる印は下端ではなく上端に。下端は画面の縁と重なって見えない。 */
     border-bottom:0; border-top:2px solid transparent;
   }
