@@ -111,16 +111,35 @@ select jsonb_pretty(jsonb_build_object(
                  false, true, '')))[1]::text::jsonb as rows
         from information_schema.tables t
        where t.table_schema = 'public' and t.table_type = 'BASE TABLE'
+         -- push_config には通知の秘密鍵と合言葉が入っている。復元のときは
+         -- 新しいプロジェクトの鍵をそのまま使うので、控えに入れない。
+         -- push_subs は端末ごとの通知の宛先で、復元しても使えない。
+         and t.table_name not in ('push_config', 'push_subs')
     ) s
   )
 ))::text as backup;
 ```
 
-PRIME で実行した結果：23テーブル、約8万文字。このくらいの規模なら
+PRIME で実行した結果：21テーブル、約10万文字（約100KB）。このくらいの規模なら
 1回のクエリで収まる。行数が万単位になったら手順A に切り替える。
 
 **この JSON には4桁の暗証番号と媒体のパスワードがそのまま入っている。**
-置き場所に注意すること（下の5）。
+置き場所に注意すること（下の5）。通知の秘密鍵だけは上のとおり除いてある。
+
+### 結果が長すぎて表示できないとき
+
+ツールやエディタが「長すぎる」と言って結果をファイルに退避した場合は、
+そのファイルから取り出す。Supabase の MCP 経由だと起きる（10万文字を超える）。
+
+```python
+import io, json, re
+outer = json.load(io.open("<退避されたファイル>", encoding="utf-8"))
+m = re.search(r"<untrusted-data-[0-9a-f-]+>\s*(\[.*\])\s*</untrusted-data-[0-9a-f-]+>",
+              outer["result"], re.S)
+backup = json.loads(json.loads(m.group(1))[0]["backup"])
+io.open("board-YYYYMMDD.json", "w", encoding="utf-8").write(
+    json.dumps(backup, ensure_ascii=False, indent=1))
+```
 
 ### 書き出せたかの確認
 
@@ -159,8 +178,9 @@ union all select 'punches', count(*) from public.punches;
 
    先に `schedule` を入れると `member_id` が無くて弾かれる。
 
-4. `board_settings` と `push_config` は入れ直さない。
-   新しいプロジェクトの値（招待コード、通知の鍵）をそのまま使う
+4. `board_settings` は入れ直さない（新しいプロジェクトの招待コードをそのまま使う）。
+   `push_config` と `push_subs` はそもそも控えに入っていない。
+   通知の鍵は新しいプロジェクトが自分で作り、端末の通知は各自が入れ直す
 5. [SETUP.md](SETUP.md) の「渡す前に必ず確認すること」を上から確認する
 
 **この手順は、まだ実際に通していない。** 書き出しは試したが、
@@ -190,3 +210,9 @@ union all select 'punches', count(*) from public.punches;
 | 試した日 | 使った控え | 結果 | 気づいたこと |
 |----------|-----------|------|-------------|
 |          |           |      |             |
+
+## 取った控え
+
+| 日 | テーブル | 大きさ | 取り方 |
+|----|---------|-------|-------|
+| 2026-10-01 | 21 | 約100KB | 手順B（SQL エディタ） |
