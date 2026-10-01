@@ -20,6 +20,17 @@ if (!SUPABASE_URL || !SUPABASE_KEY){
     "設置した人に連絡してください。</p></div></div>";
   return;
 }
+// 画面の上に出る名前は config.js から入れる。index.html に直書きすると、
+// 1社ぶん直したつもりが全社共通のファイルに入ってしまう。
+// <title> と apple-mobile-web-app-title は JS より先に読まれるので index.html 側に残る。
+(function(){
+  const mark = document.getElementById("brandMark");
+  const sub = document.getElementById("brandSub");
+  if (mark) mark.textContent = BRAND;
+  if (sub) sub.textContent = BRAND_SUB;
+  document.title = BRAND + " " + BRAND_SUB;
+})();
+
 if (!window.supabase || !window.supabase.createClient){
   // The Supabase client is loaded from a CDN; without it the page can do nothing,
   // so say so rather than leaving a blank screen.
@@ -2535,7 +2546,7 @@ function modalVault(v){
     '<label class="f">媒体名<input type="text" id="v_media" maxlength="40" value="' + h(v.media || "") + '" placeholder="例：シティヘブンネット"></label>' +
     '<div class="presets">' + MEDIA_PRESETS.map(x => '<button type="button" class="preset" data-act="preset" data-v="' + h(x) + '">' + h(x) + "</button>").join("") + "</div>" +
     '<div class="fields two">' +
-      '<label class="f">店舗<input type="text" id="v_shop" list="dl_shop" maxlength="40" value="' + h(v.shop || "") + '" placeholder="例：プライム　ロイヤル"></label>' +
+      '<label class="f">店舗<input type="text" id="v_shop" list="dl_shop" maxlength="40" value="' + h(v.shop || "") + '" placeholder="例：本店　2号店"></label>' +
       '<label class="f">キャスト<input type="text" id="v_cast" list="dl_cast" maxlength="40" value="' + h(v.cast_name || "") + '" placeholder="個人のアカウントなら名前"></label></div>' +
     '<datalist id="dl_shop">' + vaultSuggest("shop", S.shops.map(function(x){ return x.name; })) + "</datalist>" +
     '<datalist id="dl_cast">' + vaultSuggest("cast_name", []) + "</datalist>" +

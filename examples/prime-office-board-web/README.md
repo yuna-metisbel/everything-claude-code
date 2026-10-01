@@ -25,15 +25,25 @@ Yarn 1.22 では失敗する。このアプリはビルド不要なので、サ�
 
 ビルド不要の静的サイト。
 
-| ファイル                | 役割                                            |
-|-------------------------|-------------------------------------------------|
-| `index.html`            | 全画面ぶんの CSS とマークアップの器             |
-| `app.js`                | 状態管理・Supabase アクセス・描画・イベント処理 |
-| `sw.js`                 | 通知の受け口（service worker）                  |
-| `manifest.webmanifest`  | ホーム画面に追加したときの見た目と名前          |
-| `icon-192.png` / `-512` | ホーム画面と通知に出るアイコン                  |
+| ファイル                | 役割                                            | 会社ごと |
+|-------------------------|-------------------------------------------------|----------|
+| `config.js`             | 接続先（Supabase の URL とキー）と表示名        | **差し替える** |
+| `index.html`            | 全画面ぶんの CSS とマークアップの器             | 先頭2行だけ |
+| `manifest.webmanifest`  | ホーム画面に追加したときの見た目と名前          | 名前だけ |
+| `icon-192.png` / `-512` | ホーム画面と通知に出るアイコン                  | 任意 |
+| `app.js`                | 状態管理・Supabase アクセス・描画・イベント処理 | 共通 |
+| `sw.js`                 | 通知の受け口（service worker）                  | 共通 |
 
 `supabase-js` は CDN から読み込む。ほかに依存ライブラリはない。
+
+`app.js` と `sw.js` には社名が入っていない。画面の上に出る名前とブラウザのタブは
+`config.js` の `brand` / `brandSub` から入る。`<title>`、
+`apple-mobile-web-app-title`、`manifest.webmanifest` の `name` だけは JS より
+先に読まれる（または別に取得される）ので手で直す。新しい会社ぶんの手順は
+[../prime-office-board-supabase/SETUP.md](../prime-office-board-supabase/SETUP.md)。
+
+`config.js` が無い・空のときは、白い画面ではなく「設定がありません」と出して、
+設置した人に連絡するよう促す。
 
 サーバー側（スタッフのログインを処理する Edge Function とスキーマの経緯）は
 `../prime-office-board-supabase/` にある。Render が publish するのはこのディレクトリ
