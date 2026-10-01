@@ -1,9 +1,25 @@
-/* PRIME 事務所ボード — staff shared board (Supabase build) */
+/* 事務所ボード — staff shared board (Supabase build)
+   会社ごとに変わるもの（接続先・表示名）は config.js に置く。 */
 (function(){
 "use strict";
 
-const SUPABASE_URL = "https://ixsycdkazorljshjejcz.supabase.co";
-const SUPABASE_KEY = "sb_publishable_GwiqO3s7SeG6MkmRa5bI0A_-kX7twCN";
+// 接続先と会社名は config.js に置く。導入ごとに差し替えるのはあちらだけで、
+// このファイルは全社共通のまま保つ（1社に直したつもりが全社に及ぶ、を防ぐ）。
+const CONFIG = window.BOARD_CONFIG || {};
+const SUPABASE_URL = CONFIG.supabaseUrl || "";
+const SUPABASE_KEY = CONFIG.supabaseKey || "";
+const BRAND = CONFIG.brand || "BOARD";
+const BRAND_SUB = CONFIG.brandSub || "事務所ボード";
+if (!SUPABASE_URL || !SUPABASE_KEY){
+  // 設置のときに config.js を置き忘れると、ここで止まる。
+  // 白い画面のまま原因が分からない、が一番困るので名指しで出す。
+  document.getElementById("view").innerHTML =
+    '<div class="gate"><div class="gate-card">' +
+    "<h1>設定がありません</h1>" +
+    '<p class="lead">config.js に接続先が書かれていません。<br>' +
+    "設置した人に連絡してください。</p></div></div>";
+  return;
+}
 if (!window.supabase || !window.supabase.createClient){
   // The Supabase client is loaded from a CDN; without it the page can do nothing,
   // so say so rather than leaving a blank screen.
@@ -682,7 +698,7 @@ function render(){
 function renderStaffBar(){
   const t = curSite() || {};
   el("bannerBox").innerHTML =
-    '<div class="wrap staff-bar"><span class="mark">PRIME</span>' +
+    '<div class="wrap staff-bar"><span class="mark">' + h(BRAND) + "</span>" +
     '<span class="staff-site">' + h(t.name || "") + "</span>" +
     '<span class="spacer" style="flex:1"></span>' +
     '<button class="staff-me" data-act="my-pin">' + h(S.staffMe ? S.staffMe.name : "") +
@@ -786,7 +802,7 @@ function renderHere(){
 function viewAuth(){
   const up = S.authMode === "up";
   return '<div class="gate"><div class="gate-card">' +
-    '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">事務所ボード</span></div>' +
+    '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span><span class="sub">' + h(BRAND_SUB) + "</span></div>" +
     "<h1>" + (up ? "アカウントを作る" : "ログイン") + "</h1>" +
     '<p class="lead">' + (up
       ? (S.mode === "code"
@@ -1534,7 +1550,7 @@ function viewSiteGate(){
   const g = S.gate;
   if (!g){
     return '<div class="gate"><div class="gate-card">' +
-      '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">スタッフ</span></div>' +
+      '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span><span class="sub">スタッフ</span></div>' +
       "<h1>入り口が見つかりません</h1>" +
       '<p class="lead">URL が違うか、この入り口はいま停止中です。<br>本部に確認してください。</p>' +
       "</div></div>";
@@ -1545,7 +1561,7 @@ function viewSiteGate(){
   // 名簿が空のうちは、いきなり登録の画面から始める。
   const showUp = canSignUp && (up || !list.length);
   return '<div class="gate"><div class="gate-card">' +
-    '<div class="brand" style="display:flex"><span class="mark">PRIME</span><span class="sub">' + h(g.name) + "</span></div>" +
+    '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span><span class="sub">' + h(g.name) + "</span></div>" +
     "<h1>" + h(g.name) + " スタッフ</h1>" +
     (showUp
       ? '<p class="lead">名前と、自分で決めた暗証番号（4桁）を登録してください。<br>' +
@@ -3038,7 +3054,7 @@ document.addEventListener("click", async function(ev){
         S.mode = btn.dataset.v;
         break;
       case "new-code": {
-        const code = "PRIME-" + String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+        const code = BRAND + "-" + String(Math.floor(Math.random() * 10000)).padStart(4, "0");
         await run(sb.from("board_settings").update({ invite_code: code, updated_at: nowIso() }).eq("id", 1), "新しいコードにしました");
         break;
       }

@@ -65,9 +65,26 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 または MCP の `deploy_edge_function` から。`verify_jwt` は有効のままでよい
 （ブラウザは publishable キーを Authorization ヘッダーに載せて呼ぶ）。
 
+## 新しい会社ぶんを用意する
+
+手順は [SETUP.md](SETUP.md)。1社＝1 Supabase プロジェクトで、会社どうしのデータは
+物理的に別に置く。このスキーマには**会社を区別する列が無い**ので、1つのプロジェクトを
+2社で共用してはいけない——入れた瞬間に互いのパスワードと暗証番号が見える。
+
 ## スキーマ
 
-マイグレーションは Supabase プロジェクト側に記録されている。拠点まわり以降に
+マイグレーションは `migrations/` にファイルとして置いてある（本番に記録されている
+SQL をそのまま書き出したもので、34本のうち33本は md5 まで一致している）。新しい
+会社ぶんは、これをファイル名の順に流せば作れる。以前はプロジェクトの中にしか無く、
+**2社目を作る手段も復旧の手段も無かった**。
+
+残る1本 `20260913174403_push_triggers_and_digest.sql` だけは本番と差分がある。
+この時点の `push_send` は送り先の URL と publishable キーを直書きしていたので、
+他社に渡すファイルに弊社の接続先が残らないよう、その2つの文字列を空にしてある
+（ファイル冒頭にも同じ断り書きがある）。この関数は最後の
+`20260930210858_push_send_portable_endpoint.sql` で丸ごと差し替わるため、
+上から順に全部流せば最終的な中身は本番と同じになる。
+
 入れたものは次のとおり。
 
 | バージョン     | 名前                              | 内容                                                                             |
@@ -93,6 +110,7 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 | 20260913174139 | `enable_pg_net_and_cron`          | DB から HTTP を投げる `pg_net` と、時刻で動かす `pg_cron`                        |
 | 20260913174159 | `push_send_secret`                | DB から送信を頼むときの合言葉を `push_config` に置く                             |
 | 20260913174403 | `push_triggers_and_digest`        | 会議・決まったこと・毎朝8時の「今日のこと」を送るトリガと関数                    |
+| 20260930210858 | `push_send_portable_endpoint`     | 通知の宛先（URL・キー）を `push_config` に出し、直書きをやめる                   |
 
 `staff_pin_hash_column_grants` は落とし穴の修正。Supabase は `public` の全テーブルに
 表単位の権限を配るので、表単位の権限をいったん剥がしてから見せてよい列だけを
