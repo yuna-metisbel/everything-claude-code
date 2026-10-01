@@ -176,6 +176,8 @@ const S = {
   theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
   barSize: ls("prime.barsize") || "m", tabBar: [],
   settings: null, form: {}, mode: "",
+  // 個人情報の取り扱い。登録する前に読めないと意味がないので、ログイン前も持つ。
+  privacy: "",
   taskFilter: "all", payFilter: "unpaid", payMonth: today().slice(0, 7), reveal: {}, draftColor: PALETTE[0],
   vaultGroup: ls("prime.vaultGroup") || "media", vaultQ: "",
   shopKind: ls("prime.shopKind") || "shop",
@@ -482,10 +484,32 @@ async function boot(){
   // 端末側の状態を見てから設定画面の表示を合わせる。
   pushRegister().then(function(){ if (S.screen === "app") render(); });
 }
+// 本文だけを開けた関数から読む。board_settings そのものは本部のみ（招待コードが同じ行にある）。
+async function loadPrivacy(){
+  if (S.privacy) return;
+  const r = await sb.rpc("privacy_text");
+  if (r && !r.error && typeof r.data === "string") S.privacy = r.data;
+}
+// ログイン前は rpc で読んだもの、本部は board_settings から来たものを使う。
+function privacyText(){
+  return ((S.settings && S.settings.privacy_text) || S.privacy || "").trim();
+}
+function privacyLink(){
+  if (!privacyText()) return "";
+  return '<p class="swap" style="margin-top:12px">' +
+    '<button data-act="privacy">個人情報の取り扱い</button></p>';
+}
+function modalPrivacy(){
+  showModal("個人情報の取り扱い",
+    '<div style="white-space:pre-wrap;line-height:1.85;font-size:13px">' +
+      linkify(privacyText()) + "</div>",
+    '<button class="btn" data-act="close-modal">閉じる</button>');
+}
 async function refresh(){
   if (S.user) S.form = {};
   if (!S.user){
     // 入り口コード付きの URL はスタッフ用。素の URL は本部のログイン。
+    await loadPrivacy();
     if (S.siteCode){ await loadGate(S.siteCode); S.screen = "sitegate"; S.ready = true; render(); return; }
     if (!S.mode){
       const r = await sb.rpc("signup_mode");
@@ -830,6 +854,7 @@ function viewAuth(){
       (S.busy ? "処理中…" : up ? "登録する" : "ログイン") + "</button>" +
     '<p class="swap">' + (up ? "すでにアカウントがある方は " : "はじめての方は ") +
       '<button data-act="authmode" data-v="' + (up ? "in" : "up") + '">' + (up ? "ログイン" : "アカウント作成") + "</button></p>" +
+    privacyLink() +
     "</div></div>";
 }
 function viewProfile(){
@@ -1591,6 +1616,7 @@ function viewSiteGate(){
           (S.busy ? "登録中…" : "登録して入る") + "</button>" +
         '<p style="font-size:11.5px;color:var(--muted);line-height:1.7;margin-top:10px">' +
           "暗証番号は本部が確認できます。他のサービスで使っているものは避けてください。</p>" +
+        privacyLink() +
         (list.length
           ? '<p class="swap">登録済みの方は <button data-act="gate-mode" data-v="in">ログイン</button></p>'
           : "")
@@ -2263,6 +2289,23 @@ function viewSettings(){
       '<div class="row" style="align-items:center"><span style="flex:1">ログアウト</span>' +
       '<button class="btn sm" data-act="signout">ログアウト</button></div>' +
     "</div></div></section>" +
+
+    '<section class="sec"><div class="sec-head"><h2>個人情報の取り扱い</h2>' +
+      '<span class="hint">ここに文章を入れると、登録する前の画面からスタッフが読めます。' +
+      '氏名・電話番号・緊急連絡先・暗証番号を預かるので、渡す前に入れてください。</span></div>' +
+    '<div class="panel"><div style="padding:14px">' +
+      (privacyText()
+        ? '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px">' +
+            "いまの文章はスタッフも読めます。" +
+            '<button class="btn sm ghost" data-act="privacy">読む</button></p>'
+        : '<p class="err" style="margin:0 0 10px">まだ入っていません。' +
+            "いまはスタッフに何も見えていません。</p>") +
+      '<textarea id="set_privacy" rows="8" style="width:100%;font-size:13px;line-height:1.7" ' +
+        'placeholder="PRIVACY.md のひな形を貼って、〈 〉を自分の会社のものに書き換えてください。">' +
+        h(privacyText()) + "</textarea>" +
+      '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' +
+        '<button class="btn primary" data-act="save-privacy">保存</button>' +
+      "</div></div></div></section>" +
 
     '<section class="sec"><div class="sec-head"><h2>データの扱い</h2></div>' +
     '<div class="note">予定・タスク・支払い・店舗・ID /パスは、ログインしたスタッフ全員が読み書きできます。<br>' +
@@ -3074,6 +3117,15 @@ document.addEventListener("click", async function(ev){
       case "save-recruit":
         await run(sb.from("board_settings").update({ recruit_url: valOf("set_recruit"), updated_at: nowIso() }).eq("id", 1), "保存しました");
         break;
+      case "privacy": modalPrivacy(); return;
+      case "save-privacy": {
+        // 空にするのは「スタッフから見えなくする」操作なので、取り消しが効かない旨を出す。
+        const txt = valOf("set_privacy").trim();
+        if (!txt && !confirm("空にすると、スタッフから読めなくなります。よろしいですか？")) return;
+        await run(sb.from("board_settings").update({ privacy_text: txt, updated_at: nowIso() }).eq("id", 1), "保存しました");
+        S.privacy = txt;
+        break;
+      }
       case "new-notice": modalNotice(null); break;
       case "edit-notice": modalNotice(S.notices.find(x => x.id === id)); break;
       case "save-notice": await saveNoticeFromModal(id); break;
