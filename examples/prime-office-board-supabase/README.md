@@ -86,6 +86,7 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 | [BACKUP.md](BACKUP.md) | 控えの取り方と戻し方。**Free には戻せる控えが無い** | 設置する人・運用する人 |
 | [PRIVACY.md](PRIVACY.md) | 個人情報の取り扱いのひな形 | 導入先が自社の文書として出す |
 | [TERMS.md](TERMS.md) | 利用規約のひな形（提供する側と使う側） | 提供する側が埋める |
+| [SUPPORT.md](SUPPORT.md) | 不具合をどこで受けて、どう切り分けるか | 提供する側・導入先の両方 |
 
 PRIVACY.md と TERMS.md は〈 〉を埋めるひな形。会社名・住所・窓口・保存する期間は
 導入先しか決められないので、こちらで埋めない。どちらも法律家が書いたものではないので、

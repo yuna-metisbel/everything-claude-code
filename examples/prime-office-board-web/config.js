@@ -10,5 +10,9 @@ window.BOARD_CONFIG = {
   supabaseKey: "sb_publishable_GwiqO3s7SeG6MkmRa5bI0A_-kX7twCN",
   // 画面の左上とブラウザのタブに出る名前。
   brand: "PRIME",
-  brandSub: "事務所ボード"
+  brandSub: "事務所ボード",
+  // 困ったときの連絡先。設定タブと、画面が出ないときのエラー表示に出る。
+  // 空にすると何も出さない（嘘の窓口を出すより、出さないほうがまし）。
+  // 例: "ゆうな / LINE: @xxxx / support@example.com"
+  support: ""
 };

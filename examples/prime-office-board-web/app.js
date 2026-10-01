@@ -10,6 +10,20 @@ const SUPABASE_URL = CONFIG.supabaseUrl || "";
 const SUPABASE_KEY = CONFIG.supabaseKey || "";
 const BRAND = CONFIG.brand || "BOARD";
 const BRAND_SUB = CONFIG.brandSub || "事務所ボード";
+// 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
+// （嘘の窓口を出すより、出さないほうがまし）。
+const SUPPORT = String(CONFIG.support || "").trim();
+// このブロックは h() より前に動くので、最低限のエスケープを自分で持つ。
+function esc1(t){
+  return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+// 連絡先の1行。読む人が「どこに言えばいいのか」だけ分かればよい。
+function supportLine(){
+  if (!SUPPORT) return "";
+  return '<p class="lead" style="margin-top:12px;font-size:12.5px">' +
+    "うまくいかないときの連絡先：<br>" + esc1(SUPPORT) + "</p>";
+}
 if (!SUPABASE_URL || !SUPABASE_KEY){
   // 設置のときに config.js を置き忘れると、ここで止まる。
   // 白い画面のまま原因が分からない、が一番困るので名指しで出す。
@@ -17,7 +31,7 @@ if (!SUPABASE_URL || !SUPABASE_KEY){
     '<div class="gate"><div class="gate-card">' +
     "<h1>設定がありません</h1>" +
     '<p class="lead">config.js に接続先が書かれていません。<br>' +
-    "設置した人に連絡してください。</p></div></div>";
+    "設置した人に連絡してください。</p>" + supportLine() + "</div></div>";
   return;
 }
 // 画面の上に出る名前は config.js から入れる。index.html に直書きすると、
@@ -40,6 +54,7 @@ if (!window.supabase || !window.supabase.createClient){
     '<p class="lead">通信環境の影響で、必要なファイルを取得できませんでした。<br>' +
     '電波の良い場所でページを再読み込みしてください。</p>' +
     '<button class="btn primary" style="width:100%" onclick="location.reload()">再読み込み</button>' +
+    supportLine() +
     "</div></div>";
   return;
 }
@@ -2289,6 +2304,13 @@ function viewSettings(){
       '<div class="row" style="align-items:center"><span style="flex:1">ログアウト</span>' +
       '<button class="btn sm" data-act="signout">ログアウト</button></div>' +
     "</div></div></section>" +
+
+    (SUPPORT
+      ? '<section class="sec"><div class="sec-head"><h2>困ったとき</h2>' +
+          '<span class="hint">直らない不具合や、消してしまったものがあるときの連絡先です。</span></div>' +
+        '<div class="panel"><div style="padding:14px;font-size:13px;line-height:1.8;white-space:pre-wrap">' +
+          linkify(SUPPORT) + "</div></div></section>"
+      : "") +
 
     '<section class="sec"><div class="sec-head"><h2>個人情報の取り扱い</h2>' +
       '<span class="hint">ここに文章を入れると、登録する前の画面からスタッフが読めます。' +

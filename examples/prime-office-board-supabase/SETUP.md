@@ -82,9 +82,13 @@ window.BOARD_CONFIG = {
   supabaseUrl: "https://<プロジェクトID>.supabase.co",
   supabaseKey: "<publishable（anon）キー>",
   brand: "<会社名>",
-  brandSub: "事務所ボード"
+  brandSub: "事務所ボード",
+  support: "<困ったときの連絡先>"
 };
 ```
+
+`support` は「設定」タブの**困ったとき**と、画面が出ないときのエラー表示に出る。
+空のままだと何も出ない。何を書くかは [SUPPORT.md](SUPPORT.md)。
 
 画面の上に出る名前と、ブラウザのタブの名前は、ここから自動で入る。
 ただし **JS より先に読まれる／別に取得される4か所**だけは手で直す。
