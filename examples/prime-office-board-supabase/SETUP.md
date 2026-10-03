@@ -4,6 +4,16 @@
 片方の設定を間違えても、もう片方には届かない。
 
 所要時間は 30 分ほど。**上から順に、飛ばさずに。**
+
+> **この手順は、まだ通しで1回も実行していない。** 新しいプロジェクトを立てて
+> 最後まで通した実績が無いので、どこかで詰まる可能性がある。
+> 詰まったら、その場所と内容をここに書き足すこと。
+>
+> 2026-10-03 時点で確かめてあるのは、35本を順に流したときの**最終状態**が
+> 本番と一致すること（テーブル23・ポリシー38は名前まで、関数20も名前まで一致）と、
+> 後ろで作るものを前で参照している箇所が無いこと。
+> 実際に空のデータベースへ流す検証は、Supabase の無料枠（1組織2プロジェクト）が
+> 埋まっていてできていない。
 順番に意味があるのは手順5（登録方法を閉める）と6（画面を置く）。
 逆にすると、URL を知った人が誰でも登録できる時間ができる。
 
@@ -23,15 +33,23 @@
 `migrations/` のファイルを **ファイル名の順に**、1本ずつ SQL Editor に貼って実行する。
 順番が命で、飛ばすと後ろが失敗する。
 
-34本ぜんぶ通ると、テーブル 23・ポリシー 38・関数 19 ができる。数が合わなければ止まっている。
+35本ぜんぶ通ると、テーブル 23・ポリシー 38・関数 20・トリガ 2 ができる。
+数が合わなければどこかで止まっている。
 
 13本目（`20260913174403_...`）の中の `push_send` は、送り先が空のままにしてある。
-最後の34本目で丸ごと差し替わり、宛先は次の手順で DB に入れるので、そのまま通してよい。
+34本目で丸ごと差し替わり、宛先は次の手順で DB に入れるので、そのまま通してよい。
 
 ```sql
--- 確認用
-select count(*) from information_schema.tables where table_schema = 'public';   -- 23
-select count(*) from pg_policies where schemaname = 'public';                   -- 38
+-- 確認用。4つとも合っていれば、35本が最後まで通っている。
+select
+  (select count(*) from information_schema.tables
+    where table_schema = 'public' and table_type = 'BASE TABLE')          as "テーブル（23）",
+  (select count(*) from pg_policies where schemaname = 'public')          as "ポリシー（38）",
+  (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public')                                           as "関数（20）",
+  (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid
+     join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and not t.tgisinternal)                    as "トリガ（2）";
 ```
 
 ## 3. Edge Function を2つ置く
