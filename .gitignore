@@ -97,3 +97,9 @@ ecc2/target/
 .opencode/package-lock.json
 .opencode/node_modules/
 assets/images/security/badrudi-exploit.mp4
+
+# Database exports (事務所ボードの控え)
+# 4桁の暗証番号と媒体のパスワードがそのまま入っている。絶対にコミットしない。
+board-*.json
+*-backup-*.json
+*.dump
