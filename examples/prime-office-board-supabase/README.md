@@ -78,6 +78,10 @@ Supabase ダッシュボード、CLI（`supabase functions deploy staff-login`�
 誰かがもう登録しているボードでは、何も変えずに止まる——別の会社のプロジェクトを
 開いたまま流してしまう事故を、これで止める。
 
+開発を引き継ぐ人は、先に
+[../prime-office-board-HANDOVER.md](../prime-office-board-HANDOVER.md) を読むこと。
+壊してはいけない決定、踏んだ落とし穴、残っている作業がまとまっている。
+
 ## 渡す前に読む書類
 
 | ファイル | 何のためのもの | 誰向け |

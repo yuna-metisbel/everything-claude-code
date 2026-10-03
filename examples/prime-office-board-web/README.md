@@ -21,6 +21,9 @@ Yarn 1.22 では失敗する。このアプリはビルド不要なので、サ�
 `SKIP_INSTALL_DEPS=true` を設定してインストール自体を飛ばしている。
 リポジトリのルートをこのディレクトリに変更できるなら、そちらのほうが素直。
 
+開発を引き継ぐ人は、先に
+[../prime-office-board-HANDOVER.md](../prime-office-board-HANDOVER.md) を読むこと。
+
 ## 構成
 
 ビルド不要の静的サイト。
