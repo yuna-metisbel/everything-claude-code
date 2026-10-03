@@ -5,15 +5,16 @@
 
 所要時間は 30 分ほど。**上から順に、飛ばさずに。**
 
-> **この手順は、まだ通しで1回も実行していない。** 新しいプロジェクトを立てて
-> 最後まで通した実績が無いので、どこかで詰まる可能性がある。
+> **通しの実績：2026-10-04、Free プラン、Tokyo (ap-northeast-1)、PostgreSQL 17。**
+> 空の新規プロジェクトに手順1〜7を上から通し、止まる所は無かった。
+> 確かめた範囲：35本がエラーなしで通り数が一致、Edge Function 2つが新しい形式の
+> publishable キーで動く、お知らせ1件で `push_log` に行ができる、最初の1人は
+> 招待コードなし・確認メールなしで入れる、2人目以降は正しい招待コードでだけ入れる、
+> 拠点の入り口からスタッフ登録→暗証番号ログイン→打刻、スタッフからは
+> `pin` 列・支払い・本部への昇格が拒否される、画面が `config.js` の社名で出る。
+> 手順書と違っていた所・書いていなかった所は、各手順の「通したときのメモ」に書いた。
 > 詰まったら、その場所と内容をここに書き足すこと。
->
-> 2026-10-03 時点で確かめてあるのは、35本を順に流したときの**最終状態**が
-> 本番と一致すること（テーブル23・ポリシー38は名前まで、関数20も名前まで一致）と、
-> 後ろで作るものを前で参照している箇所が無いこと。
-> 実際に空のデータベースへ流す検証は、Supabase の無料枠（1組織2プロジェクト）が
-> 埋まっていてできていない。
+
 順番に意味があるのは手順5（登録方法を閉める）と6（画面を置く）。
 逆にすると、URL を知った人が誰でも登録できる時間ができる。
 
@@ -25,8 +26,17 @@
 | 名前 | どこにある |
 |------|-----------|
 | Project URL | Settings → API |
-| publishable（anon）キー | Settings → API |
-| service_role キー | Settings → API。**これは誰にも渡さない** |
+| publishable キー（`sb_publishable_...`） | Settings → API Keys |
+| service_role キー | Settings → API Keys。**これは誰にも渡さない** |
+
+通したときのメモ：
+
+- publishable キーは**新しい形式（`sb_publishable_...`）を使う。** 手順3〜6の
+  どこでもこれで通る。旧形式の anon キー（`eyJ...` で始まる JWT）でも動くが、
+  2つを混ぜると見比べるときに取り違えるので、どちらか一方に揃える。
+- service_role キーは**この手順では1回も使わない**（Edge Function には Supabase が
+  自動で渡す）。控えなくてよい。控えるなら、リポジトリや会話には書かない。
+- 作成直後に SQL を流しても待たされなかった（Free・Tokyo、作成から1分以内）。
 
 ## 2. スキーマを入れる
 
@@ -52,10 +62,33 @@ select
     where n.nspname = 'public' and not t.tgisinternal)                    as "トリガ（2）";
 ```
 
+通したときのメモ：
+
+- 35本とも、追加の操作なしで通った。`pg_net` と `pg_cron` は31本目が自分で有効にする
+  （ダッシュボードの Extensions で先に入れておく必要は無い）。`pg_net` は
+  `extensions`、`pg_cron` は `pg_catalog` に入る。
+- 33本目の最後の `cron.schedule(...)` は、結果に `schedule = 1` のような**数字が1つ出る**。
+  これはジョブの番号で、エラーではない。
+- 32本目と `init-new-company.sql` の `gen_random_bytes` は、SQL Editor の既定の
+  `search_path`（`"$user", public, extensions`）で解決される。SQL Editor 以外の道具で
+  流して `function gen_random_bytes(integer) does not exist` が出たら、
+  先頭に `set search_path = public, extensions;` を足す。
+- この確認クエリとは別に、`select count(*) from cron.job;` が 1（朝のまとめ）になる。
+
 ## 3. Edge Function を2つ置く
 
 `functions/staff-login/` と `functions/push/` を、Supabase の Edge Functions に
 それぞれ同じ名前でデプロイする。`verify_jwt` は有効のままでよい。
+
+通したときのメモ：
+
+- `verify_jwt` を有効にしたまま、新しい形式の publishable キー（JWT ではない）で
+  両方とも呼べることを確かめた。無効にする必要は無い。
+- 置いた直後に `push` を一度呼ぶと（画面で通知をオンにしたときに呼ばれる）、
+  通知の鍵（VAPID）が自動で作られて `push_config` に入る。手で作らない。
+- CLI（`supabase functions deploy`）で置くときは、`supabase projects list` で
+  **この会社のプロジェクトが一覧に出るアカウントでログインしているか**を先に見る。
+  別の組織のアカウントのままだと、デプロイ先が見つからない。
 
 ## 4. 通知の宛先を設定する
 
@@ -65,11 +98,14 @@ select
 ```sql
 update public.push_config
    set function_url = 'https://<プロジェクトID>.supabase.co/functions/v1/push',
-       anon_key     = '<publishable（anon）キー>'
+       anon_key     = '<publishable キー（sb_publishable_...）>'
  where id = 1;
 ```
 
 `send_secret` はスキーマを入れた時点で自動生成済み。触らなくてよい。
+
+列の名前は `anon_key` だが、新しい形式の publishable キーを入れて通知が届くところ
+（お知らせ1件で `push_log` に行ができる）まで確かめてある。
 
 ## 5. 登録方法を閉める（画面を公開する前に）
 
@@ -98,7 +134,7 @@ update public.push_config
 ```js
 window.BOARD_CONFIG = {
   supabaseUrl: "https://<プロジェクトID>.supabase.co",
-  supabaseKey: "<publishable（anon）キー>",
+  supabaseKey: "<publishable キー（sb_publishable_...）>",
   brand: "<会社名>",
   brandSub: "事務所ボード",
   support: "<困ったときの連絡先>"
@@ -129,6 +165,17 @@ window.BOARD_CONFIG = {
 `members` が空のあいだは、**招待コードが無くても**登録した人が入れる。これは最初の管理者を
 作るための抜け道で、1人入った時点で閉じる。つまり**最初に URL を開いた人が管理者になる**ので、
 **先方の担当者に URL を渡し、目の前で登録してもらう**。
+
+通したときのメモ：
+
+- 最初の1人は、メールアドレスとパスワードを入れるだけで**確認メールなしに**すぐ入れた。
+  続けて名前を入れると管理者（`members` の1人目）になる。
+- 2人目以降は、正しい招待コードを入れれば同じく確認メールなしで入れる。
+- **招待コードを間違えると、画面に英語で
+  `Email address "（入れたアドレス）" is invalid` と出る。** アドレスが悪いのではなく、
+  コード違いで確認メールに回され、Supabase 標準のメール送信がそれを断った結果。
+  アカウントは作られない（`auth.users` に行は残らない）。先方には
+  「この英語が出たら招待コードを確かめて」と伝えておく。
 
 登録が済んだら、手順5のコードを渡して残りの人に登録してもらう。
 「設定」タブの**スタッフの登録方法**で、その会社の方針に合わせて変えられる。
