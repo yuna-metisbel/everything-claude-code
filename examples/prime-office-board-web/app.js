@@ -576,8 +576,17 @@ async function signUp(){
   });
   S.busy = false;
   if (error){
+    // 招待コードが違う（許可リストに無い）登録は確認メールに回され、Supabase 標準の
+    // メール送信がそれを断るので、英語の「Email address ... is invalid」や送信回数の
+    // 上限エラーとして返ってくる。アドレスの誤りに見えるが、実際はコード違い。
+    const refused = S.mode !== "open" && (
+      /email_address_invalid|email_address_not_authorized|over_email_send_rate_limit/.test(error.code || "") ||
+      /is invalid|not authorized|rate limit/i.test(error.message));
     S.authErr = /already registered/i.test(error.message)
       ? "このメールアドレスは登録済みです。「ログイン」から入ってください。"
+      : refused
+      ? (S.mode === "code" ? "招待コードが違います。管理者から聞いたコードを確かめてください。"
+         : "このメールアドレスは登録が許可されていません。管理者に確認してください。")
       : error.message;
     render(); return;
   }
