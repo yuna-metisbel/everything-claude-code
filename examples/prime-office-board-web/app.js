@@ -671,15 +671,16 @@ function randomToken(){
   crypto.getRandomValues(a);
   return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
 }
+// state に nonce と招待コードを入れて LINE に預ける。iPhone では Safari で始めても、
+// 許可のあと LINE アプリの中のブラウザに戻ってくることがあり、始めたブラウザに
+// 覚えさせたものは戻った先から読めないため（実際にそれでログインが打ち切られた）。
+const b64u = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = s => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
 function startLineLogin(){
-  const state = randomToken(), nonce = randomToken();
-  // 戻ってきたときに本物かどうかを state で確かめる。招待コードも戻るまで預かる。
-  try {
-    sessionStorage.setItem("board.line", JSON.stringify({ state: state, nonce: nonce, code: valOf("au_code") }));
-  } catch(e){
-    S.authErr = "この画面ではログインを続けられません。普通のブラウザ（Safari や Chrome）で開いてください。";
-    render(); return;
-  }
+  const nonce = randomToken();
+  const state = randomToken() + "." + b64u(JSON.stringify({ n: nonce, c: valOf("au_code") }));
+  // 同じブラウザに戻ってきたときは、自分が始めたものかどうかも確かめる。
+  try { sessionStorage.setItem("board.line", state); } catch(e){ /* 戻り先で state だけを使う */ }
   const q = new URLSearchParams({
     response_type: "code", client_id: LINE_LOGIN, redirect_uri: lineRedirect(),
     state: state, scope: "profile openid", nonce: nonce,
@@ -691,20 +692,25 @@ function startLineLogin(){
 async function finishLineLogin(){
   const q = new URLSearchParams(location.search);
   if (!q.has("state") || !(q.has("code") || q.has("error"))) return;
-  let saved = null;
-  try { saved = JSON.parse(sessionStorage.getItem("board.line") || "null"); sessionStorage.removeItem("board.line"); } catch(e){}
+  let started = null;
+  try { started = sessionStorage.getItem("board.line"); sessionStorage.removeItem("board.line"); } catch(e){}
   // 戻り値はアドレス欄から消しておく（再読み込みで同じ code を2回使わないため）。
   history.replaceState(null, "", lineRedirect() + location.hash);
   if (q.has("error")){
     S.authErr = q.get("error") === "access_denied" ? "LINE でのログインを取りやめました。" : "LINE でログインできませんでした。";
     return;
   }
-  if (!saved || saved.state !== q.get("state")){
-    S.authErr = "ログインの途中で画面が変わりました。もう一度「LINEでログイン」を押してください。";
+  const state = q.get("state") || "";
+  let carried = null;
+  try { carried = JSON.parse(unb64u(state.split(".")[1] || "")); } catch(e){}
+  // 同じブラウザで始めたのに state が違うなら、よそから差し込まれたものとして断る。
+  // 別のブラウザに戻ってきたとき（started が無い）は、state に入れた nonce を LINE 側で照合する。
+  if (!carried || !carried.n || (started && started !== state)){
+    S.authErr = "ログインを確かめられませんでした。もう一度「LINEでログイン」を押してください。";
     return;
   }
   const out = await sb.functions.invoke("line-login", { body: {
-    code: q.get("code"), redirectUri: lineRedirect(), nonce: saved.nonce, inviteCode: saved.code || "" } });
+    code: q.get("code"), redirectUri: lineRedirect(), nonce: carried.n, inviteCode: carried.c || "" } });
   if (out.error || !out.data || !out.data.tokenHash){
     let msg = "LINE でログインできませんでした。もう一度お試しください。";
     try {
