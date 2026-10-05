@@ -147,6 +147,9 @@ a{color:var(--brass); text-underline-offset:3px}
 :root[data-theme="dark"] .btn.primary, :root:not([data-theme="light"]) .btn.primary{color:#1B140A}
 @media (prefers-color-scheme: light){ :root:not([data-theme="dark"]) .btn.primary{color:#fff} }
 .btn.primary:hover{filter:brightness(1.07)}
+/* LINE でログインするボタン。LINE の決まりの緑と白。 */
+.btn.line{background:#06C755; border-color:#06C755; color:#fff; font-weight:700; padding:10px 12px}
+.btn.line:hover{background:#05B34C}
 .btn.ghost{border-color:transparent; background:transparent; color:var(--muted)}
 .btn.ghost:hover{background:var(--surface-2); color:var(--ink)}
 .btn.danger{color:var(--bad); border-color:color-mix(in srgb, var(--bad) 40%, transparent)}

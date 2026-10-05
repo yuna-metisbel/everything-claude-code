@@ -8,8 +8,18 @@
 const CONFIG = window.BOARD_CONFIG || {};
 const SUPABASE_URL = CONFIG.supabaseUrl || "";
 const SUPABASE_KEY = CONFIG.supabaseKey || "";
-const BRAND = CONFIG.brand || "BOARD";
-const BRAND_SUB = CONFIG.brandSub || "事務所ボード";
+// 名前は「設定」から変えられるボードもある（editableBrand）。そのときは読み込み後に差し替わる。
+let BRAND = CONFIG.brand || "BOARD";
+let BRAND_SUB = CONFIG.brandSub || "事務所ボード";
+// 追加機能（addons/line を流したボードだけ）。空なら一切呼ばないので、PRIME などには影響しない。
+//   lineLogin   … LINE ログイン チャネルの ID。入っていればメールのログイン画面の代わりに LINE で入る
+//   lineOaId    … 通知を送る公式アカウントの ID（@ から）。友だち追加の案内に使う
+//   editableBrand … ボードの名前を「設定」から変えられるようにする
+//   reminders   … ホームにリマインダー欄を出す
+const LINE_LOGIN = String(CONFIG.lineLogin || "").trim();
+const LINE_OA = String(CONFIG.lineOaId || "").trim();
+const EDITABLE_BRAND = !!CONFIG.editableBrand;
+const REMINDERS = !!CONFIG.reminders;
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -37,13 +47,22 @@ if (!SUPABASE_URL || !SUPABASE_KEY){
 // 画面の上に出る名前は config.js から入れる。index.html に直書きすると、
 // 1社ぶん直したつもりが全社共通のファイルに入ってしまう。
 // <title> と apple-mobile-web-app-title は JS より先に読まれるので index.html 側に残る。
-(function(){
+function applyBrand(){
   const mark = document.getElementById("brandMark");
   const sub = document.getElementById("brandSub");
   if (mark) mark.textContent = BRAND;
   if (sub) sub.textContent = BRAND_SUB;
-  document.title = BRAND + " " + BRAND_SUB;
-})();
+  document.title = (BRAND + " " + BRAND_SUB).trim();
+}
+applyBrand();
+// DB に名前が入っていれば、そちらを使う（空の欄は config.js のまま）。
+function setBrandFrom(b){
+  if (!b) return;
+  const changed = (b.brand && b.brand !== BRAND) || (b.sub && b.sub !== BRAND_SUB);
+  if (b.brand) BRAND = b.brand;
+  if (b.sub) BRAND_SUB = b.sub;
+  if (changed) applyBrand();
+}
 
 if (!window.supabase || !window.supabase.createClient){
   // The Supabase client is loaded from a CDN; without it the page can do nothing,
@@ -206,7 +225,9 @@ const S = {
   siteCode: "", gate: null, staffMe: null, gateMode: "in", pinShown: {},
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
   siteDay: today(), siteMonth: today().slice(0, 7), taskSite: ls("prime.taskSite") || "all",
-  staff: [], punches: [], keyEvents: [], keyDuty: {}, sshifts: {}
+  staff: [], punches: [], keyEvents: [], keyDuty: {}, sshifts: {},
+  // LINE（addons/line）。lineLink は自分のひも付け、lineName は初回の名前の候補。
+  lineLink: null, lineName: "", reminders: []
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
@@ -328,7 +349,9 @@ async function loadAll(){
   if (ok(bst)){
     S.settings = bst.data || null;
     if (S.settings) S.mode = S.settings.signup_mode;
+    if (S.settings && EDITABLE_BRAND) setBrandFrom({ brand: S.settings.brand, sub: S.settings.brand_sub });
   }
+  if (LINE_LOGIN || REMINDERS) await loadLineExtras();
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
   if (ok(sit)) S.sites = sit.data || [];
   if (ok(stf)) S.staff = (stf.data || []).map(normStaff);
@@ -336,6 +359,16 @@ async function loadAll(){
   if (ok(dlg)) S.deviceLog = (dlg.data || []).map(normDevLog);
   if (!site(S.siteId)) S.siteId = S.sites.length ? S.sites[0].id : "";
   await loadSite(S.siteId);
+}
+
+// 追加機能のぶん。表が無いボードでは呼ばない（呼んでも前の値を残すだけ）。
+async function loadLineExtras(){
+  const [lnk, rem] = await Promise.all([
+    LINE_LOGIN ? sb.from("line_links").select("display_name, notify").eq("user_id", S.user.id).maybeSingle() : null,
+    REMINDERS ? sb.from("reminders").select("*").order("remind_at") : null
+  ]);
+  if (lnk && !lnk.error) S.lineLink = lnk.data || null;
+  if (rem && !rem.error) S.reminders = rem.data || [];
 }
 
 // スタッフとして入っているときは、自分の拠点ぶんだけを読む。
@@ -369,7 +402,7 @@ function scheduleReload(){
 // staff は pin 列があるので配信対象にしていない（下の定期読み直しで追いつく）。
 const LIVE_TABLES = ["members","office","schedule","tasks","payments","vault","shops","notices",
                      "board_settings","sites","punches","key_events","key_duty","staff_shifts","notes",
-                     "devices","device_log"];
+                     "devices","device_log"].concat(REMINDERS ? ["reminders"] : []);
 function subscribeLive(){
   const ch = sb.channel("board");
   LIVE_TABLES.forEach(t => {
@@ -485,6 +518,12 @@ async function boot(){
   applyBarSize();
   S.tabBar = loadTabBar();
   S.siteCode = urlSiteCode();
+  // ログイン前の画面にもボードの名前を出す（招待コードと同じ行なので、名前だけを関数で読む）。
+  if (EDITABLE_BRAND){
+    try { const b = await sb.rpc("board_brand"); if (b && !b.error) setBrandFrom(b.data); } catch(e){ /* 既定の名前のまま */ }
+  }
+  // LINE の許可画面から戻ってきたところなら、先にログインを済ませる。
+  if (LINE_LOGIN) await finishLineLogin();
   const { data } = await sb.auth.getSession();
   S.user = data && data.session ? data.session.user : null;
   sb.auth.onAuthStateChange(function(_e, session){
@@ -612,14 +651,81 @@ async function createProfile(){
   S.busy = false;
   if (error){
     S.authErr = /row-level security|violates row-level/i.test(error.message)
-      ? (S.mode === "code" ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
-         : "登録が許可されていません。管理者に確認してください。")
+      ? (LINE_LOGIN
+          ? "招待コードが違うか、入っていません。下の「戻る」から、招待コードを入れてもう一度 LINE でログインしてください。"
+          : S.mode === "code" ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
+          : "登録が許可されていません。管理者に確認してください。")
       : error.message;
     render(); return;
   }
   await refresh();
 }
 async function signOut(){ await sb.auth.signOut(); S.reveal = {}; await refresh(); }
+
+/* ============================ LINE でログイン（addons/line） ============================ */
+// 戻り先は LINE Developers の「コールバックURL」に登録したものと一字一句同じでないと断られる。
+// クエリを付けない、このページそのものにする。
+const lineRedirect = () => location.origin + location.pathname;
+function randomToken(){
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
+}
+function startLineLogin(){
+  const state = randomToken(), nonce = randomToken();
+  // 戻ってきたときに本物かどうかを state で確かめる。招待コードも戻るまで預かる。
+  try {
+    sessionStorage.setItem("board.line", JSON.stringify({ state: state, nonce: nonce, code: valOf("au_code") }));
+  } catch(e){
+    S.authErr = "この画面ではログインを続けられません。普通のブラウザ（Safari や Chrome）で開いてください。";
+    render(); return;
+  }
+  const q = new URLSearchParams({
+    response_type: "code", client_id: LINE_LOGIN, redirect_uri: lineRedirect(),
+    state: state, scope: "profile openid", nonce: nonce,
+    // ログインと同時に公式アカウントの友だち追加をすすめる。友だちでないと通知が届かない。
+    bot_prompt: "aggressive"
+  });
+  location.href = "https://access.line.me/oauth2/v2.1/authorize?" + q.toString();
+}
+async function finishLineLogin(){
+  const q = new URLSearchParams(location.search);
+  if (!q.has("state") || !(q.has("code") || q.has("error"))) return;
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem("board.line") || "null"); sessionStorage.removeItem("board.line"); } catch(e){}
+  // 戻り値はアドレス欄から消しておく（再読み込みで同じ code を2回使わないため）。
+  history.replaceState(null, "", lineRedirect() + location.hash);
+  if (q.has("error")){
+    S.authErr = q.get("error") === "access_denied" ? "LINE でのログインを取りやめました。" : "LINE でログインできませんでした。";
+    return;
+  }
+  if (!saved || saved.state !== q.get("state")){
+    S.authErr = "ログインの途中で画面が変わりました。もう一度「LINEでログイン」を押してください。";
+    return;
+  }
+  const out = await sb.functions.invoke("line-login", { body: {
+    code: q.get("code"), redirectUri: lineRedirect(), nonce: saved.nonce, inviteCode: saved.code || "" } });
+  if (out.error || !out.data || !out.data.tokenHash){
+    let msg = "LINE でログインできませんでした。もう一度お試しください。";
+    try {
+      const body = out.error && out.error.context ? await out.error.context.json() : null;
+      if (body && body.error) msg = body.error;
+    } catch(e){ /* 既定の文言 */ }
+    S.authErr = msg; return;
+  }
+  S.lineName = out.data.name || "";
+  const v = await sb.auth.verifyOtp({ token_hash: out.data.tokenHash, type: "email" });
+  if (v.error) S.authErr = "ログインできませんでした。もう一度お試しください。";
+}
+// 本人が「どの通知を LINE で受け取るか」を切り替える。
+async function toggleLineNotify(kind){
+  const cur = Object.assign({ updates: true, morning: true, before: true, remind: true },
+    (S.lineLink && S.lineLink.notify) || {});
+  cur[kind] = !cur[kind];
+  await run(sb.from("line_links").update({ notify: cur, updated_at: nowIso() }).eq("user_id", S.user.id));
+  S.lineLink = Object.assign({}, S.lineLink, { notify: cur });
+  render();
+}
 const valOf = id => { const n = el(id); return n ? n.value.trim() : ""; };
 
 /* ============================ render: shell ============================ */
@@ -858,7 +964,27 @@ function renderHere(){
 }
 
 /* ============================ view: ログイン / プロフィール ============================ */
+// LINE で入るボードの入口。メールとパスワードは出さない。
+function viewAuthLine(){
+  return '<div class="gate"><div class="gate-card">' +
+    '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span><span class="sub">' + h(BRAND_SUB) + "</span></div>" +
+    "<h1>ログイン</h1>" +
+    '<p class="lead">LINE のアカウントで入ります。<br>はじめての人は、途中で出てくる公式アカウントを' +
+      "友だちに追加してください（予定やリマインダーが LINE に届きます）。</p>" +
+    (S.mode === "code"
+      ? '<div class="fields"><label class="f">招待コード（はじめての人だけ）' +
+          '<input type="text" id="au_code" autocomplete="off" placeholder="招待した人から聞いたコード" value="' +
+          h(S.form.au_code || "") + '"></label></div>'
+      : "") +
+    (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
+    '<button class="btn line" style="width:100%" data-act="line-login"' + (S.busy ? " disabled" : "") + ">" +
+      (S.busy ? "処理中…" : "LINEでログイン") + "</button>" +
+    privacyLink() +
+    supportLine() +
+    "</div></div>";
+}
 function viewAuth(){
+  if (LINE_LOGIN) return viewAuthLine();
   const up = S.authMode === "up";
   return '<div class="gate"><div class="gate-card">' +
     '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span><span class="sub">' + h(BRAND_SUB) + "</span></div>" +
@@ -886,7 +1012,7 @@ function viewProfile(){
     "<h1>表示名を決めてください</h1>" +
     '<p class="lead">スケジュール・タスク・在席表示に使われる名前です。<br>あとから「設定」タブで変更できます。</p>' +
     '<div class="fields">' +
-      '<label class="f">名前<input type="text" id="pf_name" maxlength="12" placeholder="例：ゆうな" value="' + h(S.form.pf_name || "") + '"></label>' +
+      '<label class="f">名前<input type="text" id="pf_name" maxlength="12" placeholder="例：ゆうな" value="' + h(S.form.pf_name || S.lineName.slice(0, 12) || "") + '"></label>' +
       '<label class="f">色<div class="colorpick" id="pf_colors">' +
         PALETTE.map(c => '<button type="button" data-act="draft-color" data-v="' + c + '" aria-pressed="' +
           (S.draftColor === c) + '" style="background:' + c + '" aria-label="' + c + '"></button>').join("") + "</div></label>" +
@@ -894,7 +1020,7 @@ function viewProfile(){
     (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
     '<button class="btn primary" style="width:100%" data-act="create-profile"' + (S.busy ? " disabled" : "") + ">" +
       (S.busy ? "作成中…" : "はじめる") + "</button>" +
-    '<p class="swap"><button data-act="signout">別のアカウントでログイン</button></p>' +
+    '<p class="swap"><button data-act="signout">' + (LINE_LOGIN ? "戻る" : "別のアカウントでログイン") + "</button></p>" +
     "</div></div>";
 }
 
@@ -1073,6 +1199,7 @@ function viewHome(){
           '<span class="num" style="font-weight:600">' + h(yen(p.amount)) + "</span></div>").join("")
           : '<div class="empty">未払いはありません</div>') + "</div></div></section>" +
       homeDevices() +
+      (REMINDERS ? homeReminders() : "") +
       homeNotes() +
     "</div></div>";
 }
@@ -1096,6 +1223,63 @@ function homeDevices(){
         '<button class="btn sm' + (at ? "" : " primary") + '" data-act="device" data-id="' + h(d.id) +
           '" data-v="' + (at ? "in" : "out") + '">' + (at ? "返した" : "持ち出す") + "</button></div>";
     }).join("") + "</div></div></section>";
+}
+
+/* ============================ リマインダー（addons/line） ============================ */
+// 時刻になったら LINE に届く。宛先を選ばなければ自分だけ。送ったものは1日だけ残して見せる。
+const remWhen = iso => { const d = new Date(iso); return isNaN(d) ? "" :
+  (d.getMonth() + 1) + "/" + d.getDate() + "（" + DOW[d.getDay()] + "）" + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+function remTargetsText(r){
+  const ids = (r.targets || []).length ? r.targets : [r.created_by];
+  return ids.map(function(id){ const m = member(id); return m ? m.name : "?"; }).join("・");
+}
+function homeReminders(){
+  const cutoff = Date.now() - 86400000;
+  const list = S.reminders.filter(function(r){ return !r.sent_at || new Date(r.sent_at).getTime() > cutoff; });
+  return '<section class="sec"><div class="sec-head"><h2>リマインダー</h2>' +
+    '<span class="hint">時刻になると LINE に届きます。</span><div class="spacer"></div>' +
+    '<button class="btn sm primary" data-act="new-reminder">＋ 追加</button></div>' +
+    '<div class="panel">' + (list.length ? '<div class="rows" style="border-top:0">' + list.map(function(r){
+      const mine = S.me && r.created_by === S.me.id;
+      return '<div class="row" style="align-items:center;gap:10px">' +
+        '<span style="flex:1;min-width:0"><span style="font-weight:600">' + h(remWhen(r.remind_at)) + "</span> " +
+          h(r.text) + '<br><span style="font-size:12px;color:var(--muted)">' +
+          (mine ? "宛先：" + h(remTargetsText(r)) : "From " + h((member(r.created_by) || {}).name || "?")) + "</span></span>" +
+        (r.sent_at ? '<span class="chip ok">送りました</span>' : "") +
+        (mine ? '<button class="btn sm ghost" data-act="del-reminder" data-id="' + h(r.id) + '">消す</button>' : "") +
+        "</div>";
+    }).join("") + "</div>" : '<div class="empty">予定しているリマインダーはありません</div>') +
+    "</div></section>";
+}
+function modalReminder(){
+  const now = new Date(Date.now() + 3600000);
+  showModal("リマインダーを追加",
+    '<div class="fields">' +
+      '<label class="f">内容<input type="text" id="rm_text" maxlength="300" placeholder="例：〇〇さんに電話"></label>' +
+      '<div class="fields two"><label class="f">日付<input type="date" id="rm_date" value="' + ymd(now) + '"></label>' +
+      '<label class="f">時刻<input type="time" id="rm_time" value="' + pad(now.getHours()) + ':00"></label></div>' +
+      '<div class="f">送る相手<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' +
+        S.members.map(function(m){
+          return '<label style="display:flex;align-items:center;gap:6px;font-size:14px">' +
+            '<input type="checkbox" class="rm_to" value="' + h(m.id) + '"' + (S.me && m.id === S.me.id ? " checked" : "") + ">" +
+            h(m.name) + "</label>";
+        }).join("") + "</div></div>" +
+    "</div>",
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-reminder">追加する</button>');
+}
+async function saveReminder(){
+  const text = valOf("rm_text"), date = valOf("rm_date"), time = valOf("rm_time");
+  if (!text){ toast("内容を入れてください"); return; }
+  if (!date || !time){ toast("日付と時刻を入れてください"); return; }
+  const at = new Date(date + "T" + time + ":00");
+  if (isNaN(at) || at.getTime() < Date.now() - 60000){ toast("これからの時刻を選んでください"); return; }
+  const to = Array.from(document.querySelectorAll(".rm_to:checked")).map(function(x){ return x.value; });
+  if (!to.length){ toast("送る相手を1人以上選んでください"); return; }
+  // 自分だけなら空で持つ（DB 側で「作った本人」に送る）。
+  const targets = (to.length === 1 && S.me && to[0] === S.me.id) ? [] : to;
+  await run(sb.from("reminders").insert({ text: text, remind_at: at.toISOString(), targets: targets }), "追加しました");
+  closeModal();
 }
 
 // 自分用はホームにも小さく出しておく。タブを開かないと思い出せないものは書かれない。
@@ -2200,8 +2384,43 @@ function viewVault(){
 }
 
 /* ============================ view: 設定 ============================ */
+// LINE で受け取る通知の種類。無料枠（月200通）を家族で分け合うので、要らないものは止められる。
+const LINE_KINDS = [["updates","お知らせ・予定の更新、やることの担当"],["morning","朝8時のまとめ（期限・支払い）"],
+                    ["before","予定・会議の30分前"],["remind","リマインダー"]];
+function settingsLine(){
+  const n = Object.assign({ updates: true, morning: true, before: true, remind: true },
+    (S.lineLink && S.lineLink.notify) || {});
+  return '<section class="sec"><div class="sec-head"><h2>LINE の通知</h2>' +
+    '<span class="hint">自分に届くものだけが変わります。公式アカウントを友だちにしていないと届きません。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (S.lineLink
+      ? LINE_KINDS.map(function(k){
+          return '<div class="row" style="align-items:center;gap:10px"><span style="flex:1">' + h(k[1]) + "</span>" +
+            '<button class="btn sm' + (n[k[0]] ? " primary" : "") + '" data-act="line-notify" data-v="' + k[0] + '">' +
+            (n[k[0]] ? "受け取る" : "止めている") + "</button></div>";
+        }).join("")
+      : '<div class="empty">LINE とつながっていません。一度ログアウトして、LINE でログインし直してください。</div>') +
+    (LINE_OA
+      ? '<div class="row" style="align-items:center;gap:10px"><span style="flex:1">通知が来ないとき</span>' +
+          '<a class="btn sm" href="https://line.me/R/ti/p/' + encodeURIComponent(LINE_OA) + '" target="_blank" rel="noopener">公式アカウントを友だち追加</a></div>'
+      : "") +
+    "</div></div></section>";
+}
+function settingsBrand(){
+  const st = S.settings || {};
+  return '<section class="sec"><div class="sec-head"><h2>ボードの名前</h2>' +
+    '<span class="hint">画面の上とログイン画面に出ます。みんなの画面が変わります。</span></div>' +
+    '<div class="panel"><div style="padding:14px">' +
+      '<div class="fields two">' +
+        '<label class="f">名前<input type="text" id="set_brand" maxlength="20" placeholder="例：藤澤家" value="' + h(st.brand || "") + '"></label>' +
+        '<label class="f">小さく添える言葉<input type="text" id="set_brand_sub" maxlength="20" placeholder="例：みんなのボード" value="' + h(st.brand_sub || "") + '"></label>' +
+      "</div>" +
+      '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" data-act="save-brand">保存</button></div>' +
+    "</div></div></section>";
+}
 function viewSettings(){
-  return '<section class="sec"><div class="sec-head"><h2>スタッフ</h2></div>' +
+  return (EDITABLE_BRAND ? settingsBrand() : "") + (LINE_LOGIN ? settingsLine() : "") +
+    '<section class="sec"><div class="sec-head"><h2>スタッフ</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     (S.members.length ? S.members.map(m =>
       '<div class="row" style="align-items:center;gap:10px">' +
@@ -2816,6 +3035,22 @@ document.addEventListener("click", async function(ev){
       case "authmode": S.authMode = btn.dataset.v; S.authErr = ""; render(); break;
       case "draft-color": S.draftColor = btn.dataset.v; render(); break;
       case "create-profile": await createProfile(); break;
+      case "line-login": startLineLogin(); break;
+      case "line-notify": await toggleLineNotify(btn.dataset.v); break;
+      case "new-reminder": modalReminder(); break;
+      case "save-reminder": await saveReminder(); break;
+      case "del-reminder":
+        if (!confirm("このリマインダーを消しますか？")) return;
+        await run(sb.from("reminders").delete().eq("id", id), "消しました");
+        break;
+      case "save-brand": {
+        const b = valOf("set_brand"), s = valOf("set_brand_sub");
+        await run(sb.from("board_settings").update({ brand: b, brand_sub: s, updated_at: nowIso() }).eq("id", 1), "保存しました");
+        // 空にしたときは config.js の名前に戻す。
+        BRAND = b || CONFIG.brand || "BOARD"; BRAND_SUB = s || CONFIG.brandSub || "事務所ボード";
+        applyBrand();
+        break;
+      }
       case "signout": await signOut(); break;
 
       case "door":

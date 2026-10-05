@@ -116,7 +116,33 @@ Deno.serve(async (req) => {
     }
   }
   if (dead.length) await db.from("push_subs").delete().in("id", dead);
-  if (tag) await db.from("push_log").update({ ok_count: ok, fail_count: (subs?.length ?? 0) - ok }).eq("tag", tag);
 
-  return json({ sent: ok, removed: dead.length, total: subs?.length ?? 0 });
+  // LINE にも送る（addons/line を入れたボードだけ。鍵が無ければ何もしない）。
+  // 無料枠は月200通で、1人に1通が1と数えられる。宛先を絞るのは呼ぶ側（DB）の仕事で、
+  // ここでは本人が「受け取らない」にした種類を外すだけ。
+  const lineToken = Deno.env.get("LINE_MESSAGING_TOKEN") || "";
+  let lineOk = 0, lineTotal = 0;
+  if (lineToken) {
+    const kind = String(body.kind || "updates");
+    let lq = db.from("line_links").select("user_id, line_user_id, notify");
+    if (only && only.length) lq = lq.in("user_id", only);
+    const { data: links } = await lq;
+    const { data: lc } = await db.from("line_config").select("board_url").eq("id", 1).maybeSingle();
+    const msg = [title, text, lc?.board_url || ""].filter(Boolean).join("\n").slice(0, 4900);
+    for (const l of links ?? []) {
+      if (l.notify && l.notify[kind] === false) continue;
+      lineTotal += 1;
+      const res = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${lineToken}` },
+        body: JSON.stringify({ to: l.line_user_id, messages: [{ type: "text", text: msg }] }),
+      });
+      if (res.ok) lineOk += 1;
+    }
+  }
+
+  const total = (subs?.length ?? 0) + lineTotal;
+  if (tag) await db.from("push_log").update({ ok_count: ok + lineOk, fail_count: total - ok - lineOk }).eq("tag", tag);
+
+  return json({ sent: ok, removed: dead.length, total: subs?.length ?? 0, line: lineOk, lineTotal });
 });
