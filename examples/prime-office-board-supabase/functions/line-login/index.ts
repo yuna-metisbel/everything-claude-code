@@ -62,6 +62,8 @@ Deno.serve(async (req) => {
   });
   const tj = await tok.json().catch(() => ({}));
   if (!tok.ok || !tj.id_token) {
+    // 理由はログにだけ出す（code やシークレットは出さない）。
+    console.error("line token exchange failed", tok.status, tj.error, tj.error_description);
     return json({ error: "LINE でのログインを確かめられませんでした。もう一度お試しください", detail: tj.error_description || tj.error || tok.status }, 401);
   }
 
@@ -73,6 +75,7 @@ Deno.serve(async (req) => {
   });
   const vj = await ver.json().catch(() => ({}));
   if (!ver.ok || !vj.sub) {
+    console.error("line id_token verify failed", ver.status, vj.error, vj.error_description);
     return json({ error: "LINE でのログインを確かめられませんでした。もう一度お試しください", detail: vj.error_description || ver.status }, 401);
   }
   const lineUserId = String(vj.sub);
