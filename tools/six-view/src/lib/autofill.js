@@ -44,13 +44,45 @@ function matchesUrlPattern(pattern, url) {
   return url.toLowerCase().includes(trimmed.toLowerCase());
 }
 
-/** Should we attempt auto-fill for this navigation? */
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Is `url` on the same site as the pane's own start page?
+ *
+ * Either host being a subdomain of the other counts, so `fuupe.jp` and
+ * `www.fuupe.jp`, or a site whose sign-in sits on `login.example.com`, still
+ * match. Anything further apart does not.
+ */
+function sameSiteAsHome(homeUrl, url) {
+  const home = hostOf(homeUrl);
+  const here = hostOf(url);
+  if (!home || !here) return false;
+  return home === here || home.endsWith(`.${here}`) || here.endsWith(`.${home}`);
+}
+
+/**
+ * Should we attempt auto-fill for this navigation?
+ *
+ * With no pattern set the pane's own site is the pattern. That matters because
+ * a pane can be pointed anywhere - by the address bar, by a link, or by the
+ * tabs that swing every pane onto another site at once - and this pane's
+ * password belongs to this pane's site only. Typing it into a login form that
+ * happens to be on screen somewhere else would hand it to the wrong site.
+ */
 function shouldAutofill(site, url, credentials) {
   if (!site || !site.autofill || !site.autofill.enabled) return false;
   if (!credentials || !credentials.username) return false;
   // Selectors are optional: with none set, the script finds the login boxes by
   // the shape of the page, so saving an ID and password is the whole setup.
-  return matchesUrlPattern(site.autofill.urlPattern, url);
+  const pattern = typeof site.autofill.urlPattern === 'string' ? site.autofill.urlPattern.trim() : '';
+  if (!pattern) return matchesUrlPattern('', url) && sameSiteAsHome(site.url, url);
+  return matchesUrlPattern(pattern, url);
 }
 
 /**
@@ -330,5 +362,6 @@ module.exports = {
   buildDetectScript,
   jsLiteral,
   matchesUrlPattern,
+  sameSiteAsHome,
   shouldAutofill,
 };

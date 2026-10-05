@@ -25,7 +25,7 @@ const {
   buildDmTypeScript,
   buildPickerScript,
 } = require('./lib/dm-script');
-const { dmCanSend, dmIsUsable } = require('./lib/config-schema');
+const { automationPaused, dmCanSend, dmIsUsable } = require('./lib/config-schema');
 const { run, settle } = require('./lib/page-runner');
 
 /** Give a pane a moment after launch before the first scan. */
@@ -98,7 +98,10 @@ class DmService {
     const telegram = this.telegramConfig;
     this.client.token = (this.deps.getToken() || '').trim();
 
-    const watched = (config.sites || []).filter(dmIsUsable);
+    // Away from the home tab the panes show another site, so there is no
+    // message list to read. The baselines below are dropped with them, so
+    // coming back primes again instead of reporting a backlog as new.
+    const watched = automationPaused(config) ? [] : (config.sites || []).filter(dmIsUsable);
 
     for (const site of watched) {
       const everyMs = Math.max(20, Number(site.dm.intervalSeconds) || 90) * 1000;

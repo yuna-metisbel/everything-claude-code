@@ -18,14 +18,20 @@ const reopenName = document.getElementById('reopen-name');
 const reopenUrl = document.getElementById('reopen-url');
 const reopenWipe = document.getElementById('reopen-wipe');
 const reopenStatus = document.getElementById('reopen-status');
+const pageSetBar = document.getElementById('page-sets');
 
 /** siteId -> { root, webview, els, signature } */
 const panes = new Map();
 let focusedSiteId = null;
 let maximizedSiteId = null;
 
-function paneSignature(site, partition) {
-  return [site.url, partition, site.incognito ? '1' : '0'].join('|');
+/**
+ * What has to change for a pane's page to be rebuilt. The URL here is the one
+ * the active tab resolves to, not the pane's own, so picking a tab reloads
+ * every pane onto it.
+ */
+function paneSignature(url, partition, site) {
+  return [url, partition, site.incognito ? '1' : '0'].join('|');
 }
 
 function showNotice(message) {
@@ -57,11 +63,11 @@ function toggleMaximized(siteId) {
   applyMaximized();
 }
 
-function createWebview(site, partition) {
+function createWebview(url, partition) {
   const webview = document.createElement('webview');
   webview.setAttribute('partition', partition);
   webview.setAttribute('allowpopups', '');
-  webview.setAttribute('src', site.url);
+  webview.setAttribute('src', url);
   return webview;
 }
 
@@ -115,7 +121,7 @@ function wireAddressBar(pane, site) {
   urlInput.addEventListener('blur', close);
 }
 
-function buildPane(site, index, partition) {
+function buildPane(site, index, partition, url) {
   const fragment = paneTemplate.content.cloneNode(true);
   const root = fragment.querySelector('.pane');
 
@@ -170,26 +176,26 @@ function buildPane(site, index, partition) {
 
   els.name.addEventListener('dblclick', () => toggleMaximized(site.id));
 
-  const pane = { root, els, webview: null, signature: '', lastUrl: site.url || '' };
+  const pane = { root, els, webview: null, signature: '', lastUrl: url || '' };
   wireAddressBar(pane, site);
   panes.set(site.id, pane);
   grid.appendChild(root);
-  updatePaneShell(pane, site, partition);
+  updatePaneShell(pane, site, partition, url);
   return pane;
 }
 
 /** Update everything except the webview itself. */
-function updatePaneShell(pane, site, partition) {
+function updatePaneShell(pane, site, partition, url) {
   pane.els.name.textContent = site.name;
   pane.els.name.title = site.name;
   pane.els.private.hidden = !site.incognito;
-  pane.els.url.textContent = site.url || '';
+  pane.els.url.textContent = url || '';
   pane.root.dataset.partition = partition;
 }
 
 /** (Re)create the webview when the URL / partition changed. */
-function syncPaneContent(pane, site, partition) {
-  const signature = paneSignature(site, partition);
+function syncPaneContent(pane, site, partition, url) {
+  const signature = paneSignature(url, partition, site);
   if (pane.signature === signature) return;
   pane.signature = signature;
 
@@ -198,14 +204,14 @@ function syncPaneContent(pane, site, partition) {
     pane.webview = null;
   }
 
-  if (!site.url) {
+  if (!url) {
     pane.els.empty.hidden = false;
     pane.els.status.className = 'pane-status';
     return;
   }
 
   pane.els.empty.hidden = true;
-  pane.webview = createWebview(site, partition);
+  pane.webview = createWebview(url, partition);
   pane.els.body.appendChild(pane.webview);
 }
 
@@ -333,6 +339,38 @@ function renderClosedBar(closed) {
   if (reopenSiteId && !closed.some((site) => site.id === reopenSiteId)) hideReopenForm();
 }
 
+/**
+ * The tabs that point every pane at one page.
+ *
+ * Only one tab is ever "on"; clicking another is the whole interaction, and
+ * the panes reload from the config change that comes back.
+ */
+function renderPageSets(config) {
+  const sets = Array.isArray(config.pageSets) ? config.pageSets : [];
+  pageSetBar.textContent = '';
+  // A single tab is just the panes as they are, so there is nothing to switch.
+  pageSetBar.hidden = sets.length < 2;
+
+  for (const set of sets) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'page-set';
+    tab.textContent = set.name;
+    tab.title = set.url
+      ? `すべてのパネルを ${set.url} にします`
+      : 'それぞれのパネルの最初のページに戻します';
+    if (set.id === config.activePageSet) {
+      tab.classList.add('is-active');
+      tab.setAttribute('aria-current', 'page');
+    }
+    tab.addEventListener('click', () => {
+      if (set.id === config.activePageSet) return;
+      void window.sixview.switchPageSet(set.id);
+    });
+    pageSetBar.appendChild(tab);
+  }
+}
+
 function render(bootstrap) {
   const { config, partitions } = bootstrap;
 
@@ -354,14 +392,21 @@ function render(bootstrap) {
   }
   showNotice(messages.join('  /  '));
 
+  renderPageSets(config);
+  const sets = Array.isArray(config.pageSets) ? config.pageSets : [];
+  const homeTab = sets.find((set) => !set.url) || sets[0] || { id: '', name: 'ホーム' };
+  const onHomeTab = !config.activePageSet || config.activePageSet === homeTab.id;
+  const homeTabName = homeTab.name;
+
   const visible = config.sites.filter((site) => site.enabled !== false);
   const closed = config.sites.filter((site) => site.enabled === false);
 
   visible.forEach((site, index) => {
     const partition = partitions[site.id];
+    const url = (bootstrap.paneUrls && bootstrap.paneUrls[site.id]) || '';
     let pane = panes.get(site.id);
     if (!pane) {
-      pane = buildPane(site, index, partition);
+      pane = buildPane(site, index, partition, url);
       // Put a new pane in its own place rather than at the end, so a pane that
       // was closed and reopened comes back where it was. Panes already on
       // screen are never moved: detaching a webview reloads the page inside it.
@@ -369,8 +414,16 @@ function render(bootstrap) {
       if (at && at !== pane.root) grid.insertBefore(pane.root, at);
     }
     pane.els.index.textContent = String(index + 1);
-    updatePaneShell(pane, site, partition);
-    syncPaneContent(pane, site, partition);
+    updatePaneShell(pane, site, partition, url);
+    syncPaneContent(pane, site, partition, url);
+
+    // "Make this the pane's first page" would otherwise record the tab's page
+    // as the pane's own, and there would be no way back to the real one.
+    const setHome = pane.root.querySelector('[data-action="set-home"]');
+    setHome.disabled = !onHomeTab;
+    setHome.title = onHomeTab
+      ? '今開いているページを、このパネルの最初のページにする'
+      : `「${homeTabName}」に戻してから使ってください`;
   });
 
   // Drop panes that were closed, or whose site id disappeared. Removing the

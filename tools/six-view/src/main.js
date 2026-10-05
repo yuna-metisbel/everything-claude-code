@@ -21,10 +21,12 @@ const {
   SITE_PRESETS,
   TELEGRAM_SECRET_ID,
   getBrand,
+  getPageSet,
   normalizeUrl,
   partitionForSite,
   repointSite,
   resolveColumns,
+  resolvePaneUrl,
   resolveUserAgent,
   resolveZoomFactor,
 } = require('./lib/config-schema');
@@ -422,13 +424,17 @@ async function runPaneCommand(siteId, command) {
       }
       return { ok: true };
 
-    case 'home':
-      if (contents && site.url) {
+    case 'home': {
+      // Under a tab, "top page" means that tab's page - the pane's own page is
+      // one tab away, not one button away.
+      const home = resolvePaneUrl(config, site);
+      if (contents && home) {
         pane.lastAutofillUrl = '';
         pane.lastAutofillAt = 0;
-        await contents.loadURL(site.url);
+        await contents.loadURL(home);
       }
       return { ok: true };
+    }
 
     case 'login':
       await runAutofill(siteId, { auto: false });
@@ -577,6 +583,10 @@ function bootstrapPayload() {
   return {
     config,
     partitions: Object.fromEntries(config.sites.map((site) => [site.id, partitionForSite(site, RUN_ID)])),
+    // Where each pane points under the tab that is selected. The renderer
+    // builds its panes from this rather than from site.url, so a tab change
+    // and a fresh launch land on the same page.
+    paneUrls: Object.fromEntries(config.sites.map((site) => [site.id, resolvePaneUrl(config, site)])),
     zoomFactors: Object.fromEntries(config.sites.map((site) => [site.id, resolveZoomFactor(config, site)])),
     columns: resolveColumns(config),
     presets: SITE_PRESETS,
@@ -715,6 +725,36 @@ function registerIpc() {
   ipcMain.handle('pane:command', (_event, payload) => {
     if (!payload || !payload.siteId) return { ok: false };
     return runPaneCommand(payload.siteId, payload.command);
+  });
+
+  /**
+   * Swing every pane onto one page at once (the tabs along the top).
+   *
+   * Only the chosen tab is stored - the panes themselves are not touched, so
+   * the way back is always the home tab. The renderer reloads each pane from
+   * the new `paneUrls`, which is also what a relaunch reads, so quitting on
+   * the X tab comes back on the X tab.
+   */
+  ipcMain.handle('pages:switch', (_event, payload) => {
+    const setId = payload && typeof payload.setId === 'string' ? payload.setId : '';
+    const set = getPageSet(config, setId);
+    if (!set || set.id !== setId) return { ok: false, reason: 'unknown-set' };
+
+    config.activePageSet = set.id;
+    config = saveConfig(userDataDir, config, BRAND.id);
+
+    // A pane about to be pointed somewhere else must not have the page it is
+    // leaving counted as "just auto-filled".
+    for (const pane of panes.values()) {
+      pane.lastAutofillUrl = '';
+      pane.lastAutofillAt = 0;
+    }
+
+    // Standing the watchers down (or bringing them back) is part of the switch.
+    if (dmService) dmService.refresh();
+    if (boostService) boostService.refresh();
+    sendToMain('app:config-changed', bootstrapPayload());
+    return { ok: true, setId: config.activePageSet };
   });
 
   ipcMain.handle('session:clear', async (_event, payload) => {

@@ -47,6 +47,20 @@ const SITE_PRESETS = [
 ];
 
 /**
+ * Page sets - the tabs across the top of the window.
+ *
+ * Picking one points *every* pane at the same page in one click, which is how
+ * a wall of panes becomes a wall of X logins without touching any pane's
+ * settings. Each pane keeps its own session, so the same page opens as a
+ * different account in every tile.
+ *
+ * The set whose id is `home` is the way back: a blank URL means "each pane's
+ * own start page", so it never has to be kept in step with the pane list.
+ */
+const HOME_PAGE_SET_ID = 'home';
+const MAX_PAGE_SETS = 8;
+
+/**
  * Build flavours. One codebase ships as two apps so the six work sites and the
  * wall of 02 accounts stay in separate windows, with separate config and
  * credential stores (each app name gets its own userData directory).
@@ -56,10 +70,18 @@ const BRANDS = {
     id: 'sixview',
     appName: 'SixView',
     sites: DEFAULT_SITE_PRESETS,
+    pageSets: [
+      { id: HOME_PAGE_SET_ID, name: '6サイト', url: '' },
+      { id: 'x', name: 'X', url: 'https://x.com/login' },
+    ],
   },
   msns: {
     id: 'msns',
     appName: '02View',
+    pageSets: [
+      { id: HOME_PAGE_SET_ID, name: '02', url: '' },
+      { id: 'x', name: 'X', url: 'https://x.com/login' },
+    ],
     sites: [
       { id: 'msns-shop', name: '02 店舗', url: 'https://m-sns.net/shop/login/' },
       ...Array.from({ length: 7 }, (_, i) => ({
@@ -253,6 +275,89 @@ function normalizeTelegram(raw) {
   };
 }
 
+/** One tab. A blank URL means "each pane's own start page". */
+function normalizePageSet(raw, index, usedIds) {
+  const source = isPlainObject(raw) ? raw : {};
+  const name = toTrimmedString(source.name) || `ページ ${index + 1}`;
+  let id = toSiteId(source.id || name, index);
+  while (usedIds.has(id)) {
+    id = `${id}-${usedIds.size + 1}`;
+  }
+  usedIds.add(id);
+  return { id, name, url: normalizeUrl(source.url) };
+}
+
+/**
+ * The tab list, always with a usable "home" tab first.
+ *
+ * Home is what makes a switch reversible, so it is put back when a config
+ * arrives without one, and its URL is forced blank even if something was typed
+ * in. Any other tab without a URL would do nothing, so it is dropped.
+ */
+function normalizePageSets(raw, brandId = DEFAULT_BRAND) {
+  const brandSets = getBrand(brandId).pageSets || BRANDS[DEFAULT_BRAND].pageSets;
+  const source = Array.isArray(raw) && raw.length > 0 ? raw : brandSets;
+  const usedIds = new Set();
+  const sets = source
+    .slice(0, MAX_PAGE_SETS)
+    .map((entry, index) => normalizePageSet(entry, index, usedIds));
+
+  const homeAt = sets.findIndex((set) => set.id === HOME_PAGE_SET_ID);
+  const fallback = brandSets.find((set) => set.id === HOME_PAGE_SET_ID) || {
+    id: HOME_PAGE_SET_ID,
+    name: 'ホーム',
+    url: '',
+  };
+  const home = homeAt === -1 ? { ...fallback } : sets.splice(homeAt, 1)[0];
+  home.url = '';
+
+  // Home is added back after the cap, so a long list cannot push it out.
+  return [home, ...sets.filter((set) => set.url)].slice(0, MAX_PAGE_SETS);
+}
+
+/** Look a tab up by id, falling back to the first one (always home). */
+function getPageSet(config, setId) {
+  const sets = (config && config.pageSets) || [];
+  return sets.find((set) => set.id === setId) || sets[0] || null;
+}
+
+/** The tab currently showing. */
+function currentPageSet(config) {
+  return getPageSet(config, config && config.activePageSet);
+}
+
+/** Is this the tab that shows each pane its own page? */
+function isHomePageSet(set) {
+  return Boolean(set) && (set.id === HOME_PAGE_SET_ID || !set.url);
+}
+
+/**
+ * Where a pane should point right now: the active tab's page, or its own.
+ *
+ * A pane with no page of its own stays empty rather than being filled in by a
+ * tab - it has never been set up, so there is nothing to come back to.
+ */
+function resolvePaneUrl(config, site) {
+  if (!site || !site.url) return '';
+  const set = currentPageSet(config);
+  // No tabs at all (an older config, or a test fixture) means nothing to
+  // switch to, so the pane shows its own page.
+  if (!set || isHomePageSet(set)) return site.url;
+  return set.url;
+}
+
+/**
+ * Should the DM watcher and the boost presser stand down?
+ *
+ * Away from home every pane shows some other site, where that pane's selectors
+ * describe nothing - and a stray match could click something real.
+ */
+function automationPaused(config) {
+  const set = currentPageSet(config);
+  if (!set) return false;
+  return !isHomePageSet(set);
+}
+
 /** Is this pane shown in the grid? A closed pane keeps its config and session. */
 function isPaneVisible(site) {
   return Boolean(site) && site.enabled !== false;
@@ -390,6 +495,8 @@ function createDefaultConfig(brandId = DEFAULT_BRAND) {
     startup: { openAtLogin: false },
     defaults: { zoomFactor: 0.67, userAgent: '' },
     telegram: { ...DEFAULT_TELEGRAM },
+    pageSets: normalizePageSets(null, brandId),
+    activePageSet: HOME_PAGE_SET_ID,
     sites: createDefaultSites(brandId),
   };
 }
@@ -429,6 +536,14 @@ function normalizeConfig(raw, brandId = DEFAULT_BRAND) {
   const startup = isPlainObject(source.startup) ? source.startup : {};
   const layout = isPlainObject(source.layout) ? source.layout : {};
 
+  const pageSets = normalizePageSets(source.pageSets, brandId);
+  // A tab that was deleted (or never existed) must not leave the window stuck
+  // on a page nothing can switch away from.
+  const wantedSet = toTrimmedString(source.activePageSet) || HOME_PAGE_SET_ID;
+  const activePageSet = pageSets.some((set) => set.id === wantedSet)
+    ? wantedSet
+    : HOME_PAGE_SET_ID;
+
   return {
     version: CONFIG_VERSION,
     window: normalizeWindow(source.window),
@@ -439,6 +554,8 @@ function normalizeConfig(raw, brandId = DEFAULT_BRAND) {
       userAgent: toTrimmedString(defaults.userAgent),
     },
     telegram: normalizeTelegram(source.telegram),
+    pageSets,
+    activePageSet,
     sites,
   };
 }
@@ -479,6 +596,15 @@ function paneSlots(config) {
 
 module.exports = {
   BRANDS,
+  HOME_PAGE_SET_ID,
+  MAX_PAGE_SETS,
+  automationPaused,
+  currentPageSet,
+  getPageSet,
+  isHomePageSet,
+  normalizePageSet,
+  normalizePageSets,
+  resolvePaneUrl,
   DEFAULT_DM,
   DEFAULT_TELEGRAM,
   TELEGRAM_SECRET_ID,

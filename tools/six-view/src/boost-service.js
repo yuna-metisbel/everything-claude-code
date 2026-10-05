@@ -17,7 +17,7 @@
 
 const { buildBoostReadScript, buildBoostPressScript } = require('./lib/boost-script');
 const { run, settle } = require('./lib/page-runner');
-const { boostIsUsable, withinHours } = require('./lib/config-schema');
+const { automationPaused, boostIsUsable, withinHours } = require('./lib/config-schema');
 
 /** Give a pane time to load before the first look at its button. */
 const FIRST_CHECK_DELAY_MS = 20000;
@@ -73,7 +73,9 @@ class BoostService {
     this.stopTimers();
 
     const config = this.deps.getConfig();
-    const watched = (config.sites || []).filter(boostIsUsable);
+    // The panes are showing another site entirely (a tab is selected), where
+    // this pane's button selector describes nothing worth pressing.
+    const watched = automationPaused(config) ? [] : (config.sites || []).filter(boostIsUsable);
 
     for (const site of watched) {
       const everyMs = Math.max(3, Number(site.boost.checkMinutes) || 10) * 60 * 1000;

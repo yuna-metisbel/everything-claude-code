@@ -211,6 +211,28 @@ input:focus {
   font-size: 11px;
 }
 
+/* One line per tab in the page-switching card. */
+.page-set-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.page-set-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.page-set-row .field.grow {
+  flex: 1 1 260px;
+}
+
+.page-set-row input:disabled {
+  opacity: 0.6;
+}
+
 .creds {
   padding-top: 10px;
   border-top: 1px dashed var(--border);

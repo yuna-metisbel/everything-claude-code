@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('sixview', {
   paneNavigate: (siteId, url) => ipcRenderer.invoke('pane:navigate', { siteId, url }),
   paneUpdate: (siteId, patch) => ipcRenderer.invoke('pane:update', { siteId, patch }),
   paneReopenAs: (siteId, options) => ipcRenderer.invoke('pane:reopen-as', { siteId, ...options }),
+  switchPageSet: (setId) => ipcRenderer.invoke('pages:switch', { setId }),
   detectLogin: (siteId) => ipcRenderer.invoke('pane:detect-login', { siteId }),
   clearSession: (siteId) => ipcRenderer.invoke('session:clear', { siteId }),
 

@@ -248,6 +248,124 @@ async function runTests() {
     assert.strictEqual(added.url, '');
   })) passed++; else failed++;
 
+  if (test('the page-set tabs always keep a usable way back', () => {
+    const fresh = schema.normalizeConfig({}, 'msns');
+    assert.strictEqual(fresh.pageSets[0].id, schema.HOME_PAGE_SET_ID);
+    assert.strictEqual(fresh.pageSets[0].url, '', 'home shows each pane its own page');
+    assert.strictEqual(fresh.activePageSet, schema.HOME_PAGE_SET_ID);
+    assert.ok(
+      fresh.pageSets.some((set) => /x\.com/.test(set.url)),
+      '02View ships with an X tab'
+    );
+
+    // A config that lost its home tab gets one back, at the front.
+    const noHome = schema.normalizeConfig(
+      { pageSets: [{ id: 'x', name: 'X', url: 'https://x.com/login' }] },
+      'msns'
+    );
+    assert.strictEqual(noHome.pageSets[0].id, schema.HOME_PAGE_SET_ID);
+    assert.strictEqual(noHome.pageSets.length, 2);
+
+    // A home tab someone typed a URL into is still the way back.
+    const forced = schema.normalizeConfig({
+      pageSets: [{ id: schema.HOME_PAGE_SET_ID, name: 'home', url: 'https://x.com/' }],
+    });
+    assert.strictEqual(forced.pageSets[0].url, '');
+
+    // Tabs with no page would do nothing, and only http(s) is ever loaded.
+    const junk = schema.normalizeConfig({
+      pageSets: [
+        { id: 'home', name: 'もどる', url: '' },
+        { id: 'blank', name: '空', url: '' },
+        { id: 'evil', name: 'bad', url: 'javascript:alert(1)' },
+        { id: 'ok', name: 'X', url: 'x.com/login' },
+      ],
+    });
+    assert.deepStrictEqual(
+      junk.pageSets.map((set) => set.id),
+      ['home', 'ok']
+    );
+    assert.strictEqual(junk.pageSets[1].url, 'https://x.com/login');
+
+    // Pointing at a tab that is gone must not strand the window there.
+    assert.strictEqual(
+      schema.normalizeConfig({ activePageSet: 'nope' }).activePageSet,
+      schema.HOME_PAGE_SET_ID
+    );
+    assert.strictEqual(
+      schema.normalizeConfig({ activePageSet: 'x' }, 'msns').activePageSet,
+      'x'
+    );
+    assert.strictEqual(
+      schema.normalizeConfig({ pageSets: new Array(20).fill({ name: 'T', url: 'https://a.test/' }) })
+        .pageSets.length <= schema.MAX_PAGE_SETS,
+      true
+    );
+  })) passed++; else failed++;
+
+  if (test('a selected tab repoints every configured pane, and only those', () => {
+    const config = schema.normalizeConfig(
+      {
+        pageSets: [
+          { id: 'home', name: '02', url: '' },
+          { id: 'x', name: 'X', url: 'https://x.com/login' },
+        ],
+        sites: [
+          { id: 'a', name: 'A', url: 'https://m-sns.net/cast/login/' },
+          { id: 'b', name: 'B', url: 'https://m-sns.net/shop/login/' },
+          { id: 'c', name: 'C', url: '' },
+        ],
+      },
+      'msns'
+    );
+
+    const urlsOn = (setId) => {
+      config.activePageSet = setId;
+      return config.sites.map((site) => schema.resolvePaneUrl(config, site));
+    };
+
+    assert.deepStrictEqual(urlsOn('home'), [
+      'https://m-sns.net/cast/login/',
+      'https://m-sns.net/shop/login/',
+      '',
+    ]);
+    // Every pane lands on the same page - each in its own session, which is
+    // what makes it one X account per pane.
+    assert.deepStrictEqual(urlsOn('x'), [
+      'https://x.com/login',
+      'https://x.com/login',
+      '',
+    ]);
+
+    // The watchers stand down away from home: a 02 selector matching
+    // something on X could click a real button.
+    config.activePageSet = 'home';
+    assert.strictEqual(schema.automationPaused(config), false);
+    config.activePageSet = 'x';
+    assert.strictEqual(schema.automationPaused(config), true);
+  })) passed++; else failed++;
+
+  if (test('auto-login never types a pane password into another site', () => {
+    const site = {
+      url: 'https://m-sns.net/cast/login/',
+      autofill: { enabled: true, urlPattern: '' },
+    };
+    const creds = { username: 'cast1', password: 'secret' };
+
+    assert.strictEqual(autofill.shouldAutofill(site, 'https://m-sns.net/cast/login/', creds), true);
+    assert.strictEqual(autofill.shouldAutofill(site, 'https://www.m-sns.net/cast/', creds), true);
+    // The X tab puts a login form on screen that this password is not for.
+    assert.strictEqual(autofill.shouldAutofill(site, 'https://x.com/login', creds), false);
+    assert.strictEqual(autofill.shouldAutofill(site, 'https://m-sns.net.evil.test/', creds), false);
+
+    // An explicit pattern is the user's own decision and still wins.
+    const wide = { url: 'https://m-sns.net/cast/login/', autofill: { enabled: true, urlPattern: 'x.com' } };
+    assert.strictEqual(autofill.shouldAutofill(wide, 'https://x.com/login', creds), true);
+
+    assert.strictEqual(autofill.sameSiteAsHome('https://www.fuupe.jp/login', 'https://fuupe.jp/x'), true);
+    assert.strictEqual(autofill.sameSiteAsHome('', 'https://fuupe.jp/'), false);
+  })) passed++; else failed++;
+
   if (test('normalizeConfig gives every pane a unique id', () => {
     const config = schema.normalizeConfig({ sites: new Array(6).fill({ id: 'same', name: 'Same' }) });
     const ids = new Set(config.sites.map((site) => site.id));
@@ -421,10 +539,14 @@ async function runTests() {
       false
     );
     // No selectors at all still tries: the script finds the boxes by the shape
-    // of the page, so saving an ID and password is the whole setup.
+    // of the page, so saving an ID and password is the whole setup. With no
+    // pattern the pane's own site is the pattern, so it needs a url to match.
     assert.strictEqual(
       autofill.shouldAutofill(
-        { autofill: { enabled: true, urlPattern: '', usernameSelector: '', passwordSelector: '' } },
+        {
+          url: 'https://x.jp/login',
+          autofill: { enabled: true, urlPattern: '', usernameSelector: '', passwordSelector: '' },
+        },
         'https://x.jp/login',
         creds
       ),

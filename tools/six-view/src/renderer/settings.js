@@ -455,6 +455,80 @@ function renderSites() {
   document.getElementById('pane-count').textContent = `（${currentConfig.sites.length} 画面）`;
 }
 
+const MAX_PAGE_SETS = 8;
+
+/**
+ * The page-switching card: one row per tab.
+ *
+ * The first tab is the way back to each pane's own page, so its URL box is
+ * fixed and it cannot be deleted - without it a switch would be one-way.
+ */
+function renderPageSets() {
+  if (!Array.isArray(currentConfig.pageSets) || currentConfig.pageSets.length === 0) {
+    currentConfig.pageSets = [{ id: 'home', name: 'ホーム', url: '' }];
+  }
+
+  const rows = document.getElementById('page-set-rows');
+  rows.textContent = '';
+
+  currentConfig.pageSets.forEach((set, index) => {
+    const isHome = index === 0;
+
+    const row = document.createElement('div');
+    row.className = 'page-set-row';
+
+    const nameField = document.createElement('label');
+    nameField.className = 'field';
+    const nameLabel = document.createElement('span');
+    nameLabel.textContent = isHome ? 'タブの名前（戻る用）' : 'タブの名前';
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = set.name || '';
+    name.placeholder = '例: X';
+    name.addEventListener('input', () => {
+      set.name = name.value;
+    });
+    nameField.append(nameLabel, name);
+
+    const urlField = document.createElement('label');
+    urlField.className = 'field grow';
+    const urlLabel = document.createElement('span');
+    urlLabel.textContent = isHome ? 'ページ（各パネルの最初のページ）' : '全パネルで開くページ';
+    const url = document.createElement('input');
+    url.type = 'text';
+    url.placeholder = 'https://x.com/login';
+    if (isHome) {
+      url.value = 'それぞれのパネルの最初のページ';
+      url.disabled = true;
+    } else {
+      url.value = set.url || '';
+      url.addEventListener('input', () => {
+        set.url = url.value;
+      });
+    }
+    urlField.append(urlLabel, url);
+
+    row.append(nameField, urlField);
+
+    if (!isHome) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn';
+      remove.textContent = '削除';
+      remove.addEventListener('click', () => {
+        currentConfig.pageSets.splice(index, 1);
+        if (currentConfig.activePageSet === set.id) {
+          currentConfig.activePageSet = currentConfig.pageSets[0].id;
+        }
+        renderPageSets();
+      });
+      row.appendChild(remove);
+    }
+
+    rows.appendChild(row);
+  });
+}
+
 function render(bootstrap) {
   currentConfig = bootstrap.config;
   encryptionAvailable = bootstrap.encryptionAvailable;
@@ -509,6 +583,7 @@ function render(bootstrap) {
     currentConfig.defaults.userAgent = readInput(defaultUa);
   });
 
+  renderPageSets();
   renderTelegram(bootstrap);
   renderSites();
 }
@@ -592,6 +667,18 @@ function renderTelegram(bootstrap) {
       : `トークンは有効です（@${result.username}）。チャット ID を入れてもう一度テストしてください。`;
   });
 }
+
+document.getElementById('add-page-set').addEventListener('click', () => {
+  if (currentConfig.pageSets.length >= MAX_PAGE_SETS) {
+    flash(`タブは最大 ${MAX_PAGE_SETS} 個までです。`, true);
+    return;
+  }
+  const taken = new Set(currentConfig.pageSets.map((set) => set.id));
+  let id = `tab-${currentConfig.pageSets.length + 1}`;
+  while (taken.has(id)) id = `${id}-2`;
+  currentConfig.pageSets.push({ id, name: '', url: '' });
+  renderPageSets();
+});
 
 document.getElementById('add-pane').addEventListener('click', () => {
   if (currentConfig.sites.length >= MAX_PANES) {

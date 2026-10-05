@@ -68,6 +68,43 @@ body {
   font-weight: 700;
 }
 
+/*
+ * The tabs that point every pane at one page. They sit beside the brand rather
+ * than with the buttons on the right, because they say what is on screen now,
+ * not what pressing them does.
+ */
+.page-sets {
+  display: flex;
+  gap: 4px;
+  margin-right: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.page-set {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.page-set:hover {
+  background: #303648;
+  color: var(--text);
+}
+
+.page-set.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
 .topbar-actions {
   display: flex;
   gap: 8px;
