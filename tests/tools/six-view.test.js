@@ -21,6 +21,8 @@ const { DmBridge } = require(path.join(toolRoot, 'src/lib/dm-bridge'));
 const telegramLib = require(path.join(toolRoot, 'src/lib/telegram'));
 const { DmService } = require(path.join(toolRoot, 'src/dm-service'));
 const { BoostService } = require(path.join(toolRoot, 'src/boost-service'));
+const xScripts = require(path.join(toolRoot, 'src/lib/x-scripts'));
+const { XService } = require(path.join(toolRoot, 'src/x-service'));
 
 function test(name, fn) {
   try {
@@ -1476,6 +1478,205 @@ async function runTests() {
     assert.deepStrictEqual(store.get('msns-cast-1@x'), { username: 'willymatze', password: '' });
     assert.strictEqual(store.get('msns-cast-1'), null, "the X ID is not the pane's own login");
   })) passed++; else failed++;
+
+  // --- X accounts: status, groups, analysis ---
+
+  if (test('X counts are read the way X prints them', () => {
+    assert.strictEqual(xScripts.parseCount('24 件の表示。ポストアナリティクスを表示'), 24);
+    assert.strictEqual(xScripts.parseCount('1,234 件のいいね'), 1234);
+    assert.strictEqual(xScripts.parseCount('1.2万 件の表示'), 12000);
+    assert.strictEqual(xScripts.parseCount('3.4K Likes'), 3400);
+    assert.strictEqual(xScripts.parseCount('いいねする'), 0);
+  })) passed++; else failed++;
+
+  if (test('an X page is sorted into ok, logged out, locked, suspended or unknown', () => {
+    const c = xScripts.classifyXState;
+    assert.strictEqual(c({ path: '/home', handle: 'willymatze' }), 'ok');
+    assert.strictEqual(c({ path: '/i/flow/login', handle: '' }), 'logged-out');
+    assert.strictEqual(c({ path: '/home', handle: 'a', cookie: false }), 'logged-out');
+    assert.strictEqual(c({ path: '/account/access', handle: 'a' }), 'locked');
+    assert.strictEqual(c({ path: '/home', handle: 'a', text: 'アカウントは凍結されています' }), 'suspended');
+    assert.strictEqual(c({ path: '/home', handle: 'a', text: 'Your account is suspended' }), 'suspended');
+    assert.strictEqual(c({ path: '/home', handle: '', loginButton: true }), 'logged-out');
+    assert.strictEqual(c({ path: '/home', handle: '' }), 'unknown', 'a page still drawing is not a ban');
+    assert.strictEqual(c(null), 'unknown');
+  })) passed++; else failed++;
+
+  if (test('the X readers only read the page', () => {
+    const forbidden = ['.click(', '.submit(', 'dispatchEvent', 'location.href =', 'setValue(', '.value =', 'fetch('];
+    for (const [name, script] of [
+      ['state', xScripts.buildXStateScript()],
+      ['posts', xScripts.buildXPostsScript('willymatze')],
+      ['scroll', xScripts.buildXScrollScript()],
+    ]) {
+      for (const bad of forbidden) assert.ok(!script.includes(bad), `${name} must not use ${bad}`);
+      assert.doesNotThrow(() => new Function(`return ${script}`), `${name} is valid JavaScript`);
+    }
+  })) passed++; else failed++;
+
+  if (test('posts merge by id and keep the latest numbers', () => {
+    const first = xScripts.mergePosts([], [{ id: '1', likes: 1 }, { id: '2', likes: 0 }]);
+    assert.strictEqual(first.added, 2);
+    const second = xScripts.mergePosts(first.posts, [{ id: '2', likes: 5 }, { id: '3', likes: 0 }, {}]);
+    assert.strictEqual(second.added, 1);
+    assert.strictEqual(second.posts.find((post) => post.id === '2').likes, 5);
+  })) passed++; else failed++;
+
+  if (test('groups, memos and the X check settings are kept and bounded', () => {
+    const config = schema.normalizeConfig(
+      {
+        sites: [
+          { id: 'a', name: 'A', url: 'https://m-sns.net/', group: 'アフィ', memo: 'm'.repeat(300) },
+          { id: 'b', name: 'B', url: 'https://m-sns.net/', group: 'アフィ' },
+          { id: 'c', name: 'C', url: 'https://m-sns.net/', group: '本垢' },
+          { id: 't', name: 'TOTP', url: 'https://mudostore.net/totp', keepPage: true },
+        ],
+        pageSets: [{ id: 'x', name: 'X', url: 'https://x.com/login' }],
+        activeGroup: 'アフィ',
+        xWatch: { enabled: false, intervalMinutes: 7, notify: 'yes' },
+      },
+      'msns'
+    );
+    assert.deepStrictEqual(schema.paneGroups(config), ['アフィ', '本垢']);
+    assert.strictEqual(config.sites[0].memo.length, 200);
+    assert.strictEqual(config.activeGroup, 'アフィ');
+    assert.deepStrictEqual(config.xWatch, { enabled: false, intervalMinutes: 60, notify: true });
+    assert.deepStrictEqual(schema.xAccountSites(config).map((site) => site.id), ['a', 'b', 'c'], 'the TOTP pane is no account');
+    const noX = schema.normalizeConfig({ sites: config.sites, pageSets: [{ id: 'home', name: '02', url: '' }] }, 'msns');
+    assert.deepStrictEqual(schema.xAccountSites(noX), [], 'without an X tab there are no X accounts');
+  })) passed++; else failed++;
+
+  /** A hidden window stand-in whose page answers the state and posts readers. */
+  function fakeXWindows(pages) {
+    const opened = [];
+    const openWindow = (site) => {
+      const win = {
+        site,
+        url: '',
+        closed: false,
+        contents: {
+          once(event, callback) {
+            if (event === 'did-stop-loading') setImmediate(callback);
+          },
+          removeListener() {},
+          executeJavaScript: async (source) => {
+            const page = pages[site.id] || {};
+            if (source.includes('AppTabBar_Profile_Link')) return { path: '/home', handle: '', text: '', ...page.state };
+            if (source.includes('tweetText')) {
+              const batch = (page.batches || []).shift() || [];
+              return { ok: true, posts: batch };
+            }
+            return { ok: true };
+          },
+        },
+        loadURL: async (url) => {
+          win.url = url;
+        },
+        close: () => {
+          win.closed = true;
+        },
+      };
+      opened.push(win);
+      return win;
+    };
+    return { opened, openWindow };
+  }
+
+  await testAsync('an account that goes wrong is reported once, and its recovery once', async () => {
+    const config = schema.normalizeConfig(
+      {
+        sites: [{ id: 'cast-1', name: 'キャスト1', url: 'https://m-sns.net/' }],
+        pageSets: [{ id: 'x', name: 'X', url: 'https://x.com/login' }],
+      },
+      'msns'
+    );
+    const pages = { 'cast-1': { state: { handle: 'willymatze' } } };
+    const windows = fakeXWindows(pages);
+    const said = [];
+    const service = new XService({
+      getConfig: () => config,
+      getSite: (id) => config.sites.find((site) => site.id === id) || null,
+      openWindow: windows.openWindow,
+      announce: async (text) => said.push(text),
+      wait: async () => {},
+    });
+
+    await service.checkAll();
+    assert.strictEqual(service.status().accounts[0].state, 'ok');
+    assert.strictEqual(said.length, 0, 'a first look that is fine is not news');
+
+    pages['cast-1'].state = { path: '/account/access', handle: '' };
+    await service.checkOne('cast-1');
+    await service.checkOne('cast-1');
+    assert.strictEqual(said.length, 1, 'the same problem is only reported once');
+    assert.ok(/ロック/.test(said[0]) && /@willymatze/.test(said[0]), said[0]);
+
+    pages['cast-1'].state = { path: '/home', handle: '' };
+    await service.checkOne('cast-1');
+    assert.strictEqual(said.length, 1, 'a page that is still drawing says nothing');
+
+    pages['cast-1'].state = { handle: 'willymatze' };
+    await service.checkOne('cast-1');
+    assert.strictEqual(said.length, 2);
+    assert.ok(/正常/.test(said[1]));
+    assert.ok(windows.opened.every((win) => win.closed), 'every hidden window is closed again');
+    assert.ok(windows.opened.every((win) => win.url === 'https://x.com/home'));
+  }).then((ok) => (ok ? passed++ : failed++));
+
+  await testAsync('no login cookie is a logged-out account without loading anything', async () => {
+    const config = schema.normalizeConfig(
+      { sites: [{ id: 'a', name: 'A', url: 'https://m-sns.net/' }], pageSets: [{ id: 'x', name: 'X', url: 'https://x.com/' }] },
+      'msns'
+    );
+    const windows = fakeXWindows({});
+    const service = new XService({
+      getConfig: () => config,
+      getSite: (id) => config.sites.find((site) => site.id === id) || null,
+      openWindow: windows.openWindow,
+      hasLoginCookie: async () => false,
+      wait: async () => {},
+    });
+    const result = await service.checkOne('a');
+    assert.strictEqual(result.state, 'logged-out');
+    assert.strictEqual(windows.opened.length, 0);
+  }).then((ok) => (ok ? passed++ : failed++));
+
+  await testAsync('analysis reads the own profile until no new posts come', async () => {
+    const config = schema.normalizeConfig(
+      { sites: [{ id: 'a', name: 'A', url: 'https://m-sns.net/' }], pageSets: [{ id: 'x', name: 'X', url: 'https://x.com/' }] },
+      'msns'
+    );
+    const post = (id, time, views) => ({ id, time, views, likes: 1, url: `https://x.com/me/status/${id}` });
+    const pages = {
+      a: {
+        state: { handle: 'me' },
+        batches: [
+          [post('3', '2026-10-03', 30), post('2', '2026-10-02', 20)],
+          [post('2', '2026-10-02', 21), post('1', '2026-10-01', 10)],
+        ],
+      },
+    };
+    const windows = fakeXWindows(pages);
+    const progress = [];
+    const service = new XService({
+      getConfig: () => config,
+      getSite: (id) => config.sites.find((site) => site.id === id) || null,
+      openWindow: windows.openWindow,
+      wait: async () => {},
+    });
+    const result = await service.analyze('a', { maxPosts: 50, onProgress: (p) => progress.push(p.found) });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.handle, 'me');
+    assert.deepStrictEqual(result.posts.map((p) => p.id), ['3', '2', '1'], 'newest first');
+    assert.strictEqual(result.posts[1].views, 21, 'the later reading wins');
+    assert.strictEqual(windows.opened[1].url, 'https://x.com/me');
+    assert.ok(progress.length >= 2);
+    assert.ok(windows.opened.every((win) => win.closed));
+
+    pages.a.state = { path: '/account/access' };
+    const locked = await service.analyze('a');
+    assert.deepStrictEqual(locked, { ok: false, reason: 'locked' });
+  }).then((ok) => (ok ? passed++ : failed++));
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 

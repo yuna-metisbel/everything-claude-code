@@ -13,6 +13,8 @@ const PANE_EVENTS = [
   'pane:toggle-maximize',
   'app:config-changed',
   'dm:status',
+  'x:status',
+  'x:progress',
 ];
 
 contextBridge.exposeInMainWorld('sixview', {
@@ -42,6 +44,13 @@ contextBridge.exposeInMainWorld('sixview', {
   setTelegramToken: (token) => ipcRenderer.invoke('telegram:set-token', { token }),
   testTelegram: (token, chatId) => ipcRenderer.invoke('telegram:test', { token, chatId }),
   discoverChatId: (token) => ipcRenderer.invoke('telegram:discover-chat', { token }),
+  // X accounts: status checks and post analysis, all done in the main process.
+  xStatus: () => ipcRenderer.invoke('x:status'),
+  xCheck: (siteId) => ipcRenderer.invoke('x:check', { siteId }),
+  xAnalyze: (siteId, maxPosts) => ipcRenderer.invoke('x:analyze', { siteId, maxPosts }),
+  xOpenPost: (url) => ipcRenderer.invoke('x:open-post', { url }),
+  openAnalytics: () => ipcRenderer.send('analytics:open'),
+  switchGroup: (group) => ipcRenderer.invoke('groups:switch', { group }),
   openSettings: () => ipcRenderer.send('settings:open'),
   closeSettings: () => ipcRenderer.send('settings:close'),
   reloadAll: () => ipcRenderer.send('panes:reload-all'),

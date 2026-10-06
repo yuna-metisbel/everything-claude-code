@@ -74,6 +74,34 @@
       </div>
     </section>
 
+    <section class="card" id="xwatch-card">
+      <h2>X アカウントの状態チェック</h2>
+      <p class="hint">
+        X のタブがあるとき、各パネルの X アカウントがログアウト・ロック・凍結になっていないかを、
+        見えないウィンドウで自動的に確かめます。読むだけで、いいねや投稿などの操作はしません。
+        問題が見つかるとパネルに赤い印が付き、Telegram 連携を使っていれば通知も届きます。
+      </p>
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="xw-enabled" />
+          <span>自動でチェックする</span>
+        </label>
+        <label class="field narrow">
+          <span>間隔</span>
+          <select id="xw-interval">
+            <option value="30">30 分ごと</option>
+            <option value="60">1 時間ごと</option>
+            <option value="180">3 時間ごと</option>
+            <option value="360">6 時間ごと</option>
+          </select>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="xw-notify" />
+          <span>問題が見つかったら Telegram に通知する</span>
+        </label>
+      </div>
+    </section>
+
     <section class="card" id="telegram-card">
       <h2>Telegram 連携（DMの通知と返信）</h2>
       <p class="hint">
@@ -158,6 +186,17 @@
           <label class="field grow">
             <span>ログインページ URL</span>
             <input type="text" data-field="url" placeholder="https://example.co.jp/login" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="field">
+            <span>グループ（同じ名前のパネルをまとめて表示できます）</span>
+            <input type="text" data-field="group" maxlength="30" placeholder="例: アフィ用" />
+          </label>
+          <label class="field grow">
+            <span>メモ（パネルの上に表示されます）</span>
+            <input type="text" data-field="memo" maxlength="200" placeholder="例: 毎朝チェック / 外注さん担当" />
           </label>
         </div>
 

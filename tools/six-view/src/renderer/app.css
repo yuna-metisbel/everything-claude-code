@@ -105,6 +105,105 @@ body {
   font-weight: 600;
 }
 
+.groups {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.group-chip {
+  padding: 4px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.group-chip.is-active {
+  border-style: solid;
+  border-color: var(--ok);
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.xstatus-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  background: #1b1e26;
+  border-bottom: 1px solid #262b36;
+  font-size: 12px;
+}
+
+.xstatus-title {
+  color: var(--text-dim);
+}
+
+.xstatus-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.xstatus-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #39404f;
+  background: #232834;
+  color: #d7dce6;
+  cursor: pointer;
+  font: inherit;
+}
+
+.xstatus-chip.is-ok {
+  border-color: #2a6b52;
+}
+
+.xstatus-chip.is-problem {
+  border-color: var(--danger);
+  background: #3a1f24;
+  color: #ffd2d2;
+  font-weight: 600;
+}
+
+.xstatus-note {
+  color: var(--text-dim);
+}
+
+#open-xstatus.has-problem {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.pane-badge.pane-group {
+  background: #1f3a30;
+  color: var(--ok);
+}
+
+.pane-badge.pane-xstate.is-problem {
+  background: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.pane-memo {
+  color: var(--warn);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  flex: 0 1 auto;
+}
+
 .topbar-actions {
   display: flex;
   gap: 8px;

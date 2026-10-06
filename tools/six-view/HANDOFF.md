@@ -26,7 +26,11 @@
 - ブーストのボタンを自動で押す
 - **「自動でさがす」** — DM の行とブーストのボタンを、クリック指定なしで自動検出
 - 上のタブで全パネルを一斉に別サイトへ切り替え（X を9アカウント並べる用）
-- **タブごとのログイン ID**（最新の変更）。パネル x タブごとに金庫の別スロット `<パネルID>@<タブID>` に保存し、
+- **X アカウントの状態チェック・投稿分析・グループとメモ**（最新の変更）。`src/x-service.js` と
+  `src/lib/x-scripts.js`。パネルのセッションで見えない BrowserWindow を1つずつ開き、読むだけのスクリプトで
+  状態（ok / logged-out / locked / suspended / unknown）と自分の投稿を取る。auth_token Cookie が無ければ
+  ページを開かずにログアウト扱い。unknown は通知しない（`known` に最後の確定状態を持つ）
+- タブごとのログイン ID。パネル x タブごとに金庫の別スロット `<パネルID>@<タブID>` に保存し、
   そのタブのサイトにだけ入力する。設定画面の「保存して反映」は、入力済みで未保存の ID もまとめて保存する
 
 ### 状態
@@ -34,7 +38,7 @@
 - PR: [#2](https://github.com/yuna-metisbel/everything-claude-code/pull/2) — **オープン / ドラフト**。base は `main`
 - このリポジトリに **CI は設定されていません**。PR の status が `pending / total_count: 0` なのは
   「チェックが1つもない」という意味で、失敗ではありません。直すものはありません
-- ユニットテスト: `node tests/tools/six-view.test.js` → **82 passed, 0 failed**
+- ユニットテスト: `node tests/tools/six-view.test.js` → **91 passed, 0 failed**
 - 全体テスト: `node tests/run-all.js` → 1946件中 **3件失敗**。これは既存の失敗で、six-view とは無関係です
   （`hooks/hooks.test.js`、`lib/session-aliases.test.js`、`lib/session-manager.test.js`。
   root で動かすとファイル権限のテストが成立しないため）
@@ -140,6 +144,7 @@ tools/six-view/
   src/preload.js                 レンダラーへの唯一の橋（パスワードは通らない）
   src/dm-service.js              DM 監視の実行時処理
   src/boost-service.js           ブースト押しの実行時処理
+  src/x-service.js               X アカウントの状態チェックと投稿分析（見えないウィンドウ）
   src/lib/
     config-schema.js             設定の正規化。タブ(pageSets)もここ。Electron 非依存＝単体テスト可
     config-store.js              config.json の読み書き（tmp + rename で原子的に）
@@ -148,12 +153,14 @@ tools/six-view/
     dm-script.js / dm-detect-script.js    DM の操作と自動検出
     boost-script.js              ブーストの読み取り・押す・自動検出
     page-runner.js               遷移で壊れた実行環境を「結果」として扱う共通処理
+    x-scripts.js                 X の状態判定と投稿の読み取り（読むだけ）
     telegram.js / dm-bridge.js   Telegram クライアントと返信の経路表
   src/renderer/
     index.html / app.js / app.css            メインウィンドウ（グリッドとタブ）
     settings.html / settings.js / settings.css  設定ウィンドウ
+    analytics.html / analytics.js / analytics.css  投稿分析ウィンドウ
   README.md                      使い方（日本語・非開発者向け）
-tests/tools/six-view.test.js     ユニットテスト 82件
+tests/tools/six-view.test.js     ユニットテスト 91件
 ```
 
 ---
@@ -189,6 +196,7 @@ xvfb-run -a npx electron --no-sandbox <ハーネスのパス>
 
 | ハーネス | 何を確かめるか | 結果 |
 |----------|----------------|------|
+| `x-ui-harness.js` | 状態バー・赤い印・グループ絞り込み・分析ウィンドウ・設定の保存 | 16/16 |
 | `pages-harness.js` | タブ切り替え。3パネルが3つの別 X ログインになること | 16/16 |
 | `pagesets-settings-harness.js` | 設定画面でタブの追加・改名・削除が保存されること | 12/12 |
 | `detect-harness.js` | 「自動でさがす」が別の書き方の2つの画面で動くこと | 31/31 |

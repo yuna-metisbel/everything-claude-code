@@ -442,6 +442,9 @@ function normalizeSite(raw, index, usedIds) {
     // Stays on its own page whichever tab is showing - a code generator or a
     // memo that is needed while every other pane is on X.
     keepPage: toBoolean(source.keepPage, false),
+    // A label to filter the grid by, and a note shown on the pane.
+    group: toTrimmedString(source.group).slice(0, 30),
+    memo: toTrimmedString(source.memo).slice(0, 200),
     zoomFactor: clampZoomOverride(source.zoomFactor),
     userAgent: toTrimmedString(source.userAgent),
     autofill: normalizeAutofill(source.autofill),
@@ -586,10 +589,57 @@ function normalizeConfig(raw, brandId = DEFAULT_BRAND) {
       userAgent: toTrimmedString(defaults.userAgent),
     },
     telegram: normalizeTelegram(source.telegram),
+    xWatch: normalizeXWatch(source.xWatch),
     pageSets,
     activePageSet,
+    // '' shows every pane; a group name shows only that group's panes.
+    activeGroup: toTrimmedString(source.activeGroup).slice(0, 30),
     sites,
   };
+}
+
+const DEFAULT_X_WATCH = { enabled: true, intervalMinutes: 60, notify: true };
+const X_WATCH_INTERVALS = [30, 60, 180, 360];
+
+/** The X account check: on, how often, and whether Telegram hears about it. */
+function normalizeXWatch(raw) {
+  const source = isPlainObject(raw) ? raw : {};
+  const interval = Number(source.intervalMinutes);
+  return {
+    enabled: toBoolean(source.enabled, DEFAULT_X_WATCH.enabled),
+    intervalMinutes: X_WATCH_INTERVALS.includes(interval) ? interval : DEFAULT_X_WATCH.intervalMinutes,
+    notify: toBoolean(source.notify, DEFAULT_X_WATCH.notify),
+  };
+}
+
+/** Group names in the order the panes first use them. */
+function paneGroups(config) {
+  const seen = [];
+  for (const site of (config && config.sites) || []) {
+    if (site.group && !seen.includes(site.group)) seen.push(site.group);
+  }
+  return seen;
+}
+
+/** Hostname of a URL, or '' when it is not one. */
+function hostOfUrl(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Panes that hold an X account: every pane that follows the tabs, as long as
+ * one of the tabs opens X. A pane kept on its own page (a code generator) is
+ * not an account.
+ */
+function xAccountSites(config) {
+  const sets = (config && config.pageSets) || [];
+  const hasXTab = sets.some((set) => /(^|\.)(x|twitter)\.com$/.test(hostOfUrl(set.url)));
+  if (!hasXTab) return [];
+  return ((config && config.sites) || []).filter((site) => site.enabled !== false && !site.keepPage && site.url);
 }
 
 /** Effective zoom for a pane: per-site override, else the global default. */
@@ -633,6 +683,11 @@ module.exports = {
   automationPaused,
   credentialSlotId,
   credentialSlotIds,
+  DEFAULT_X_WATCH,
+  X_WATCH_INTERVALS,
+  normalizeXWatch,
+  paneGroups,
+  xAccountSites,
   currentPageSet,
   getPageSet,
   isHomePageSet,

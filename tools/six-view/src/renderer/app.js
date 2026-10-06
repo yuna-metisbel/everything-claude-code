@@ -19,11 +19,22 @@ const reopenUrl = document.getElementById('reopen-url');
 const reopenWipe = document.getElementById('reopen-wipe');
 const reopenStatus = document.getElementById('reopen-status');
 const pageSetBar = document.getElementById('page-sets');
+const groupBar = document.getElementById('groups');
+const xStatusBar = document.getElementById('xstatus-bar');
+const xStatusList = document.getElementById('xstatus-list');
+const xStatusNote = document.getElementById('xstatus-note');
+const xStatusButton = document.getElementById('open-xstatus');
+const analyticsButton = document.getElementById('open-analytics');
 
 /** siteId -> { root, webview, els, signature } */
 const panes = new Map();
 let focusedSiteId = null;
 let maximizedSiteId = null;
+/** siteId -> group name, and the group being shown ('' = every pane). */
+const paneGroupOf = new Map();
+let activeGroup = '';
+/** The latest X account check, as the main process reported it. */
+let xStatus = null;
 
 /**
  * What has to change for a pane's page to be rebuilt. The URL here is the one
@@ -51,10 +62,96 @@ function setFocused(siteId) {
   }
 }
 
+/**
+ * Which panes are on screen: one when a pane is maximized, otherwise every pane
+ * in the chosen group. Hidden panes keep their page loaded - hiding is not
+ * closing, so switching groups never reloads anything.
+ */
 function applyMaximized() {
   grid.classList.toggle('is-maximized', Boolean(maximizedSiteId));
   for (const [id, pane] of panes) {
-    pane.root.classList.toggle('is-hidden', Boolean(maximizedSiteId) && id !== maximizedSiteId);
+    const outOfGroup = Boolean(activeGroup) && paneGroupOf.get(id) !== activeGroup;
+    const hidden = maximizedSiteId ? id !== maximizedSiteId : outOfGroup;
+    pane.root.classList.toggle('is-hidden', hidden);
+  }
+}
+
+/** "すべて" plus one chip per group, when any pane has a group. */
+function renderGroups(config) {
+  const groups = [];
+  for (const site of config.sites) {
+    if (site.enabled !== false && site.group && !groups.includes(site.group)) groups.push(site.group);
+  }
+  groupBar.textContent = '';
+  groupBar.hidden = groups.length === 0;
+  activeGroup = groups.includes(config.activeGroup) ? config.activeGroup : '';
+
+  for (const name of ['', ...groups]) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'group-chip';
+    chip.textContent = name || 'すべて';
+    chip.title = name ? `グループ「${name}」のパネルだけ表示します` : 'すべてのパネルを表示します';
+    if (name === activeGroup) chip.classList.add('is-active');
+    chip.addEventListener('click', () => {
+      if (name === activeGroup) return;
+      void window.sixview.switchGroup(name);
+    });
+    groupBar.appendChild(chip);
+  }
+}
+
+function formatCheckedAt(ms) {
+  if (!ms) return '未確認';
+  const d = new Date(ms);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')} 確認`;
+}
+
+const X_PROBLEM_STATES = ['logged-out', 'locked', 'suspended'];
+
+/** Badges on the panes and the chips in the status bar. */
+function applyXStatus(status) {
+  xStatus = status;
+  const accounts = (status && status.accounts) || [];
+  xStatusButton.hidden = accounts.length === 0;
+  analyticsButton.hidden = accounts.length === 0;
+  if (accounts.length === 0) xStatusBar.hidden = true;
+
+  const problems = accounts.filter((account) => X_PROBLEM_STATES.includes(account.state));
+  xStatusButton.textContent = problems.length > 0 ? `アカウント状態（要確認 ${problems.length}）` : 'アカウント状態';
+  xStatusButton.classList.toggle('has-problem', problems.length > 0);
+
+  for (const [id, pane] of panes) {
+    const account = accounts.find((entry) => entry.siteId === id);
+    const problem = account && X_PROBLEM_STATES.includes(account.state);
+    pane.els.xstate.hidden = !problem;
+    pane.els.xstate.textContent = problem ? `X: ${account.label}` : '';
+    pane.els.xstate.classList.toggle('is-problem', Boolean(problem));
+  }
+
+  xStatusList.textContent = '';
+  for (const account of accounts) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'xstatus-chip';
+    if (account.state === 'ok') chip.classList.add('is-ok');
+    if (X_PROBLEM_STATES.includes(account.state)) chip.classList.add('is-problem');
+    const who = account.handle ? `@${account.handle}` : account.name;
+    chip.textContent = `${who}：${account.label}`;
+    chip.title = `${account.name} / ${formatCheckedAt(account.checkedAt)}（押すとこのアカウントだけ確認します）`;
+    chip.addEventListener('click', async () => {
+      chip.textContent = `${who}：確認中…`;
+      await window.sixview.xCheck(account.siteId);
+    });
+    xStatusList.appendChild(chip);
+  }
+
+  if (status && status.checking) {
+    xStatusNote.textContent = '確認しています…（1アカウント数秒ずつ）';
+  } else if (status && !status.enabled) {
+    xStatusNote.textContent = '自動チェックはオフです（設定で変えられます）';
+  } else {
+    xStatusNote.textContent = '自動でチェックしています。問題があれば Telegram にも通知します。';
   }
 }
 
@@ -130,6 +227,9 @@ function buildPane(site, index, partition, url) {
     name: root.querySelector('.pane-name'),
     private: root.querySelector('.pane-private'),
     status: root.querySelector('.pane-status'),
+    group: root.querySelector('.pane-group'),
+    xstate: root.querySelector('.pane-xstate'),
+    memo: root.querySelector('.pane-memo'),
     url: root.querySelector('.pane-url'),
     urlInput: root.querySelector('.pane-url-input'),
     body: root.querySelector('.pane-body'),
@@ -189,6 +289,11 @@ function updatePaneShell(pane, site, partition, url) {
   pane.els.name.textContent = site.name;
   pane.els.name.title = site.name;
   pane.els.private.hidden = !site.incognito;
+  pane.els.group.hidden = !site.group;
+  pane.els.group.textContent = site.group || '';
+  pane.els.memo.hidden = !site.memo;
+  pane.els.memo.textContent = site.memo || '';
+  pane.els.memo.title = site.memo || '';
   pane.els.url.textContent = url || '';
   pane.root.dataset.partition = partition;
 }
@@ -393,6 +498,9 @@ function render(bootstrap) {
   showNotice(messages.join('  /  '));
 
   renderPageSets(config);
+  paneGroupOf.clear();
+  for (const site of config.sites) paneGroupOf.set(site.id, site.group || '');
+  renderGroups(config);
   const sets = Array.isArray(config.pageSets) ? config.pageSets : [];
   const homeTab = sets.find((set) => !set.url) || sets[0] || { id: '', name: 'ホーム' };
   const onHomeTab = !config.activePageSet || config.activePageSet === homeTab.id;
@@ -441,6 +549,7 @@ function render(bootstrap) {
 
   if (!focusedSiteId && visible.length > 0) setFocused(visible[0].id);
   applyMaximized();
+  if (xStatus) applyXStatus(xStatus);
 }
 
 document.getElementById('reload-all').addEventListener('click', () => window.sixview.reloadAll());
@@ -453,5 +562,18 @@ window.sixview.on('pane:toggle-maximize', () => {
   if (focusedSiteId) toggleMaximized(focusedSiteId);
 });
 window.sixview.on('app:config-changed', render);
+window.sixview.on('x:status', applyXStatus);
 
-window.sixview.bootstrap().then(render);
+xStatusButton.addEventListener('click', () => {
+  xStatusBar.hidden = !xStatusBar.hidden;
+});
+document.getElementById('xstatus-check').addEventListener('click', () => {
+  xStatusNote.textContent = '確認しています…（1アカウント数秒ずつ）';
+  void window.sixview.xCheck('');
+});
+analyticsButton.addEventListener('click', () => window.sixview.openAnalytics());
+
+window.sixview.bootstrap().then((bootstrap) => {
+  render(bootstrap);
+  return window.sixview.xStatus().then((status) => status && applyXStatus(status));
+});

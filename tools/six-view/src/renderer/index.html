@@ -16,7 +16,10 @@
         <span class="brand-name">SixView</span>
       </div>
       <nav id="page-sets" class="page-sets" aria-label="ページの切り替え"></nav>
+      <nav id="groups" class="groups" aria-label="グループで絞り込む" hidden></nav>
       <div class="topbar-actions">
+        <button type="button" id="open-xstatus" class="btn" hidden>アカウント状態</button>
+        <button type="button" id="open-analytics" class="btn" hidden>投稿分析</button>
         <button type="button" id="login-all" class="btn btn-primary">すべて自動ログイン</button>
         <button type="button" id="reload-all" class="btn">すべて再読み込み</button>
         <button type="button" id="open-settings" class="btn">設定</button>
@@ -24,6 +27,13 @@
     </header>
 
     <div id="notice" class="notice" hidden></div>
+
+    <div id="xstatus-bar" class="xstatus-bar" hidden>
+      <span class="xstatus-title">X アカウントの状態</span>
+      <span id="xstatus-list" class="xstatus-list"></span>
+      <button type="button" id="xstatus-check" class="btn">今すぐチェック</button>
+      <span id="xstatus-note" class="xstatus-note"></span>
+    </div>
 
     <div id="closed-bar" class="closed-bar" hidden>
       <span class="closed-label">閉じているパネル</span>
@@ -51,6 +61,9 @@
           <span class="pane-index"></span>
           <span class="pane-name"></span>
           <span class="pane-badge pane-private" hidden>シークレット</span>
+          <span class="pane-badge pane-group" hidden></span>
+          <span class="pane-badge pane-xstate" hidden></span>
+          <span class="pane-memo" hidden></span>
           <span class="pane-status" title="状態"></span>
           <span class="pane-url" title="クリックするとアドレスを変更できます"></span>
           <input

@@ -37,6 +37,7 @@ const { buildDmDetectScript } = require('./lib/dm-detect-script');
 const { buildBoostDetectScript } = require('./lib/boost-script');
 const { DmService } = require('./dm-service');
 const { BoostService } = require('./boost-service');
+const { XService } = require('./x-service');
 const { buildMenu } = require('./menu');
 
 /**
@@ -79,6 +80,9 @@ let secrets = null;
 /** @type {DmService|null} */
 let dmService = null;
 let boostService = null;
+let xService = null;
+/** @type {BrowserWindow|null} */
+let analyticsWindow = null;
 
 /** siteId -> pane runtime */
 const panes = new Map();
@@ -92,6 +96,12 @@ function log(...args) {
 function sendToMain(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function sendToAnalytics(channel, payload) {
+  if (analyticsWindow && !analyticsWindow.isDestroyed()) {
+    analyticsWindow.webContents.send(channel, payload);
   }
 }
 
@@ -390,6 +400,64 @@ function createDmService() {
   boostService.refresh();
 }
 
+/**
+ * A window nobody sees, on one pane's own session, for the X account checks.
+ * It shares the pane's cookies - that is the point - but never its screen.
+ */
+function openHiddenWindow(site) {
+  const win = new BrowserWindow({
+    show: false,
+    width: 1200,
+    height: 1600,
+    webPreferences: {
+      partition: partitionForSite(site, RUN_ID),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+      spellcheck: false,
+    },
+  });
+  win.webContents.setAudioMuted(true);
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const userAgent = resolveUserAgent(config, site);
+  if (userAgent) win.webContents.setUserAgent(userAgent);
+  return {
+    contents: win.webContents,
+    loadURL: (url) => win.loadURL(url),
+    close: () => {
+      if (!win.isDestroyed()) win.destroy();
+    },
+  };
+}
+
+function createXService() {
+  xService = new XService({
+    getConfig: () => config,
+    getSite: (siteId) => getSite(siteId),
+    openWindow: openHiddenWindow,
+    // No X login cookie at all is a logged-out account; no page needs loading
+    // to know that.
+    hasLoginCookie: async (site) => {
+      try {
+        const cookies = await session
+          .fromPartition(partitionForSite(site, RUN_ID))
+          .cookies.get({ url: 'https://x.com', name: 'auth_token' });
+        return cookies.length > 0;
+      } catch {
+        return null;
+      }
+    },
+    announce: (text) => (dmService ? dmService.announce(text) : Promise.resolve({ ok: false })),
+    onStatus: (status) => {
+      sendToMain('x:status', status);
+      sendToAnalytics('x:status', status);
+    },
+    log,
+  });
+  xService.refresh();
+}
+
 // ---------------------------------------------------------------------------
 // Pane commands
 // ---------------------------------------------------------------------------
@@ -580,6 +648,36 @@ function openSettingsWindow() {
   void settingsWindow.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
 }
 
+function openAnalyticsWindow() {
+  if (analyticsWindow && !analyticsWindow.isDestroyed()) {
+    analyticsWindow.focus();
+    return;
+  }
+
+  analyticsWindow = new BrowserWindow({
+    width: 1100,
+    height: 820,
+    minWidth: 720,
+    minHeight: 480,
+    title: `${BRAND.appName} 投稿分析`,
+    backgroundColor: '#12141a',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    },
+  });
+
+  analyticsWindow.on('closed', () => {
+    analyticsWindow = null;
+  });
+
+  void analyticsWindow.loadFile(path.join(__dirname, 'renderer', 'analytics.html'));
+}
+
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
@@ -625,6 +723,7 @@ function registerIpc() {
     setupPaneSessions();
     if (dmService) dmService.refresh();
     if (boostService) boostService.refresh();
+    if (xService) xService.refresh();
     sendToMain('app:config-changed', bootstrapPayload());
     return bootstrapPayload();
   });
@@ -861,6 +960,40 @@ function registerIpc() {
     return dmService.testToken(token, chatId);
   });
 
+  /** Show only one group's panes (or all of them, for ''). */
+  ipcMain.handle('groups:switch', (_event, payload) => {
+    const group = payload && typeof payload.group === 'string' ? payload.group : '';
+    if (group && !config.sites.some((site) => site.group === group)) return { ok: false, reason: 'unknown-group' };
+    config.activeGroup = group;
+    config = saveConfig(userDataDir, config, BRAND.id);
+    sendToMain('app:config-changed', bootstrapPayload());
+    return { ok: true, group };
+  });
+
+  ipcMain.handle('x:status', () => (xService ? xService.status() : null));
+  ipcMain.handle('x:check', (_event, payload) => {
+    if (!xService) return { ok: false, reason: 'not-ready' };
+    if (payload && payload.siteId) return xService.checkOne(payload.siteId);
+    // Checking eight accounts takes a while; progress arrives as x:status.
+    void xService.checkAll();
+    return { ok: true, started: true };
+  });
+  ipcMain.handle('x:analyze', (_event, payload) => {
+    if (!xService || !payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
+    const maxPosts = Math.min(300, Math.max(10, Number(payload.maxPosts) || 100));
+    return xService.analyze(payload.siteId, {
+      maxPosts,
+      onProgress: (progress) => sendToAnalytics('x:progress', progress),
+    });
+  });
+  ipcMain.handle('x:open-post', (_event, payload) => {
+    const url = payload && typeof payload.url === 'string' ? payload.url : '';
+    if (!/^https:\/\/x\.com\/[A-Za-z0-9_]+\/status\/\d+$/.test(url)) return { ok: false };
+    void shell.openExternal(url);
+    return { ok: true };
+  });
+  ipcMain.on('analytics:open', () => openAnalyticsWindow());
+
   ipcMain.on('settings:open', () => openSettingsWindow());
   ipcMain.on('settings:close', () => {
     if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
@@ -904,6 +1037,7 @@ if (!app.requestSingleInstanceLock()) {
     applyLoginItemSetting();
     setupPaneSessions();
     createDmService();
+    createXService();
     registerIpc();
     buildMenu({
       appName: BRAND.appName,
@@ -933,6 +1067,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     if (dmService) dmService.stop();
     if (boostService) boostService.stop();
+    if (xService) xService.stop();
   });
 
   app.on('window-all-closed', () => {

@@ -43,6 +43,8 @@ function blankSite(takenIds, preset = {}) {
     enabled: true,
     incognito: false,
     keepPage: false,
+    group: '',
+    memo: '',
     zoomFactor: 0,
     userAgent: '',
     autofill: {
@@ -645,8 +647,30 @@ function render(bootstrap) {
   });
 
   renderPageSets();
+  renderXWatch();
   renderTelegram(bootstrap);
   renderSites();
+}
+
+/** The X account check card. Plain config, saved with "保存して反映". */
+function renderXWatch() {
+  if (!currentConfig.xWatch) currentConfig.xWatch = { enabled: true, intervalMinutes: 60, notify: true };
+  const watch = currentConfig.xWatch;
+  const enabled = document.getElementById('xw-enabled');
+  const interval = document.getElementById('xw-interval');
+  const notify = document.getElementById('xw-notify');
+  enabled.checked = Boolean(watch.enabled);
+  interval.value = String(watch.intervalMinutes || 60);
+  notify.checked = Boolean(watch.notify);
+  enabled.onchange = () => {
+    watch.enabled = enabled.checked;
+  };
+  interval.onchange = () => {
+    watch.intervalMinutes = Number(interval.value);
+  };
+  notify.onchange = () => {
+    watch.notify = notify.checked;
+  };
 }
 
 /** The Telegram card: token in the vault, the rest in the config. */
