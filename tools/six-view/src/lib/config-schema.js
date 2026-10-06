@@ -339,6 +339,7 @@ function isHomePageSet(set) {
  */
 function resolvePaneUrl(config, site) {
   if (!site || !site.url) return '';
+  if (site.keepPage) return site.url;
   const set = currentPageSet(config);
   // No tabs at all (an older config, or a test fixture) means nothing to
   // switch to, so the pane shows its own page.
@@ -366,6 +367,7 @@ function credentialSlotIds(config) {
   const ids = [];
   for (const site of sites) {
     ids.push(site.id);
+    if (site.keepPage) continue;
     for (const set of sets) {
       if (!isHomePageSet(set)) ids.push(credentialSlotId(site.id, set.id));
     }
@@ -437,6 +439,9 @@ function normalizeSite(raw, index, usedIds) {
     url: normalizeUrl(source.url),
     enabled: toBoolean(source.enabled, true),
     incognito: toBoolean(source.incognito, false),
+    // Stays on its own page whichever tab is showing - a code generator or a
+    // memo that is needed while every other pane is on X.
+    keepPage: toBoolean(source.keepPage, false),
     zoomFactor: clampZoomOverride(source.zoomFactor),
     userAgent: toTrimmedString(source.userAgent),
     autofill: normalizeAutofill(source.autofill),

@@ -1450,6 +1450,26 @@ async function runTests() {
     assert.strictEqual(autofill.shouldAutofill(onX.site, 'https://x.com/login', null), false, 'no X login, nothing typed');
   })) passed++; else failed++;
 
+  if (test('a pane marked keepPage stays on its own page on every tab', () => {
+    const config = schema.normalizeConfig(
+      {
+        sites: [
+          { id: 'cast-1', name: 'キャスト1', url: 'https://m-sns.net/cast/login/' },
+          { id: 'totp', name: 'TOTP', url: 'https://mudostore.net/totp', keepPage: true },
+        ],
+        activePageSet: 'x',
+      },
+      'msns'
+    );
+    const [cast, totp] = config.sites;
+    assert.strictEqual(totp.keepPage, true);
+    assert.strictEqual(cast.keepPage, false, 'off unless asked for');
+    assert.ok(/x\.com/.test(schema.resolvePaneUrl(config, cast)), 'an ordinary pane follows the tab');
+    assert.strictEqual(schema.resolvePaneUrl(config, totp), 'https://mudostore.net/totp');
+    assert.strictEqual(autofill.loginForTab(totp, schema.currentPageSet(config)).slotId, 'totp');
+    assert.ok(!schema.credentialSlotIds(config).includes('totp@x'), 'no X login for a pane that never shows X');
+  })) passed++; else failed++;
+
   if (test('an ID saved without a password reads back as the ID alone', () => {
     const store = new SecretStore(fs.mkdtempSync(path.join(tmpDir, 'tab-')), fakeSafeStorage());
     assert.strictEqual(store.set('msns-cast-1@x', 'willymatze', ''), true);

@@ -100,7 +100,7 @@ function shouldAutofill(site, url, credentials) {
  */
 function loginForTab(site, set) {
   if (!site) return { slotId: '', site: null };
-  if (!set || isHomePageSet(set)) return { slotId: site.id, site };
+  if (!set || isHomePageSet(set) || site.keepPage) return { slotId: site.id, site };
   const own = site.autofill || {};
   return {
     slotId: credentialSlotId(site.id, set.id),

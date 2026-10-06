@@ -42,6 +42,7 @@ function blankSite(takenIds, preset = {}) {
     url: preset.url || '',
     enabled: true,
     incognito: false,
+    keepPage: false,
     zoomFactor: 0,
     userAgent: '',
     autofill: {
@@ -490,7 +491,7 @@ function buildSiteCard(site, index, hasCredential) {
 
   // One more login per extra tab: on the X tab this pane is an X account, and
   // that account's ID is kept apart from the pane's own 02 login.
-  for (const set of savedTabs()) {
+  for (const set of site.keepPage ? [] : savedTabs()) {
     const tabCreds = ownCreds.cloneNode(true);
     const tabName = set.name || set.url;
     tabCreds.classList.add('creds-tab');
