@@ -17,6 +17,7 @@ const MAX_PANES = 12;
 let currentConfig = null;
 let encryptionAvailable = false;
 let credentialStatus = {};
+let savedPageSets = [];
 let presets = [];
 
 /** Copy a pane so a second account on the same site gets its own session. */
@@ -107,8 +108,8 @@ function writeInput(input, value) {
   input.value = value === null || value === undefined ? '' : String(value);
 }
 
-function renderCredStatus(card, hasCredential) {
-  const status = card.querySelector('.cred-status');
+function renderCredStatus(creds, hasCredential) {
+  const status = creds.querySelector('.cred-status');
   if (!encryptionAvailable) {
     status.textContent = 'この環境では保存できません（Cookie によるログイン保持のみ利用できます）。';
     return;
@@ -325,6 +326,82 @@ function wireBoost(card, site) {
   });
 }
 
+/** Mirrors credentialSlotId in config-schema.js: a pane's login on one tab. */
+function tabSlotId(siteId, setId) {
+  return `${siteId}@${setId}`;
+}
+
+/**
+ * Tabs that already exist in the saved config. A tab typed in just now has no
+ * login slot until "保存して反映" makes it real, so it gets its rows after that.
+ */
+function savedTabs() {
+  return savedPageSets.filter((set) => set.id !== 'home' && set.url);
+}
+
+/** Hook one ID / password row up to one vault slot. */
+function wireCreds(creds, slotId, label, hasCredential) {
+  creds.dataset.slot = slotId;
+  creds.dataset.label = label;
+  const usernameInput = creds.querySelector('[data-cred="username"]');
+  const passwordInput = creds.querySelector('[data-cred="password"]');
+  usernameInput.value = '';
+  passwordInput.value = '';
+
+  if (!encryptionAvailable) {
+    usernameInput.disabled = true;
+    passwordInput.disabled = true;
+  }
+
+  creds.querySelector('[data-cred-action="save"]').addEventListener('click', async () => {
+    const username = usernameInput.value;
+    const password = passwordInput.value;
+    if (!username && !password) {
+      flash('ID を入力してください。', true);
+      return;
+    }
+    const ok = await saveCredRow(creds);
+    flash(ok ? `${label} の認証情報を保存しました。` : '認証情報を保存できませんでした。', !ok);
+  });
+
+  creds.querySelector('[data-cred-action="clear"]').addEventListener('click', async () => {
+    await window.sixview.clearCredentials(slotId);
+    usernameInput.value = '';
+    passwordInput.value = '';
+    credentialStatus[slotId] = false;
+    renderCredStatus(creds, false);
+    flash(`${label} の認証情報を削除しました。`);
+  });
+
+  renderCredStatus(creds, hasCredential);
+}
+
+/** Send one row to the vault and clear it. Returns true when it was stored. */
+async function saveCredRow(creds) {
+  const usernameInput = creds.querySelector('[data-cred="username"]');
+  const passwordInput = creds.querySelector('[data-cred="password"]');
+  const result = await window.sixview.setCredentials(creds.dataset.slot, usernameInput.value, passwordInput.value);
+  if (!result || !result.ok) return false;
+  usernameInput.value = '';
+  passwordInput.value = '';
+  credentialStatus[creds.dataset.slot] = true;
+  renderCredStatus(creds, true);
+  return true;
+}
+
+/**
+ * Rows with something typed in that were never sent to the vault. "保存して
+ * 反映" stores these too - typing an ID and pressing the big save button is
+ * the obvious thing to do, and it used to quietly drop the ID.
+ */
+function pendingCredRows() {
+  return Array.from(sitesRoot.querySelectorAll('.creds[data-slot]')).filter((creds) => {
+    const username = creds.querySelector('[data-cred="username"]').value;
+    const password = creds.querySelector('[data-cred="password"]').value;
+    return Boolean(username || password);
+  });
+}
+
 function buildSiteCard(site, index, hasCredential) {
   const fragment = siteTemplate.content.cloneNode(true);
   const card = fragment.querySelector('.site');
@@ -408,41 +485,23 @@ function buildSiteCard(site, index, hasCredential) {
   wireDmPickers(card, site);
   wireBoost(card, site);
 
-  const usernameInput = card.querySelector('[data-cred="username"]');
-  const passwordInput = card.querySelector('[data-cred="password"]');
+  const ownCreds = card.querySelector('.creds');
+  wireCreds(ownCreds, site.id, site.name, hasCredential);
 
-  if (!encryptionAvailable) {
-    usernameInput.disabled = true;
-    passwordInput.disabled = true;
+  // One more login per extra tab: on the X tab this pane is an X account, and
+  // that account's ID is kept apart from the pane's own 02 login.
+  for (const set of savedTabs()) {
+    const tabCreds = ownCreds.cloneNode(true);
+    const tabName = set.name || set.url;
+    tabCreds.classList.add('creds-tab');
+    tabCreds.querySelector('[data-cred="username"]').previousElementSibling.textContent =
+      `「${tabName}」タブでのログイン ID`;
+    tabCreds.querySelector('[data-cred="password"]').previousElementSibling.textContent =
+      `「${tabName}」タブでのパスワード（空欄可）`;
+    ownCreds.parentNode.appendChild(tabCreds);
+    const slotId = tabSlotId(site.id, set.id);
+    wireCreds(tabCreds, slotId, `${site.name}（${tabName}）`, Boolean(credentialStatus[slotId]));
   }
-
-  card.querySelector('[data-cred-action="save"]').addEventListener('click', async () => {
-    const username = usernameInput.value;
-    const password = passwordInput.value;
-    if (!username && !password) {
-      flash('ID とパスワードを入力してください。', true);
-      return;
-    }
-    const result = await window.sixview.setCredentials(site.id, username, password);
-    if (result && result.ok) {
-      usernameInput.value = '';
-      passwordInput.value = '';
-      renderCredStatus(card, true);
-      flash(`${site.name} の認証情報を保存しました。`);
-    } else {
-      flash('認証情報を保存できませんでした。', true);
-    }
-  });
-
-  card.querySelector('[data-cred-action="clear"]').addEventListener('click', async () => {
-    await window.sixview.clearCredentials(site.id);
-    usernameInput.value = '';
-    passwordInput.value = '';
-    renderCredStatus(card, false);
-    flash(`${site.name} の認証情報を削除しました。`);
-  });
-
-  renderCredStatus(card, hasCredential);
   sitesRoot.appendChild(fragment);
 }
 
@@ -533,6 +592,7 @@ function render(bootstrap) {
   currentConfig = bootstrap.config;
   encryptionAvailable = bootstrap.encryptionAvailable;
   credentialStatus = bootstrap.credentialStatus || {};
+  savedPageSets = JSON.parse(JSON.stringify(bootstrap.config.pageSets || []));
   presets = bootstrap.presets || [];
 
   const presetSelect = document.getElementById('preset');
@@ -704,9 +764,35 @@ document.getElementById('enable-all-autofill').addEventListener('click', () => {
 
 document.getElementById('save').addEventListener('click', async () => {
   try {
+    // Remember what was typed before the cards are redrawn.
+    const pending = pendingCredRows().map((creds) => ({
+      slot: creds.dataset.slot,
+      label: creds.dataset.label,
+      username: creds.querySelector('[data-cred="username"]').value,
+      password: creds.querySelector('[data-cred="password"]').value,
+    }));
+
     const saved = await window.sixview.saveConfig(currentConfig);
     if (saved && saved.credentialStatus) credentialStatus = saved.credentialStatus;
-    flash('保存しました。パネルに反映されます。');
+    // Only the tab list is taken back; the rest of the window keeps editing
+    // the same currentConfig object its inputs are bound to.
+    if (saved && saved.config) savedPageSets = JSON.parse(JSON.stringify(saved.config.pageSets || []));
+
+    const failed = [];
+    for (const entry of pending) {
+      const result = await window.sixview.setCredentials(entry.slot, entry.username, entry.password);
+      if (result && result.ok) credentialStatus[entry.slot] = true;
+      else failed.push(entry.label);
+    }
+
+    renderSites();
+    if (failed.length > 0) {
+      flash(`設定は保存しましたが、次の ID は保存できませんでした: ${failed.join('、')}`, true);
+    } else if (pending.length > 0) {
+      flash(`保存しました。ID / パスワードも ${pending.length} 件保存しました。`);
+    } else {
+      flash('保存しました。パネルに反映されます。');
+    }
   } catch (err) {
     flash(`保存できませんでした: ${err.message}`, true);
   }

@@ -1413,6 +1413,50 @@ async function runTests() {
     service.stop();
   })) passed++; else failed++;
 
+  // --- logins per tab ---
+
+  if (test('each pane keeps a separate login slot for every tab but home', () => {
+    const config = schema.normalizeConfig({}, 'msns');
+    const ids = schema.credentialSlotIds(config);
+    const cast = config.sites.find((site) => site.id === 'msns-cast-1');
+    assert.ok(cast, 'the 02 build has a cast pane');
+    assert.strictEqual(schema.credentialSlotId(cast.id, schema.HOME_PAGE_SET_ID), cast.id);
+    assert.strictEqual(schema.credentialSlotId(cast.id, 'x'), 'msns-cast-1@x');
+    assert.ok(ids.includes(cast.id));
+    assert.ok(ids.includes('msns-cast-1@x'));
+    assert.ok(!ids.includes('msns-cast-1@home'));
+    assert.strictEqual(ids.length, config.sites.length * config.pageSets.length);
+  })) passed++; else failed++;
+
+  if (test('on the X tab a pane types its X login on X and nowhere else', () => {
+    const config = schema.normalizeConfig({}, 'msns');
+    const site = config.sites.find((entry) => entry.id === 'msns-cast-1');
+    site.autofill = { ...site.autofill, enabled: true, usernameSelector: '#cast-id', passwordSelector: '#cast-pw' };
+    const xTab = config.pageSets.find((set) => set.id === 'x');
+
+    const home = autofill.loginForTab(site, config.pageSets[0]);
+    assert.strictEqual(home.slotId, site.id);
+    assert.strictEqual(home.site, site, 'home leaves the pane exactly as it is');
+
+    const onX = autofill.loginForTab(site, xTab);
+    assert.strictEqual(onX.slotId, 'msns-cast-1@x');
+    assert.strictEqual(onX.site.autofill.usernameSelector, '', "the 02 form's selectors do not describe X");
+    assert.strictEqual(onX.site.autofill.passwordSelector, '');
+    assert.strictEqual(site.autofill.usernameSelector, '#cast-id', 'the pane itself is not changed');
+
+    const idOnly = { username: 'willymatze', password: '' };
+    assert.strictEqual(autofill.shouldAutofill(onX.site, 'https://x.com/i/flow/login', idOnly), true);
+    assert.strictEqual(autofill.shouldAutofill(onX.site, 'https://m-sns.net/cast/login/', idOnly), false);
+    assert.strictEqual(autofill.shouldAutofill(onX.site, 'https://x.com/login', null), false, 'no X login, nothing typed');
+  })) passed++; else failed++;
+
+  if (test('an ID saved without a password reads back as the ID alone', () => {
+    const store = new SecretStore(fs.mkdtempSync(path.join(tmpDir, 'tab-')), fakeSafeStorage());
+    assert.strictEqual(store.set('msns-cast-1@x', 'willymatze', ''), true);
+    assert.deepStrictEqual(store.get('msns-cast-1@x'), { username: 'willymatze', password: '' });
+    assert.strictEqual(store.get('msns-cast-1'), null, "the X ID is not the pane's own login");
+  })) passed++; else failed++;
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);

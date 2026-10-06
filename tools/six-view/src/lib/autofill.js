@@ -7,6 +7,8 @@
  * so credentials never travel through the renderer.
  */
 
+const { credentialSlotId, isHomePageSet } = require('./config-schema');
+
 // `<` plus the two line separators JSON.stringify leaves raw (U+2028/U+2029).
 const UNSAFE_JS_CHARS = new RegExp('[<' + String.fromCharCode(0x2028, 0x2029) + ']', 'g');
 
@@ -83,6 +85,39 @@ function shouldAutofill(site, url, credentials) {
   const pattern = typeof site.autofill.urlPattern === 'string' ? site.autofill.urlPattern.trim() : '';
   if (!pattern) return matchesUrlPattern('', url) && sameSiteAsHome(site.url, url);
   return matchesUrlPattern(pattern, url);
+}
+
+/**
+ * Which login a pane should use on the tab that is showing, and the rules for
+ * filling it in.
+ *
+ * On the home tab that is the pane's own login, untouched. On any other tab
+ * the pane is showing some other site, so it gets that tab's own vault slot and
+ * that tab's page as the only place to type into. The pane's own selectors
+ * describe its own site's form, not this one, so they are dropped and the form
+ * is found by its shape. There is no fallback to the pane's own login: an empty
+ * X slot means nothing is typed on X.
+ */
+function loginForTab(site, set) {
+  if (!site) return { slotId: '', site: null };
+  if (!set || isHomePageSet(set)) return { slotId: site.id, site };
+  const own = site.autofill || {};
+  return {
+    slotId: credentialSlotId(site.id, set.id),
+    site: {
+      ...site,
+      url: set.url,
+      autofill: {
+        enabled: Boolean(own.enabled),
+        urlPattern: '',
+        usernameSelector: '',
+        passwordSelector: '',
+        submitSelector: '',
+        autoSubmit: Boolean(own.autoSubmit),
+        delayMs: Number(own.delayMs) || 0,
+      },
+    },
+  };
 }
 
 /**
@@ -362,6 +397,7 @@ module.exports = {
   buildDetectScript,
   jsLiteral,
   matchesUrlPattern,
+  loginForTab,
   sameSiteAsHome,
   shouldAutofill,
 };

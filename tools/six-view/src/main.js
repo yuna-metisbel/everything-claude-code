@@ -20,6 +20,8 @@ const { SecretStore } = require('./lib/secret-store');
 const {
   SITE_PRESETS,
   TELEGRAM_SECRET_ID,
+  credentialSlotIds,
+  currentPageSet,
   getBrand,
   getPageSet,
   normalizeUrl,
@@ -30,7 +32,7 @@ const {
   resolveUserAgent,
   resolveZoomFactor,
 } = require('./lib/config-schema');
-const { buildAutofillScript, buildDetectScript, shouldAutofill } = require('./lib/autofill');
+const { buildAutofillScript, buildDetectScript, loginForTab, shouldAutofill } = require('./lib/autofill');
 const { buildDmDetectScript } = require('./lib/dm-detect-script');
 const { buildBoostDetectScript } = require('./lib/boost-script');
 const { DmService } = require('./dm-service');
@@ -241,10 +243,13 @@ async function runAutofill(siteId, options = {}) {
   };
 
   const url = pane.contents.getURL();
-  const credentials = secrets ? secrets.get(siteId) : null;
+  // On a tab other than home the pane is showing another site, with that
+  // tab's own login - never the pane's own.
+  const login = loginForTab(site, currentPageSet(config));
+  const credentials = secrets ? secrets.get(login.slotId) : null;
 
   if (options.auto) {
-    if (!shouldAutofill(site, url, credentials)) return;
+    if (!shouldAutofill(login.site, url, credentials)) return;
     // Debounce repeat loads of the same URL so a single page cannot be typed
     // into twice, while a real reload still re-fills the form.
     const sameUrlJustNow =
@@ -259,7 +264,7 @@ async function runAutofill(siteId, options = {}) {
 
   try {
     let result = await pane.contents.executeJavaScript(
-      buildAutofillScript(site.autofill, credentials),
+      buildAutofillScript(login.site.autofill, credentials),
       true
     );
     result = await finishTwoStep(result);
@@ -590,7 +595,7 @@ function bootstrapPayload() {
     zoomFactors: Object.fromEntries(config.sites.map((site) => [site.id, resolveZoomFactor(config, site)])),
     columns: resolveColumns(config),
     presets: SITE_PRESETS,
-    credentialStatus: secrets ? secrets.status(config.sites.map((site) => site.id)) : {},
+    credentialStatus: secrets ? secrets.status(credentialSlotIds(config)) : {},
     encryptionAvailable: Boolean(secrets && secrets.isAvailable()),
     loginItemSupported: process.platform === 'darwin' || process.platform === 'win32',
     telegramTokenStored: Boolean(secrets && secrets.has(TELEGRAM_SECRET_ID)),
@@ -605,12 +610,13 @@ function registerIpc() {
   ipcMain.handle('app:bootstrap', () => bootstrapPayload());
 
   ipcMain.handle('config:save', (_event, incoming) => {
-    const previousIds = config.sites.map((site) => site.id);
+    const previousIds = credentialSlotIds(config);
     config = saveConfig(userDataDir, { ...incoming, window: config.window }, BRAND.id);
     configError = null;
 
-    // A removed pane should not leave its password behind in the vault.
-    const liveIds = new Set(config.sites.map((site) => site.id));
+    // A removed pane - or a removed tab - should not leave a login behind in
+    // the vault.
+    const liveIds = new Set(credentialSlotIds(config));
     for (const id of previousIds) {
       if (!liveIds.has(id) && secrets) secrets.clear(id);
     }
@@ -626,6 +632,8 @@ function registerIpc() {
   ipcMain.handle('creds:set', (_event, payload) => {
     if (!secrets || !payload || !payload.siteId) return { ok: false, reason: 'bad-request' };
     if (!secrets.isAvailable()) return { ok: false, reason: 'no-encryption' };
+    // Only a pane, or a pane on a tab, that exists - not any key at all.
+    if (!credentialSlotIds(config).includes(payload.siteId)) return { ok: false, reason: 'unknown-slot' };
     const ok = secrets.set(payload.siteId, payload.username, payload.password);
     sendToMain('app:config-changed', bootstrapPayload());
     return { ok };

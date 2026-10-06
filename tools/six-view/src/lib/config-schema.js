@@ -347,6 +347,33 @@ function resolvePaneUrl(config, site) {
 }
 
 /**
+ * Where a pane's login for one tab is kept in the credential vault.
+ *
+ * The home tab is the pane's own site, so it keeps the pane's own slot. Every
+ * other tab gets a slot of its own: the X tab must never be handed the 02
+ * password, and nine X accounts need nine separate IDs.
+ */
+function credentialSlotId(siteId, setId) {
+  if (!siteId) return '';
+  if (!setId || setId === HOME_PAGE_SET_ID) return siteId;
+  return `${siteId}@${setId}`;
+}
+
+/** Every vault slot the config can still use: each pane, on each tab. */
+function credentialSlotIds(config) {
+  const sites = (config && Array.isArray(config.sites) && config.sites) || [];
+  const sets = (config && Array.isArray(config.pageSets) && config.pageSets) || [];
+  const ids = [];
+  for (const site of sites) {
+    ids.push(site.id);
+    for (const set of sets) {
+      if (!isHomePageSet(set)) ids.push(credentialSlotId(site.id, set.id));
+    }
+  }
+  return ids;
+}
+
+/**
  * Should the DM watcher and the boost presser stand down?
  *
  * Away from home every pane shows some other site, where that pane's selectors
@@ -599,6 +626,8 @@ module.exports = {
   HOME_PAGE_SET_ID,
   MAX_PAGE_SETS,
   automationPaused,
+  credentialSlotId,
+  credentialSlotIds,
   currentPageSet,
   getPageSet,
   isHomePageSet,
