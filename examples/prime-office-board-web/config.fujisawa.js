@@ -6,7 +6,7 @@ window.BOARD_CONFIG = {
   // 名前は「設定」から変えられる。ここは URL を共有したときの題名と、
   // 設定がまだ読めていない一瞬に出る名前（build-site.sh が index.html に書き込む）。
   brand: "藤澤家",
-  brandSub: "オンラインハウス",
+  brandSub: "住民票バラバラな我が家のオンラインハウス",
   support: "",
   // 追加機能（../prime-office-board-supabase/addons/line）
   lineLogin: "2011881307",

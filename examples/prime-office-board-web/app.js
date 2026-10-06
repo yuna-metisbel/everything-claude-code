@@ -56,6 +56,7 @@ function applyBrand(){
   // 名前を画面から変えるボードは、ホーム画面に置いたときの名前も合わせる。
   // iPhone は追加した瞬間の apple-mobile-web-app-title を、Android は manifest を見る。
   if (CONFIG.editableBrand){
+    document.documentElement.classList.add("brand-edit");
     const am = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (am) am.setAttribute("content", BRAND);
     const base = location.origin + location.pathname.replace(/[^/]*$/, "");
@@ -244,7 +245,9 @@ const S = {
   // LINE（addons/line）。lineLink は自分のひも付け、lineName は初回の名前の候補。
   lineLink: null, lineName: "", reminders: [],
   // 自由な一覧（addons/line の 02）
-  lists: [], listItems: [], listId: ls("prime.listId") || ""
+  lists: [], listItems: [], listId: ls("prime.listId") || "",
+  // LINE から届いた要望・感想（addons/line の 03）
+  feedback: []
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
@@ -382,16 +385,18 @@ async function loadAll(){
 // 追加機能のぶん。表が無いボードでは呼ばない（呼んでも前の値を残すだけ）。
 async function loadLineExtras(){
   const lists = customizable();
-  const [lnk, rem, lst, itm] = await Promise.all([
+  const [lnk, rem, lst, itm, fbk] = await Promise.all([
     LINE_LOGIN ? sb.from("line_links").select("display_name, notify").eq("user_id", S.user.id).maybeSingle() : null,
     REMINDERS ? sb.from("reminders").select("*").order("remind_at") : null,
     lists ? sb.from("lists").select("*").order("sort_order").order("created_at") : null,
-    lists ? sb.from("list_items").select("*").order("sort_order").order("created_at") : null
+    lists ? sb.from("list_items").select("*").order("sort_order").order("created_at") : null,
+    LINE_LOGIN ? sb.from("feedback").select("*").order("created_at", { ascending: false }).limit(100) : null
   ]);
   if (lnk && !lnk.error) S.lineLink = lnk.data || null;
   if (rem && !rem.error) S.reminders = rem.data || [];
   if (lst && !lst.error) S.lists = lst.data || [];
   if (itm && !itm.error) S.listItems = itm.data || [];
+  if (fbk && !fbk.error) S.feedback = fbk.data || [];
 }
 
 // スタッフとして入っているときは、自分の拠点ぶんだけを読む。
@@ -426,7 +431,8 @@ function scheduleReload(){
 const LIVE_TABLES = ["members","office","schedule","tasks","payments","vault","shops","notices",
                      "board_settings","sites","punches","key_events","key_duty","staff_shifts","notes",
                      "devices","device_log"].concat(REMINDERS ? ["reminders"] : [])
-                     .concat(EDITABLE_BRAND ? ["lists", "list_items"] : []);
+                     .concat(EDITABLE_BRAND ? ["lists", "list_items"] : [])
+                     .concat(LINE_LOGIN ? ["feedback"] : []);
 function subscribeLive(){
   const ch = sb.channel("board");
   LIVE_TABLES.forEach(t => {
@@ -914,7 +920,7 @@ function renderStaffTabs(){
     '<span class="t-lg">' + h(t.label) + '</span><span class="t-sm">' + h(t.short) + "</span></button>").join("");
 }
 function tabBadges(){
-  return { tasks: wantedTasks().length,
+  return { set: S.feedback.filter(f => !f.done).length, tasks: wantedTasks().length,
            pay: unpaid().filter(p => { const n = daysUntil(p.due); return n !== null && n <= 0; }).length };
 }
 function tabButton(t, badges){
@@ -2439,8 +2445,10 @@ function settingsCustomize(){
       const o = tabs[d.id] || {}, fixed = d.id === "home" || d.id === "set";
       return '<div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">' +
         '<label style="display:flex;align-items:center;gap:6px;min-width:64px">' +
-          (fixed ? '<span style="width:20px"></span>' : chk("ct_on_" + d.id, o.off !== true)) +
-          '<span style="font-size:12px;color:var(--muted)">' + h(d.label) + "</span></label>" +
+          (fixed ? '<input type="checkbox" checked disabled style="width:20px;height:20px" aria-label="いつも出ます">'
+                 : chk("ct_on_" + d.id, o.off !== true)) +
+          '<span style="font-size:12px;color:var(--muted)">' + h(d.label) +
+          (fixed ? '<br><span style="font-size:10.5px">いつも出ます</span>' : "") + "</span></label>" +
         '<input type="text" id="ct_label_' + d.id + '" maxlength="12" placeholder="' + h(d.label) + '" value="' + h(o.label || "") + '" style="flex:2;min-width:120px">' +
         '<input type="text" id="ct_short_' + d.id + '" maxlength="4" placeholder="下の帯：' + h(d.short) + '" value="' + h(o.short || "") + '" style="flex:1;min-width:90px">' +
         "</div>";
@@ -2650,6 +2658,27 @@ function settingsLine(){
       : "") +
     "</div></div></section>";
 }
+// 公式アカウントのトークに送られた要望・感想。読んだら「対応した」で下に回す。
+function settingsFeedback(){
+  const open = S.feedback.filter(f => !f.done), done = S.feedback.filter(f => f.done).slice(0, 10);
+  const row = function(f){
+    const who = (f.member_id && member(f.member_id)) ? member(f.member_id).name : (f.sender_name || "ボード未登録の人");
+    return '<div class="row" style="align-items:flex-start;gap:10px">' +
+      '<span style="flex:1;min-width:0' + (f.done ? ";color:var(--muted)" : "") + '">' +
+        '<span style="white-space:pre-wrap">' + h(f.body) + "</span><br>" +
+        '<span style="font-size:12px;color:var(--muted)">' + h(who) + "・" + h(stamp(f.created_at)) + "</span></span>" +
+      '<button class="btn sm' + (f.done ? " ghost" : "") + '" data-act="fb-done" data-id="' + h(f.id) + '">' +
+        (f.done ? "戻す" : "対応した") + "</button>" +
+      '<button class="btn sm ghost" data-act="fb-del" data-id="' + h(f.id) + '">消す</button></div>';
+  };
+  return '<section class="sec"><div class="sec-head"><h2>要望・感想</h2>' +
+      '<span class="hint">公式アカウント' + (LINE_OA ? "（" + h(LINE_OA) + "）" : "") +
+      'のトークに送られたものがここに届きます。家族にも「ここに送ってね」と伝えてください。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+      (open.length ? open.map(row).join("") : '<div class="empty">新しい要望・感想はありません</div>') +
+      (done.length ? done.map(row).join("") : "") +
+    "</div></div></section>";
+}
 function settingsBrand(){
   const st = S.settings || {};
   return '<section class="sec"><div class="sec-head"><h2>ボードの名前</h2>' +
@@ -2664,7 +2693,7 @@ function settingsBrand(){
 }
 function viewSettings(){
   return (EDITABLE_BRAND ? settingsBrand() : "") + (customizable() ? settingsCustomize() : "") +
-    (LINE_LOGIN ? settingsLine() : "") +
+    (LINE_LOGIN ? settingsFeedback() + settingsLine() : "") +
     '<section class="sec"><div class="sec-head"><h2>スタッフ</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     (S.members.length ? S.members.map(m =>
@@ -3286,6 +3315,13 @@ document.addEventListener("click", async function(ev){
       case "draft-color": S.draftColor = btn.dataset.v; render(); break;
       case "create-profile": await createProfile(); break;
       case "line-login": startLineLogin(); break;
+      case "fb-done": {
+        const f = S.feedback.find(x => x.id === id); if (!f) return;
+        await run(sb.from("feedback").update({ done: !f.done }).eq("id", id)); break;
+      }
+      case "fb-del":
+        if (!confirm("この要望・感想を消しますか？")) return;
+        await run(sb.from("feedback").delete().eq("id", id), "消しました"); break;
       case "season-mine":
         ls("prime.season", btn.dataset.v || "");
         if (!btn.dataset.v){ try { localStorage.removeItem("prime.season"); } catch(e){} }
