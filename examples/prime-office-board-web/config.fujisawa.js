@@ -3,9 +3,10 @@
 window.BOARD_CONFIG = {
   supabaseUrl: "https://gsuzsdoinoowiuuxomue.supabase.co",
   supabaseKey: "sb_publishable_imxwJTjlyLhXtE2ebC71NQ_AKE1Db92",
-  // 名前は「設定」から登録者が決める。ここは未設定のときの仮の名前。
-  brand: "ボード",
-  brandSub: "みんなの予定",
+  // 名前は「設定」から変えられる。ここは URL を共有したときの題名と、
+  // 設定がまだ読めていない一瞬に出る名前（build-site.sh が index.html に書き込む）。
+  brand: "藤澤家",
+  brandSub: "オンラインハウス",
   support: "",
   // 追加機能（../prime-office-board-supabase/addons/line）
   lineLogin: "2011881307",

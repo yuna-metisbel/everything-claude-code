@@ -53,6 +53,21 @@ function applyBrand(){
   if (mark) mark.textContent = BRAND;
   if (sub) sub.textContent = BRAND_SUB;
   document.title = (BRAND + " " + BRAND_SUB).trim();
+  // 名前を画面から変えるボードは、ホーム画面に置いたときの名前も合わせる。
+  // iPhone は追加した瞬間の apple-mobile-web-app-title を、Android は manifest を見る。
+  if (CONFIG.editableBrand){
+    const am = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (am) am.setAttribute("content", BRAND);
+    const base = location.origin + location.pathname.replace(/[^/]*$/, "");
+    const mf = { name: document.title, short_name: BRAND.slice(0, 12), start_url: base, scope: base,
+      display: "standalone", background_color: "#FFFFFF", theme_color: "#FFFFFF", lang: "ja",
+      icons: [{ src: base + "icon-192.png", sizes: "192x192", type: "image/png" },
+              { src: base + "icon-512.png", sizes: "512x512", type: "image/png" }] };
+    const link = document.querySelector('link[rel="manifest"]');
+    try {
+      if (link) link.setAttribute("href", URL.createObjectURL(new Blob([JSON.stringify(mf)], { type: "application/manifest+json" })));
+    } catch(e){ /* 古いブラウザは元の manifest のまま */ }
+  }
 }
 applyBrand();
 // DB に名前が入っていれば、そちらを使う（空の欄は config.js のまま）。
@@ -227,7 +242,9 @@ const S = {
   siteDay: today(), siteMonth: today().slice(0, 7), taskSite: ls("prime.taskSite") || "all",
   staff: [], punches: [], keyEvents: [], keyDuty: {}, sshifts: {},
   // LINE（addons/line）。lineLink は自分のひも付け、lineName は初回の名前の候補。
-  lineLink: null, lineName: "", reminders: []
+  lineLink: null, lineName: "", reminders: [],
+  // 自由な一覧（addons/line の 02）
+  lists: [], listItems: [], listId: ls("prime.listId") || ""
 };
 const member = id => S.members.find(m => m.id === id) || null;
 const meName = () => (S.me ? S.me.name : "");
@@ -350,8 +367,9 @@ async function loadAll(){
     S.settings = bst.data || null;
     if (S.settings) S.mode = S.settings.signup_mode;
     if (S.settings && EDITABLE_BRAND) setBrandFrom({ brand: S.settings.brand, sub: S.settings.brand_sub });
+    if (customizable()) applyUi(S.settings.ui);
   }
-  if (LINE_LOGIN || REMINDERS) await loadLineExtras();
+  if (LINE_LOGIN || REMINDERS || customizable()) await loadLineExtras();
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
   if (ok(sit)) S.sites = sit.data || [];
   if (ok(stf)) S.staff = (stf.data || []).map(normStaff);
@@ -363,12 +381,17 @@ async function loadAll(){
 
 // 追加機能のぶん。表が無いボードでは呼ばない（呼んでも前の値を残すだけ）。
 async function loadLineExtras(){
-  const [lnk, rem] = await Promise.all([
+  const lists = customizable();
+  const [lnk, rem, lst, itm] = await Promise.all([
     LINE_LOGIN ? sb.from("line_links").select("display_name, notify").eq("user_id", S.user.id).maybeSingle() : null,
-    REMINDERS ? sb.from("reminders").select("*").order("remind_at") : null
+    REMINDERS ? sb.from("reminders").select("*").order("remind_at") : null,
+    lists ? sb.from("lists").select("*").order("sort_order").order("created_at") : null,
+    lists ? sb.from("list_items").select("*").order("sort_order").order("created_at") : null
   ]);
   if (lnk && !lnk.error) S.lineLink = lnk.data || null;
   if (rem && !rem.error) S.reminders = rem.data || [];
+  if (lst && !lst.error) S.lists = lst.data || [];
+  if (itm && !itm.error) S.listItems = itm.data || [];
 }
 
 // スタッフとして入っているときは、自分の拠点ぶんだけを読む。
@@ -402,7 +425,8 @@ function scheduleReload(){
 // staff は pin 列があるので配信対象にしていない（下の定期読み直しで追いつく）。
 const LIVE_TABLES = ["members","office","schedule","tasks","payments","vault","shops","notices",
                      "board_settings","sites","punches","key_events","key_duty","staff_shifts","notes",
-                     "devices","device_log"].concat(REMINDERS ? ["reminders"] : []);
+                     "devices","device_log"].concat(REMINDERS ? ["reminders"] : [])
+                     .concat(EDITABLE_BRAND ? ["lists", "list_items"] : []);
 function subscribeLive(){
   const ch = sb.channel("board");
   LIVE_TABLES.forEach(t => {
@@ -520,7 +544,11 @@ async function boot(){
   S.siteCode = urlSiteCode();
   // ログイン前の画面にもボードの名前を出す（招待コードと同じ行なので、名前だけを関数で読む）。
   if (EDITABLE_BRAND){
-    try { const b = await sb.rpc("board_brand"); if (b && !b.error) setBrandFrom(b.data); } catch(e){ /* 既定の名前のまま */ }
+    try {
+      const b = await sb.rpc("board_brand");
+      if (b && !b.error){ setBrandFrom(b.data); BOARD_SEASON = (b.data && b.data.theme) || ""; }
+    } catch(e){ /* 既定の名前のまま */ }
+    applySeason();
   }
   // LINE の許可画面から戻ってきたところなら、先にログインを済ませる。
   if (LINE_LOGIN) await finishLineLogin();
@@ -738,7 +766,7 @@ const valOf = id => { const n = el(id); return n ? n.value.trim() : ""; };
 // 下のメニューに出す並び。人によって毎日開くタブが違うので、決め打たずに選ばせる。
 // 端末ごとの好みなので、データベースではなくこの端末にだけ覚える。
 const TAB_MAX = 5;
-function tabIds(){ return TABS.map(function(t){ return t.id; }); }
+function tabIds(){ return visibleTabs().map(function(t){ return t.id; }); }
 function loadTabBar(){
   const saved = (ls("prime.tabbar") || "").split(",")
     .filter(function(x){ return tabIds().indexOf(x) >= 0; });
@@ -854,8 +882,10 @@ function render(){
     if (S.siteTab === "shift") scrollShiftToToday();
     return;
   }
+  if (!tabOn(S.tab)) S.tab = "home";
   renderDoor(); renderHere(); renderTabs();
   v.innerHTML = S.tab === "sched" ? viewSched()
+    : S.tab === "lists" ? viewLists()
     : S.tab === "shops" ? viewShops()
     : S.tab === "tasks" ? viewTasks()
     : S.tab === "pay"   ? viewPay()
@@ -894,8 +924,8 @@ function tabButton(t, badges){
 }
 function renderTabs(){
   const badges = tabBadges();
-  const shown = S.tabBar.map(function(id){ return TABS.find(function(t){ return t.id === id; }); }).filter(Boolean);
-  const rest = TABS.filter(function(t){ return S.tabBar.indexOf(t.id) < 0; });
+  const shown = S.tabBar.map(function(id){ return visibleTabs().find(function(t){ return t.id === id; }); }).filter(Boolean);
+  const rest = visibleTabs().filter(function(t){ return S.tabBar.indexOf(t.id) < 0; });
   // 外したタブも「その他」から必ず開ける。設定を外して設定に戻れない、をなくす。
   const restBadge = rest.reduce(function(a, t){ return a + (badges[t.id] || 0); }, 0);
   el("tabs").innerHTML = shown.map(function(t){ return tabButton(t, badges); }).join("") +
@@ -909,7 +939,7 @@ function renderTabs(){
 function modalMoreTabs(){
   const badges = tabBadges();
   showModal("ほかの画面",
-    '<div class="pick-list">' + TABS.map(function(t){
+    '<div class="pick-list">' + visibleTabs().map(function(t){
       return '<button class="pick' + (S.tab === t.id ? " on" : "") + '" data-tab="' + t.id + '">' +
         h(t.label) + (badges[t.id] ? ' <span class="badge num">' + badges[t.id] + "</span>" : "") +
         (S.tabBar.indexOf(t.id) >= 0 ? ' <span class="chip">下のメニュー</span>' : "") + "</button>";
@@ -925,6 +955,12 @@ function deviceState(id){
 const devicesOut = () => S.devices.filter(d => d.active && deviceState(d.id))
   .map(d => ({ d: d, at: deviceState(d.id) }));
 function renderDoor(){
+  if (!uiHome("door")){
+    el("doorBox").innerHTML = devicesOut().map(function(x){
+      return '<span class="chip warn out-chip">' + h(x.d.name) + " " +
+        h((member(x.at.memberId) || {}).name || "誰か") + " 持ち出し中</span>"; }).join("");
+    return;
+  }
   const open = !!S.office.doorOpen;
   const by = S.office.updatedBy ? (member(S.office.updatedBy) || {}).name : "";
   // 昨日以前の記録は、今日の状態の証拠にならない。日をまたいだら未確認に戻す。
@@ -933,7 +969,7 @@ function renderDoor(){
   el("doorBox").innerHTML =
     '<div class="door ' + (fresh ? (open ? "open" : "shut") : "unknown") + '">' +
       '<span class="lamp"></span>' +
-      '<span class="txt"><b>事務所 ' +
+      '<span class="txt"><b>' + h(PLACE) + " " +
         (fresh ? (open ? "あいてます" : "しまっています") : "未確認") + "</b>" +
         "<small>" + (fresh
           ? h((by || "誰か") + " が " + stamp(S.office.updatedAt))
@@ -963,7 +999,7 @@ function renderHere(){
       '<span class="av' + (m.present ? "" : " off") + '" style="background:' + h(m.color || "#888") + '" title="' +
       h(m.name + (m.present ? "・在席" : "・不在")) + '">' + h((m.name || "?").slice(0, 1)) + "</span>").join("") + "</div>" +
     '<span class="chip ' + (here.length ? "ok" : "") + '"><span class="dot"></span>在席 ' + here.length + " / " + S.members.length + "</span>" +
-    (S.me ? '<button class="btn sm ' + (S.me.present ? "" : "primary") + '" data-act="present">' +
+    (S.me && uiHome("present") ? '<button class="btn sm ' + (S.me.present ? "" : "primary") + '" data-act="present">' +
       (S.me.present ? "出た" : "入った") + "</button>" : "") +
     '<button class="themebtn" data-act="theme" title="' + h(themeLabel()) + '" aria-label="' + h(themeLabel()) + '">' +
       h(themeGlyph()) + "</button>";
@@ -1181,11 +1217,11 @@ function viewHome(){
         '</div><div class="spacer"></div><span class="hint">今日の全員の動き</span></div>' +
         '<h2 style="font-family:var(--serif);font-size:19px;margin-bottom:12px">今日は誰が、何をしていますか</h2>' +
         '<div class="panel">' + (S.members.length ? S.members.map(todayRow).join("") : '<div class="empty">メンバーがいません</div>') + "</div></section>" +
-      '<section class="sec"><div class="sec-head"><h2>手が空いている人へ</h2>' +
+      (tabOn("tasks") ? '<section class="sec"><div class="sec-head"><h2>手が空いている人へ</h2>' +
         '<span class="hint">担当が決まっていない作業です。引き受けると自分のタスクになります。</span></div>' +
-        '<div class="panel">' + (wanted.length ? wanted.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">募集中の作業はありません</div>') + "</div></section>" +
+        '<div class="panel">' + (wanted.length ? wanted.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">募集中の作業はありません</div>') + "</div></section>" : "") +
     "</div><div>" +
-      '<section class="sec"><div class="sec-head"><h2>いまの持ち分</h2></div>' +
+      (tabOn("tasks") ? '<section class="sec"><div class="sec-head"><h2>いまの持ち分</h2></div>' +
         '<div class="panel"><div class="rows" style="border-top:0">' +
         (load.length ? load.map(x =>
           '<div class="row" style="align-items:center"><span class="who" style="flex:1"><span class="pip" style="background:' + h(x.m.color) + '"></span>' +
@@ -1193,8 +1229,8 @@ function viewHome(){
           x.n + '</span><span style="font-size:11px;color:var(--muted);align-self:flex-end;padding-bottom:3px">件</span></div>').join("")
           : '<div class="empty">—</div>') + "</div></div></section>" +
       '<section class="sec"><div class="sec-head"><h2>期限が近い</h2></div>' +
-        '<div class="panel">' + (soon.length ? soon.map(function(t){ return taskRow(t, true); }).join("") : '<div class="empty">7日以内の期限はありません</div>') + "</div></section>" +
-      '<section class="sec"><div class="sec-head"><h2>支払い予定</h2><div class="spacer"></div>' +
+        '<div class="panel">' + (soon.length ? soon.map(function(t){ return taskRow(t, true); }).join("") : '<div class="empty">7日以内の期限はありません</div>') + "</div></section>" : "") +
+      (tabOn("pay") ? '<section class="sec"><div class="sec-head"><h2>支払い予定</h2><div class="spacer"></div>' +
         '<span class="chip ' + (unpaid().length ? "warn" : "ok") + '">未払い ' + unpaid().length + "件</span></div>" +
         '<div class="panel"><div class="rows" style="border-top:0">' +
         (bills.length ? bills.map(p =>
@@ -1203,10 +1239,10 @@ function viewHome(){
           '<div style="margin-top:3px;display:flex;gap:6px;flex-wrap:wrap">' + dueChip(p.due) +
           (p.payee ? '<span class="chip">' + h(p.payee) + "</span>" : "") + "</div></div>" +
           '<span class="num" style="font-weight:600">' + h(yen(p.amount)) + "</span></div>").join("")
-          : '<div class="empty">未払いはありません</div>') + "</div></div></section>" +
-      homeDevices() +
-      (REMINDERS ? homeReminders() : "") +
-      homeNotes() +
+          : '<div class="empty">未払いはありません</div>') + "</div></div></section>" : "") +
+      (uiHome("devices") ? homeDevices() : "") +
+      (REMINDERS && uiHome("reminders") ? homeReminders() : "") +
+      (uiHome("notes") ? homeNotes() : "") +
     "</div></div>";
 }
 
@@ -1214,7 +1250,7 @@ function viewHome(){
 function homeDevices(){
   const list = S.devices.filter(d => d.active);
   if (!list.length) return "";
-  return '<section class="sec"><div class="sec-head"><h2>事務所から持ち出すもの</h2></div>' +
+  return '<section class="sec"><div class="sec-head"><h2>' + h(PLACE) + "から持ち出すもの</h2></div>" +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     list.map(function(d){
       const at = deviceState(d.id);
@@ -1224,7 +1260,7 @@ function homeDevices(){
           '<span style="font-size:13.5px;font-weight:500">' + h(d.name) + "</span>" +
           '<div style="font-size:11.5px;color:var(--muted)">' +
             (at ? h(who + " が " + stamp(at.happenedAt) + " に持ち出し") + (at.note ? " ・ " + h(at.note) : "")
-                : "事務所にあります") + "</div></span>" +
+                : PLACE + "にあります") + "</div></span>" +
         '<span class="chip ' + (at ? "warn" : "ok") + '">' + (at ? "持ち出し中" : "あり") + "</span>" +
         '<button class="btn sm' + (at ? "" : " primary") + '" data-act="device" data-id="' + h(d.id) +
           '" data-v="' + (at ? "in" : "out") + '">' + (at ? "返した" : "持ち出す") + "</button></div>";
@@ -1381,11 +1417,11 @@ function viewSched(){
     rows.map(function(r){ return "<tr>" + r.join("") + "</tr>"; }).join("") +
     "</tbody></table>" +
     '<div class="legend">' +
-      '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>事＝事務所</span>' +
-      '<span><i class="k-both-sw" style="border:1px solid var(--line)"></i>事在＝事務所＋在宅</span>' +
-      '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>在＝在宅</span>' +
-      '<span><i style="background:var(--warn-soft);border:1px solid var(--line)"></i>外＝外仕事</span>' +
-      '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>休＝休み</span>' +
+      '<span><i style="background:var(--brass-soft);border:1px solid var(--brass-line)"></i>' + h(KINDS.office.mini + "＝" + KINDS.office.label) + "</span>" +
+      '<span><i class="k-both-sw" style="border:1px solid var(--line)"></i>' + h(KINDS.both.mini + "＝" + KINDS.both.label) + "</span>" +
+      '<span><i style="background:var(--cool-soft);border:1px solid var(--line)"></i>' + h(KINDS.home.mini + "＝" + KINDS.home.label) + "</span>" +
+      '<span><i style="background:var(--warn-soft);border:1px solid var(--line)"></i>' + h(KINDS.out.mini + "＝" + KINDS.out.label) + "</span>" +
+      '<span><i style="background:var(--bad-soft);border:1px solid var(--line)"></i>' + h(KINDS.off.mini + "＝" + KINDS.off.label) + "</span>" +
       '<span><i style="background:var(--bad);border-radius:50%"></i>連絡がつかない時間帯あり</span>' +
       '<span><i style="background:var(--ok);border-radius:50%"></i>やったこと記録あり</span>' +
     "</div></section>" +
@@ -2261,11 +2297,213 @@ const SHOP_KINDS = [
   ["shop", "店舗", "＋ 店舗を追加", "応募の問い合わせにそのまま答えられるように、条件をまとめておく場所です。"],
   ["cast", "掲載用プロフィール", "＋ プロフィールを追加", "媒体に載せるプロフィール。そのままコピーして貼れる形で置いておく場所です。"]
 ];
-const shopKind = () => (S.shopKind === "cast" ? "cast" : "shop");
+const shopKind = () => (SHOP_KINDS.some(k => k[0] === S.shopKind) ? S.shopKind : SHOP_KINDS[0][0]);
+const shopKindLabel = k => ((SHOP_KINDS.find(x => x[0] === k) || [k, "情報"])[1]);
 // 表示は入力どおり、発信は数字だけ。ハイフンや全角が混じっていても掛けられるように。
 const telHref = v => String(v || "").replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
                                     .replace(/[^0-9+]/g, "");
 const kindOf = sp => (sp.kind || "shop");
+
+/* ============================ ボードのカスタマイズ（addons/line の 02） ============================ */
+// board_settings に ui 列があるボードだけで効く。無いボード（PRIME）は UI が null のままで、
+// 呼び方も色もタブも今までどおり。設定はボード全体で1つ、色だけは端末ごとに上書きできる。
+const SEASONS = [["spring","春","#D81B60"],["summer","夏","#0B8A3E"],["autumn","秋","#9C6C1F"],["winter","冬","#1A56DB"]];
+const LISTS_TAB = { id:"lists", label:"一覧", short:"一覧" };
+const DEFAULT_TABS = TABS.concat([LISTS_TAB]).map(t => ({ id:t.id, label:t.label, short:t.short }));
+const DEFAULT_KINDS = {};
+KIND_ORDER.forEach(function(k){ DEFAULT_KINDS[k] = { label:KINDS[k].label, cell:KINDS[k].cell, mini:KINDS[k].mini }; });
+const DEFAULT_SHOP_KINDS = SHOP_KINDS.map(k => k.slice());
+const GENERIC_SHOP_HINT = "まとめておきたい情報を、■ の見出しのまま貼って置いておく場所です。";
+// ホームに出すもの。使わないものは外せる。
+const HOME_PARTS = [["door","開け閉め（「〇〇 あいてます」）"],["present","在席（入った・出た）"],
+                    ["devices","持ち出すもの"],["reminders","リマインダー"],["notes","自分用"]];
+let UI = null, PLACE = "事務所", BOARD_SEASON = "";
+const customizable = () => !!(S.settings && Object.prototype.hasOwnProperty.call(S.settings, "ui"));
+function uiHome(k){ return !UI || !UI.home || UI.home[k] !== false; }
+function tabOn(id){
+  if (id === "set" || id === "home") return true;
+  if (!UI) return id !== "lists";
+  return !(UI.tabs && UI.tabs[id] && UI.tabs[id].off === true);
+}
+function visibleTabs(){ return TABS.filter(function(t){ return tabOn(t.id); }); }
+const kindChoices = cur => KIND_ORDER.filter(k => k === "" || k === (cur || "") ||
+  !(UI && UI.kinds && UI.kinds[k] && UI.kinds[k].off));
+// 端末で選んだ色 → ボードの色 → 秋（今までの色）
+function seasonNow(){ return ls("prime.season") || (UI && UI.theme) || BOARD_SEASON || "autumn"; }
+function applySeason(){
+  const s = seasonNow();
+  if (s && s !== "autumn") document.documentElement.setAttribute("data-season", s);
+  else document.documentElement.removeAttribute("data-season");
+}
+// 呼び方を差し替える。何も入っていない欄は元の呼び方に戻す。
+function applyUi(ui){
+  UI = ui || {};
+  if (!TABS.some(t => t.id === "lists")){
+    const at = TABS.findIndex(t => t.id === "set");
+    TABS.splice(at < 0 ? TABS.length : at, 0, Object.assign({}, LISTS_TAB));
+    S.tabBar = loadTabBar();
+  }
+  TABS.forEach(function(t){
+    const d = DEFAULT_TABS.find(x => x.id === t.id) || t, o = (UI.tabs || {})[t.id] || {};
+    t.label = (o.label || "").trim() || d.label;
+    t.short = (o.short || "").trim() || (o.label || "").trim().slice(0, 4) || d.short;
+  });
+  Object.keys(DEFAULT_KINDS).forEach(function(k){
+    if (!k) return;
+    const d = DEFAULT_KINDS[k], lb = (((UI.kinds || {})[k] || {}).label || "").trim();
+    KINDS[k].label = lb || d.label;
+    KINDS[k].cell = lb ? lb.slice(0, 3) : d.cell;
+    const two = lb.split(/[＋+]/);
+    KINDS[k].mini = lb ? (two.length > 1 ? two[0].slice(0, 1) + two[1].slice(0, 1) : lb.slice(0, 1)) : d.mini;
+  });
+  PLACE = (UI.place || "").trim() || "事務所";
+  const cats = Array.isArray(UI.shopCats) && UI.shopCats.length ? UI.shopCats : null;
+  const next = cats ? cats.map(function(c){
+    const d = DEFAULT_SHOP_KINDS.find(x => x[0] === c.id), label = (c.label || "").trim() || (d ? d[1] : "情報");
+    return [c.id, label, "＋ " + label + "を追加", d ? d[3] : GENERIC_SHOP_HINT];
+  }) : DEFAULT_SHOP_KINDS.map(k => k.slice());
+  SHOP_KINDS.splice.apply(SHOP_KINDS, [0, SHOP_KINDS.length].concat(next));
+  applySeason();
+}
+
+/* ---- 自由な一覧 ---- */
+const curList = () => S.lists.find(l => l.id === S.listId) || S.lists[0] || null;
+function viewLists(){
+  const L = curList();
+  const items = L ? S.listItems.filter(x => x.list_id === L.id) : [];
+  const open = items.filter(x => !x.done), done = items.filter(x => x.done);
+  const row = function(x){
+    return '<div class="row" style="align-items:center;gap:10px">' +
+      '<input type="checkbox" data-act="list-done" data-id="' + h(x.id) + '"' + (x.done ? " checked" : "") +
+        ' style="width:22px;height:22px;flex:none" aria-label="終わった">' +
+      '<span style="flex:1;min-width:0' + (x.done ? ";text-decoration:line-through;color:var(--muted)" : "") + '">' +
+        h(x.title) + (x.memo ? '<br><span style="font-size:12px;color:var(--muted)">' + h(x.memo) + "</span>" : "") + "</span>" +
+      '<button class="btn sm ghost" data-act="list-item-del" data-id="' + h(x.id) + '">消す</button></div>';
+  };
+  return '<section class="sec"><div class="sec-head"><h2>' + h((TABS.find(t => t.id === "lists") || LISTS_TAB).label) + "</h2>" +
+      '<span class="hint">買い物リストや連絡先など、自由に作れる一覧です。</span>' +
+      '<div class="btn-row"><button class="btn primary" data-act="list-new">＋ 一覧を作る</button></div></div>' +
+    (S.lists.length
+      ? '<div class="site-switch">' + S.lists.map(function(l){
+          const n = S.listItems.filter(x => x.list_id === l.id && !x.done).length;
+          return '<button class="btn sm' + (L && L.id === l.id ? " primary" : "") + '" data-act="list-pick" data-id="' + h(l.id) + '">' +
+            h(l.name) + (n ? " " + n : "") + "</button>"; }).join("") + "</div>" +
+        '<div class="panel"><div style="padding:12px;display:flex;gap:8px;flex-wrap:wrap">' +
+          '<input type="text" id="li_title" maxlength="200" placeholder="「' + h(L.name) + '」に足す" style="flex:1;min-width:160px">' +
+          '<button class="btn primary" data-act="list-item-add">追加</button></div>' +
+          '<div class="rows">' + (open.length ? open.map(row).join("")
+            : '<div class="empty">' + (done.length ? "残っているものはありません" : "まだ何もありません") + "</div>") + "</div>" +
+          (done.length ? '<div class="rows">' + done.map(row).join("") + "</div>" : "") +
+          '<div style="padding:12px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line)">' +
+            (done.length ? '<button class="btn sm" data-act="list-clear-done">終わったものを消す</button>' : "") +
+            '<button class="btn sm ghost" data-act="list-rename">一覧の名前を変える</button>' +
+            '<button class="btn sm ghost" data-act="list-del">この一覧を消す</button></div>' +
+        "</div>"
+      : '<div class="panel"><div class="empty">まだ一覧がありません。「＋ 一覧を作る」から作ってください。</div></div>') +
+    "</section>";
+}
+
+function modalListName(L){
+  showModal(L ? "一覧の名前を変える" : "一覧を作る",
+    '<div class="fields"><label class="f">名前<input type="text" id="ln_name" maxlength="30" placeholder="例：買い物リスト・取引先" value="' +
+      h(L ? L.name : "") + '"></label></div>',
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="list-save" data-id="' + h(L ? L.id : "") + '">' + (L ? "変える" : "作る") + "</button>");
+}
+
+/* ---- 設定：カスタマイズ ---- */
+function settingsCustomize(){
+  const ui = UI || {}, tabs = ui.tabs || {}, kinds = ui.kinds || {}, home = ui.home || {};
+  const board = ui.theme || "autumn", mine = ls("prime.season") || "";
+  const swatch = function(s, on, act){
+    return '<button class="btn' + (on ? " primary" : "") + '" data-act="' + act + '" data-v="' + s[0] + '">' +
+      '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + s[2] +
+      ';margin-right:6px;vertical-align:-1px;box-shadow:0 0 0 2px #fff"></span>' + s[1] + "</button>";
+  };
+  const chk = (id, on) => '<input type="checkbox" id="' + id + '"' + (on ? " checked" : "") + ' style="width:20px;height:20px">';
+  return '<section class="sec"><div class="sec-head"><h2>色</h2>' +
+      '<span class="hint">ボードの色はみんなの画面の初期の色です。この端末だけ別の色にもできます。</span></div>' +
+    '<div class="panel"><div style="padding:14px">' +
+      '<div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">ボードの色</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' + SEASONS.map(s => swatch(s, board === s[0], "season-board")).join("") + "</div>" +
+      '<div style="font-size:12.5px;color:var(--muted);margin:14px 0 8px">この端末だけ</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn' + (!mine ? " primary" : "") + '" data-act="season-mine" data-v="">ボードと同じ</button>' +
+        SEASONS.map(s => swatch(s, mine === s[0], "season-mine")).join("") + "</div>" +
+    "</div></div></section>" +
+
+    '<section class="sec"><div class="sec-head"><h2>タブ</h2>' +
+      '<span class="hint">名前と、使うかどうか。外したタブは誰の画面からも消えます（中身は消えません）。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    DEFAULT_TABS.map(function(d){
+      const o = tabs[d.id] || {}, fixed = d.id === "home" || d.id === "set";
+      return '<div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<label style="display:flex;align-items:center;gap:6px;min-width:64px">' +
+          (fixed ? '<span style="width:20px"></span>' : chk("ct_on_" + d.id, o.off !== true)) +
+          '<span style="font-size:12px;color:var(--muted)">' + h(d.label) + "</span></label>" +
+        '<input type="text" id="ct_label_' + d.id + '" maxlength="12" placeholder="' + h(d.label) + '" value="' + h(o.label || "") + '" style="flex:2;min-width:120px">' +
+        '<input type="text" id="ct_short_' + d.id + '" maxlength="4" placeholder="下の帯：' + h(d.short) + '" value="' + h(o.short || "") + '" style="flex:1;min-width:90px">' +
+        "</div>";
+    }).join("") + "</div></div></section>" +
+
+    '<section class="sec"><div class="sec-head"><h2>その日の動き</h2>' +
+      '<span class="hint">予定で選ぶ「どこで・何をしているか」の名前。使わないものは外せます。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    KIND_ORDER.filter(k => k).map(function(k){
+      const o = kinds[k] || {};
+      return '<div class="row" style="align-items:center;gap:8px">' +
+        chk("ck_on_" + k, o.off !== true) +
+        '<input type="text" id="ck_label_' + k + '" maxlength="10" placeholder="' + h(DEFAULT_KINDS[k].label) + '" value="' + h(o.label || "") + '" style="flex:1">' +
+        "</div>";
+    }).join("") + "</div></div></section>" +
+
+    '<section class="sec"><div class="sec-head"><h2>ホームに出すもの</h2></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    HOME_PARTS.map(function(p){
+      return '<label class="row" style="align-items:center;gap:8px">' + chk("ch_" + p[0], home[p[0]] !== false) +
+        '<span style="flex:1">' + h(p[1]) + "</span></label>";
+    }).join("") +
+      '<div class="row" style="align-items:center;gap:8px"><span style="min-width:120px">開け閉めする場所</span>' +
+        '<input type="text" id="c_place" maxlength="10" placeholder="事務所" value="' + h(ui.place || "") + '" style="flex:1"></div>' +
+    "</div></div></section>" +
+
+    '<section class="sec"><div class="sec-head"><h2>情報タブの分類</h2>' +
+      '<span class="hint">例：会社・店舗情報／求人情報／事業者登録情報。名前を空にして保存すると、その分類は消えます（中身は残ります）。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0" id="c_cats">' +
+    SHOP_KINDS.map(function(k){
+      return '<div class="row" style="align-items:center;gap:8px"><input type="text" class="c_cat" data-id="' + h(k[0]) +
+        '" maxlength="16" value="' + h(k[1]) + '" style="flex:1"></div>';
+    }).join("") + "</div>" +
+      '<div style="padding:12px"><input type="text" id="c_cat_new" maxlength="16" placeholder="分類を増やす（例：事業者登録情報）" style="width:100%"></div>' +
+    "</div></section>" +
+
+    '<section class="sec"><div style="display:flex;gap:8px">' +
+      '<button class="btn primary" data-act="save-ui">この内容で保存</button>' +
+      '<span class="hint" style="align-self:center">色の切り替えはすぐに効きます。ほかはここで保存します。</span></div></section>';
+}
+function collectUi(){
+  const ui = JSON.parse(JSON.stringify(UI || {}));
+  ui.tabs = {}; DEFAULT_TABS.forEach(function(d){
+    const on = el("ct_on_" + d.id);
+    ui.tabs[d.id] = { label: valOf("ct_label_" + d.id), short: valOf("ct_short_" + d.id), off: on ? !on.checked : false };
+  });
+  ui.kinds = {}; KIND_ORDER.filter(k => k).forEach(function(k){
+    ui.kinds[k] = { label: valOf("ck_label_" + k), off: !el("ck_on_" + k).checked };
+  });
+  ui.home = {}; HOME_PARTS.forEach(function(p){ ui.home[p[0]] = el("ch_" + p[0]).checked; });
+  ui.place = valOf("c_place");
+  const cats = Array.from(document.querySelectorAll(".c_cat"))
+    .map(function(x){ return { id: x.dataset.id, label: x.value.trim() }; }).filter(c => c.label);
+  const add = valOf("c_cat_new");
+  if (add) cats.push({ id: "c" + Date.now().toString(36), label: add });
+  if (!cats.length) cats.push({ id: "shop", label: "情報" });
+  ui.shopCats = cats;
+  return ui;
+}
+async function saveUi(ui, msg){
+  await run(sb.from("board_settings").update({ ui: ui, updated_at: nowIso() }).eq("id", 1), msg || "保存しました");
+  applyUi(ui);
+}
 function viewShops(){
   const kind = shopKind();
   const meta = SHOP_KINDS.find(k => k[0] === kind);
@@ -2425,7 +2663,8 @@ function settingsBrand(){
     "</div></div></section>";
 }
 function viewSettings(){
-  return (EDITABLE_BRAND ? settingsBrand() : "") + (LINE_LOGIN ? settingsLine() : "") +
+  return (EDITABLE_BRAND ? settingsBrand() : "") + (customizable() ? settingsCustomize() : "") +
+    (LINE_LOGIN ? settingsLine() : "") +
     '<section class="sec"><div class="sec-head"><h2>スタッフ</h2></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     (S.members.length ? S.members.map(m =>
@@ -2469,7 +2708,7 @@ function viewSettings(){
         '<button class="btn sm" data-act="tab-off" data-id="' + h(id) + '">外す</button></div>';
     }).join("") + "</div></div>" +
     (function(){
-      const rest = TABS.filter(function(t){ return S.tabBar.indexOf(t.id) < 0; });
+      const rest = visibleTabs().filter(function(t){ return S.tabBar.indexOf(t.id) < 0; });
       if (!rest.length) return "";
       return '<div class="sec-head" style="margin:14px 0 8px"><h2 style="font-size:14px">「その他」に入っているもの</h2></div>' +
         '<div class="panel"><div class="rows" style="border-top:0">' +
@@ -2492,7 +2731,7 @@ function viewSettings(){
         h(S.push.why) + "</div>" : "") +
     "</div></div></section>" +
 
-    '<section class="sec"><div class="sec-head"><h2>事務所から持ち出すもの</h2>' +
+    '<section class="sec"><div class="sec-head"><h2>' + h(PLACE) + "から持ち出すもの</h2>" +
       '<span class="hint">持ち出し・返却はホームから。ここでは増やしたり外したりできます。</span>' +
       '<div class="btn-row"><button class="btn sm primary" data-act="new-device">＋ 追加</button></div></div>' +
     '<div class="panel"><div class="rows" style="border-top:0">' +
@@ -2638,7 +2877,7 @@ function modalDayAll(date){
     const d = dayOf(m.id, date) || {};
     const K = KINDS[d.kind || ""];
     const bits = [];
-    if (d.from || d.to) bits.push("事務所・現場 " + h((d.from || "--:--") + "〜" + (d.to || "--:--")));
+    if (d.from || d.to) bits.push((UI ? "時間 " : "事務所・現場 ") + h((d.from || "--:--") + "〜" + (d.to || "--:--")));
     if (d.ngFrom || d.ngTo) bits.push("連絡不可 " + h((d.ngFrom || "--:--") + "〜" + (d.ngTo || "--:--")));
     return '<div class="row" style="align-items:flex-start;gap:10px">' +
       '<span style="flex:1;min-width:0">' +
@@ -2665,10 +2904,10 @@ function modalDay(memberId, date){
   showModal(m.name + " ・ " + date.replace(/-/g, "/") + "（" + w + "）",
     '<div class="fields">' +
     '<label class="f">その日の動き方<select id="d_kind">' +
-      KIND_ORDER.map(k => '<option value="' + k + '"' + ((d.kind || "") === k ? " selected" : "") + ">" +
+      kindChoices(d.kind).map(k => '<option value="' + k + '"' + ((d.kind || "") === k ? " selected" : "") + ">" +
         KINDS[k].label + "</option>").join("") + "</select></label>" +
     '<div class="fields two">' +
-      '<label class="f">事務所・現場にいる時間（開始）<input type="time" id="d_from" value="' + h(d.from || "") + '"></label>' +
+      '<label class="f">' + (UI ? "その場所にいる時間" : "事務所・現場にいる時間") + '（開始）<input type="time" id="d_from" value="' + h(d.from || "") + '"></label>' +
       '<label class="f">同（終了）<input type="time" id="d_to" value="' + h(d.to || "") + '"></label></div>' +
     '<label class="f">関連リンク（面接・撮影の詳細など）' +
       '<input type="url" id="d_url" value="' + h(d.url || "") + '" placeholder="' + h(recruitUrl() || "https://") + '"></label>' +
@@ -2860,23 +3099,28 @@ function modalVault(v){
     '<button class="btn primary" data-act="save-vault" data-id="' + h(v.id || "") + '">保存</button>');
 }
 const SHOP_PLACEHOLDER = "\u25a0店名：\n\u25a0営業時間：15:00〜3:00\n\u25a0最寄り駅：\n日本橋\n\u25a0女子給\n70分6,000〜\n90分8,000〜";
+const GENERIC_PLACEHOLDER = "\u25a0店名：株式会社〇〇\n\u25a0住所\n大阪市〇〇区…\n\u25a0電話\n06-0000-0000\n\u25a0メモ\n";
 const CAST_PLACEHOLDER = "\u25a0店名：はるか\n\u25a0キャッチコピー\nモデル級の美しさ\n\u25a0年齢\n25歳\n\u25a0身長\n170cm\n\u25a0サイズ\nB:93 W:56 H:88";
 function modalShop(sp){
   sp = sp || {};
   // 新規は、いま開いている種別で作る。編集は元の種別を保つ。
   const kind = sp.id ? (sp.kind || "shop") : shopKind();
   const isCast = kind === "cast";
-  showModal((sp.id ? "編集" : "追加") + "：" + (isCast ? "掲載用プロフィール" : "店舗"),
+  // 分類の名前を変えたボードでは、元の店舗・プロフィールの例は当てはまらない。
+  const asIs = shopKindLabel(kind) === (isCast ? "掲載用プロフィール" : "店舗");
+  showModal((sp.id ? "編集" : "追加") + "：" + shopKindLabel(kind),
     '<div class="fields">' +
     '<label class="f">貼り付け（■ の形式そのまま）' +
       '<textarea id="s_paste" rows="16" style="min-height:280px;font-size:13px;line-height:1.7" placeholder="' +
-      h(isCast ? CAST_PLACEHOLDER : SHOP_PLACEHOLDER) + '">' + h(sp.id ? shopText(sp) : "") + "</textarea></label>" +
+      h(!asIs ? GENERIC_PLACEHOLDER : isCast ? CAST_PLACEHOLDER : SHOP_PLACEHOLDER) + '">' + h(sp.id ? shopText(sp) : "") + "</textarea></label>" +
     '<input type="hidden" id="s_kind" value="' + h(kind) + '">' +
     '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
-      (isCast ? "プロフィールをそのまま貼ってください。" : "求人票をそのまま貼ってください。") +
+      (!asIs ? "まとめてある文章をそのまま貼ってください。" : isCast ? "プロフィールをそのまま貼ってください。" : "求人票をそのまま貼ってください。") +
       '<strong>■</strong> で始まる行が見出しになります。' +
       '「■店名：〇〇」のように同じ行に書いても、次の行に書いても大丈夫です。<br>' +
-      (isCast
+      (!asIs
+        ? "1行目の <strong>■店名</strong> には、その情報の名前（会社名など）を入れてください。見出しの数や順番は自由です。</p>"
+        : isCast
         ? "1行目の <strong>■店名</strong> にはその子の名前を入れてください。見出しの数や順番は自由です。</p>"
         : "見出しの数や順番は店舗ごとに自由です。</p>") +
     (isCast ? "" :
@@ -3042,6 +3286,47 @@ document.addEventListener("click", async function(ev){
       case "draft-color": S.draftColor = btn.dataset.v; render(); break;
       case "create-profile": await createProfile(); break;
       case "line-login": startLineLogin(); break;
+      case "season-mine":
+        ls("prime.season", btn.dataset.v || "");
+        if (!btn.dataset.v){ try { localStorage.removeItem("prime.season"); } catch(e){} }
+        applySeason(); render(); return;
+      case "season-board": {
+        const ui = Object.assign({}, UI || {}, { theme: btn.dataset.v });
+        await saveUi(ui, "ボードの色を変えました"); break;
+      }
+      case "save-ui": await saveUi(collectUi()); S.uiDirty = false; break;
+      case "list-pick": S.listId = id; ls("prime.listId", id); render(); return;
+      case "list-new": modalListName(null); return;
+      case "list-rename": { const L = curList(); if (L) modalListName(L); return; }
+      case "list-save": {
+        const name = valOf("ln_name");
+        if (!name){ toast("名前を入れてください"); return; }
+        if (id) await run(sb.from("lists").update({ name: name.slice(0, 30) }).eq("id", id), "変えました");
+        else {
+          const r = await run(sb.from("lists").insert({ name: name.slice(0, 30), sort_order: S.lists.length + 1 }).select().single(), "作りました");
+          if (r && r.data){ S.listId = r.data.id; ls("prime.listId", r.data.id); }
+        }
+        closeModal(); break;
+      }
+      case "list-del": {
+        const L = curList(); if (!L) return;
+        if (!confirm("「" + L.name + "」と、その中身をすべて消しますか？")) return;
+        await run(sb.from("lists").delete().eq("id", L.id), "消しました"); S.listId = ""; break;
+      }
+      case "list-item-add": {
+        const L = curList(), title = valOf("li_title");
+        if (!L || !title) return;
+        await run(sb.from("list_items").insert({ list_id: L.id, title: title.slice(0, 200) })); break;
+      }
+      case "list-done": {
+        const x = S.listItems.find(i => i.id === id); if (!x) return;
+        await run(sb.from("list_items").update({ done: !x.done, updated_at: nowIso() }).eq("id", id)); break;
+      }
+      case "list-item-del": await run(sb.from("list_items").delete().eq("id", id)); break;
+      case "list-clear-done": {
+        const L = curList(); if (!L) return;
+        await run(sb.from("list_items").delete().eq("list_id", L.id).eq("done", true), "消しました"); break;
+      }
       case "line-notify": await toggleLineNotify(btn.dataset.v); break;
       case "new-reminder": modalReminder(); break;
       case "save-reminder": await saveReminder(); break;
@@ -3050,6 +3335,7 @@ document.addEventListener("click", async function(ev){
         await run(sb.from("reminders").delete().eq("id", id), "消しました");
         break;
       case "save-brand": {
+        S.uiDirty = false;
         const b = valOf("set_brand"), s = valOf("set_brand_sub");
         await run(sb.from("board_settings").update({ brand: b, brand_sub: s, updated_at: nowIso() }).eq("id", 1), "保存しました");
         // 空にしたときは config.js の名前に戻す。
@@ -3430,6 +3716,8 @@ document.addEventListener("input", function(ev){
   const t = ev.target;
   if (!t || !t.id) return;
   if (/^(au_|pf_|st_)/.test(t.id)) S.form[t.id] = t.value;
+  // カスタマイズ欄を書きかけの間は、読み直しで描き直さない（保存すると戻る）。
+  if (/^(ct_|ck_|ch_|c_|set_brand)/.test(t.id) || t.classList.contains("c_cat")) S.uiDirty = true;
   if (t.id === "v_q"){
     S.vaultQ = t.value;
     const box = el("vaultList");
@@ -3439,6 +3727,7 @@ document.addEventListener("input", function(ev){
 document.addEventListener("change", function(ev){
   const t = ev.target;
   if (t && /^st_/.test(t.id)) S.form[t.id] = t.value;
+  if (t && t.id && /^(ct_|ck_|ch_)/.test(t.id)) S.uiDirty = true;
   if (t && t.id === "x_share"){
     const box = el("x_who");
     if (box) box.hidden = t.value !== "some";
@@ -3465,6 +3754,8 @@ document.addEventListener("keydown", function(ev){
 const _render = render;
 render = function(){
   const f = document.activeElement, v = el("view");
+  if (S.uiDirty && S.screen === "app" && S.tab === "set"){ renderDoor(); renderHere(); renderTabs(); return; }
+  if (S.tab !== "set") S.uiDirty = false;
   if (f && v && v.contains(f) && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && S.screen === "app"){
     renderDoor(); renderHere(); renderTabs(); return;
   }

@@ -43,6 +43,30 @@ img{max-width:100%}
   --sans:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,-apple-system,sans-serif;
   --serif:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
 }
+/* 季節の色（addons/line の「設定」で選ぶ）。何も選ばなければ上の秋（金茶）のまま。
+   白い地に、はっきりした差し色。見出しも癖のないゴシックにそろえる。
+   暗い表示のときは下の暗い色が勝ち、差し色だけを後ろで明るい版に替える。 */
+:root[data-season="spring"]{
+  --paper:#FFFFFF; --surface:#FFFFFF; --surface-2:#FFF4F8; --surface-3:#FFE4EF;
+  --line:#F3DCE6; --line-strong:#E6BDCF;
+  --ink:#1F1A22; --ink-2:#45404A; --muted:#6E6873;
+  --brass:#D81B60; --brass-soft:#FFE1EC; --brass-line:#F48FB1;
+  --serif:var(--sans);
+}
+:root[data-season="summer"]{
+  --paper:#FFFFFF; --surface:#FFFFFF; --surface-2:#F1FAF4; --surface-3:#DDF3E4;
+  --line:#D6EBDD; --line-strong:#A9D6B8;
+  --ink:#1F1A22; --ink-2:#45404A; --muted:#6E6873;
+  --brass:#0B8A3E; --brass-soft:#DDF5E5; --brass-line:#7FD19C;
+  --serif:var(--sans);
+}
+:root[data-season="winter"]{
+  --paper:#FFFFFF; --surface:#FFFFFF; --surface-2:#F2F6FF; --surface-3:#E0E9FF;
+  --line:#D9E2F5; --line-strong:#AFC2EA;
+  --ink:#1F1A22; --ink-2:#45404A; --muted:#6E6873;
+  --brass:#1A56DB; --brass-soft:#E1EAFF; --brass-line:#8EAEF5;
+  --serif:var(--sans);
+}
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     color-scheme: dark;
@@ -77,6 +101,15 @@ img{max-width:100%}
   --g7:#E09A4B; --g7s:#3A2A15; --g8:#E28ABC; --g8s:#38182C;
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 36px -22px rgba(0,0,0,.9);
 }
+/* 暗い表示での季節の差し色。地の色は暗いまま、差し色だけ明るい版に。 */
+@media (prefers-color-scheme: dark){
+  :root[data-season="spring"]:not([data-theme="light"]){ --brass:#FF5C9A; --brass-soft:#3A1526; --brass-line:#7A2C4C }
+  :root[data-season="summer"]:not([data-theme="light"]){ --brass:#3DD47A; --brass-soft:#123222; --brass-line:#2A6B44 }
+  :root[data-season="winter"]:not([data-theme="light"]){ --brass:#6E9BFF; --brass-soft:#17223F; --brass-line:#334D85 }
+}
+:root[data-season="spring"][data-theme="dark"]{ --brass:#FF5C9A; --brass-soft:#3A1526; --brass-line:#7A2C4C }
+:root[data-season="summer"][data-theme="dark"]{ --brass:#3DD47A; --brass-soft:#123222; --brass-line:#2A6B44 }
+:root[data-season="winter"][data-theme="dark"]{ --brass:#6E9BFF; --brass-soft:#17223F; --brass-line:#334D85 }
 
 *{box-sizing:border-box}
 body{

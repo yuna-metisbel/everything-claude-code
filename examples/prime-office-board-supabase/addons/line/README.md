@@ -16,6 +16,10 @@ PRIME の本番には入れていない。
 | 朝8時のまとめ（その人の期限・支払い、今日明日の会議） | `family_morning()`。何も無い人には送らない |
 | 予定・会議の30分前 | `family_tick()`。開始時刻が読めるものだけ |
 | 種類ごとに「受け取らない」 | 「設定」→ LINE の通知 |
+| 色（春・夏・秋・冬）。ボードの色と、端末ごとの上書き | `02_board_customize.sql` の `board_settings.ui` |
+| タブの名前・使う／使わない、その日の動きの名前、「〇〇 あいてます」の〇〇 | 同上 |
+| 情報タブ（元の店舗）の分類を自由に増やす | 同上。`shops.kind` の制限を外す |
+| 自由な一覧（買い物リストなど） | `lists` / `list_items` |
 
 LINE への送信は、既存の Edge Function `push` が Web Push と一緒に行う。
 `LINE_MESSAGING_TOKEN` が無いボード（PRIME）では何もしない。
@@ -23,7 +27,7 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
 ## 入れ方
 
 1. `migrations/` の35本を流す（SETUP.md の手順2）
-2. `01_line_login_reminders.sql` を流す
+2. `01_line_login_reminders.sql`、続けて `02_board_customize.sql` を流す
 3. Edge Function `push`（新しい版）と `line-login` を置く。`verify_jwt` は有効のまま
 4. `push_config` に `function_url` と `anon_key`（SETUP.md の手順4）
 5. 公開してよい LINE の設定を入れる
@@ -50,7 +54,10 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
      （これが無いと、ログイン時の友だち追加の案内が出ない）
    - 家族が使う前に、チャネルを **公開** にする（開発中は管理者とテスターしか入れない）
 8. `init-new-company.sql` で招待コード方式にする（最初の1人はコードなしで入れる）
-9. 画面の `config.js` に `lineLogin`・`lineOaId`・`editableBrand: true`・`reminders: true`
+9. 画面は Render の Build Command を
+   `sh examples/prime-office-board-web/build-site.sh <名前>` にする
+   （`config.<名前>.js` を `config.js` にし、URL を共有したときの題名とホーム画面の名前を書き換える）。
+   その `config.<名前>.js` に `lineLogin`・`lineOaId`・`editableBrand: true`・`reminders: true`
    （例：`../../../prime-office-board-web/config.fujisawa.js`）
 
 ## 気をつけること
