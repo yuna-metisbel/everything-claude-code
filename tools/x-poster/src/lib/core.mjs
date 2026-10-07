@@ -17,7 +17,9 @@ const BATCH = 10;
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const STATE_TTL_MS = 30 * 60 * 1000;
 
-const LIVE = ['pending', 'scheduled', 'posting', 'posted'];
+const LIVE = ['draft', 'pending', 'scheduled', 'posting', 'posted'];
+/** A suggestion nobody picked is dropped this long after its suggested time. */
+const DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
 
 function app(env) {
   return { clientId: env.X_CLIENT_ID, clientSecret: env.X_CLIENT_SECRET };
@@ -108,7 +110,7 @@ async function accessTokenFor(env, account, fetchImpl) {
 }
 
 export async function disconnectAccount(env, id) {
-  await env.DB.prepare("UPDATE posts SET status = 'canceled', error = '連携解除' WHERE account_id = ?1 AND status IN ('pending', 'scheduled')")
+  await env.DB.prepare("UPDATE posts SET status = 'canceled', error = '連携解除' WHERE account_id = ?1 AND status IN ('draft', 'pending', 'scheduled')")
     .bind(id)
     .run();
   await env.DB.prepare("UPDATE accounts SET status = 'removed', access_sealed = '', refresh_sealed = '' WHERE id = ?1")
@@ -122,7 +124,7 @@ export async function disconnectAccount(env, id) {
  * Queue a post. `confirmed: false` leaves it waiting for a yes (Telegram);
  * the web screen asks before it sends, so it queues confirmed.
  */
-export async function queuePost(env, { accountId, text, at, source, confirmed }) {
+export async function queuePost(env, { accountId, text, at, source, confirmed, draft = false }) {
   const body = String(text || '').trim();
   const problem = textProblem(body);
   if (problem) return { ok: false, error: problem };
@@ -149,7 +151,7 @@ export async function queuePost(env, { accountId, text, at, source, confirmed })
     };
   }
 
-  const status = confirmed ? 'scheduled' : 'pending';
+  const status = draft ? 'draft' : confirmed ? 'scheduled' : 'pending';
   const result = await env.DB.prepare(
     `INSERT INTO posts (account_id, text, text_hash, status, scheduled_at, source, created_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
@@ -160,18 +162,36 @@ export async function queuePost(env, { accountId, text, at, source, confirmed })
 }
 
 /** The yes for a pending post. A time that has passed meanwhile means now. */
-export async function confirmPost(env, id) {
-  const post = await env.DB.prepare("SELECT * FROM posts WHERE id = ?1 AND status = 'pending'").bind(id).first();
+export async function confirmPost(env, id, { now = false } = {}) {
+  const post = await env.DB.prepare("SELECT * FROM posts WHERE id = ?1 AND status IN ('pending', 'draft')").bind(id).first();
   if (!post) return { ok: false, error: 'その投稿は確認待ちではありません' };
-  await env.DB.prepare("UPDATE posts SET status = 'scheduled', scheduled_at = ?1 WHERE id = ?2")
-    .bind(Math.max(post.scheduled_at, Date.now()), id)
-    .run();
-  return { ok: true, due: post.scheduled_at <= Date.now() };
+  const at = now ? Date.now() : Math.max(post.scheduled_at, Date.now());
+  await env.DB.prepare("UPDATE posts SET status = 'scheduled', scheduled_at = ?1 WHERE id = ?2").bind(at, id).run();
+  return { ok: true, due: at <= Date.now(), at };
+}
+
+/** What the morning drafter needs: who it writes for, and what they said lately. */
+export async function draftContext(env, days = 14) {
+  const accounts = (await listAccounts(env)).filter((a) => a.status !== 'removed');
+  const { results } = await env.DB.prepare(
+    `SELECT a.handle, p.text, p.status, p.scheduled_at FROM posts p JOIN accounts a ON a.id = p.account_id
+     WHERE p.created_at > ?1 AND p.status IN ('draft', 'scheduled', 'posting', 'posted') ORDER BY p.created_at DESC LIMIT 400`
+  )
+    .bind(Date.now() - days * 24 * 60 * 60 * 1000)
+    .all();
+  return {
+    now: Date.now(),
+    accounts: accounts.map((a) => ({
+      handle: a.handle,
+      status: a.status,
+      recent: (results || []).filter((p) => p.handle === a.handle).map((p) => p.text),
+    })),
+  };
 }
 
 export async function cancelPost(env, id) {
   const done = await env.DB.prepare(
-    "UPDATE posts SET status = 'canceled' WHERE id = ?1 AND status IN ('pending', 'scheduled')"
+    "UPDATE posts SET status = 'canceled' WHERE id = ?1 AND status IN ('draft', 'pending', 'scheduled')"
   )
     .bind(id)
     .run();
@@ -181,7 +201,7 @@ export async function cancelPost(env, id) {
 export async function listPosts(env, { upcoming = false, limit = 30 } = {}) {
   const sql = upcoming
     ? `SELECT p.*, a.handle FROM posts p JOIN accounts a ON a.id = p.account_id
-       WHERE p.status IN ('pending', 'scheduled', 'posting') ORDER BY p.scheduled_at LIMIT ?1`
+       WHERE p.status IN ('draft', 'pending', 'scheduled', 'posting') ORDER BY p.scheduled_at LIMIT ?1`
     : `SELECT p.*, a.handle FROM posts p JOIN accounts a ON a.id = p.account_id
        WHERE p.status IN ('posted', 'failed', 'canceled') ORDER BY COALESCE(p.posted_at, p.created_at) DESC LIMIT ?1`;
   const { results } = await env.DB.prepare(sql).bind(limit).all();
@@ -194,6 +214,9 @@ export async function listPosts(env, { upcoming = false, limit = 30 } = {}) {
  * for the Telegram report.
  */
 export async function dispatchDue(env, fetchImpl = fetch, now = Date.now()) {
+  await env.DB.prepare("UPDATE posts SET status = 'canceled', error = '選ばれなかった案' WHERE status = 'draft' AND scheduled_at < ?1")
+    .bind(now - DRAFT_TTL_MS)
+    .run();
   const { results } = await env.DB.prepare(
     "SELECT * FROM posts WHERE status = 'scheduled' AND scheduled_at <= ?1 ORDER BY scheduled_at LIMIT ?2"
   )

@@ -83,6 +83,7 @@ export function resultPage(title, message, ok) {
 }
 
 const STATUS = {
+  draft: ['案', 'tag-wait'],
   pending: ['確認待ち', 'tag-wait'],
   scheduled: ['予約', 'tag-wait'],
   posting: ['投稿中', 'tag-wait'],
@@ -102,6 +103,7 @@ function postRow(post, { cancel = false } = {}) {
   <div class="post-text">${esc(post.text)}</div>
   ${post.error ? `<div class="hint" style="color:var(--red)">${esc(post.error)}</div>` : ''}
   <div class="row">${link}
+  ${post.status === 'draft' ? `<form method="post" action="/posts/${post.id}/approve" onsubmit="return confirm('#${post.id} を ${esc(when)} に予約しますか？')"><button class="btn btn-pink btn-small" type="submit">この案を予約</button></form>` : ''}
   ${cancel ? `<form method="post" action="/posts/${post.id}/cancel" onsubmit="return confirm('#${post.id} を取り消しますか？')"><button class="btn btn-line btn-small" type="submit">取り消す</button></form>` : ''}
   </div>
 </div>`;

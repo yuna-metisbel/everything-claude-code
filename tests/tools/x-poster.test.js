@@ -265,6 +265,47 @@ async function main() {
     assert.strictEqual(dispatched, 1, 'a post due now goes out at once');
   });
 
+  await test('a morning draft waits for a button, then books its suggested time', async () => {
+    const db = fakeD1();
+    const e = env(db);
+    const apis = fakeApis();
+    const acct = await connected(e, apis);
+    const at = Date.now() + 3 * 3600e3;
+    const draft = await core.queuePost(e, { accountId: acct.id, text: '朝の案です', at, source: 'drafter', draft: true });
+    assert.strictEqual(draft.status, 'draft');
+    assert.strictEqual((await core.dispatchDue(e, apis, at + 1000)).length, 0, 'a draft is never posted by itself');
+
+    const twin = await core.queuePost(e, { accountId: acct.id, text: '朝の案です！', source: 'drafter', draft: true });
+    assert.strictEqual(twin.ok, false, 'two drafts with the same words are one too many');
+
+    await telegram.sendDraft(e, { id: draft.id, handle: 'willymatze', at, text: '朝の案です', note: 'お昼休み' }, apis);
+    const sent = JSON.parse(apis.calls.filter((c) => c.url.endsWith('/sendMessage')).pop().options.body);
+    assert.deepStrictEqual(sent.reply_markup.inline_keyboard[0].map((b) => b.callback_data), [`sch:${draft.id}`, `now:${draft.id}`, `no:${draft.id}`]);
+
+    await telegram.handleUpdate(
+      e,
+      { callback_query: { id: 'q', data: `sch:${draft.id}`, message: { chat: { id: 777 }, message_id: 1, text: 'x' } } },
+      { fetchImpl: apis }
+    );
+    const row = db.raw.prepare('SELECT status, scheduled_at FROM posts WHERE id = ?').get(draft.id);
+    assert.deepStrictEqual([row.status, row.scheduled_at], ['scheduled', at], 'booked for the suggested time, not now');
+  });
+
+  await test('drafts nobody picks are dropped, and the drafter sees recent posts', async () => {
+    const db = fakeD1();
+    const e = env(db);
+    const apis = fakeApis();
+    const acct = await connected(e, apis);
+    const old = await core.queuePost(e, { accountId: acct.id, text: '古い案', at: Date.now() + 60e3, source: 'drafter', draft: true });
+    await core.queuePost(e, { accountId: acct.id, text: '投稿予定', at: Date.now() + 60e3, source: 'web', confirmed: true });
+    const ctx = await core.draftContext(e);
+    assert.deepStrictEqual(ctx.accounts.map((a) => a.handle), ['willymatze']);
+    assert.ok(ctx.accounts[0].recent.includes('投稿予定'));
+
+    await core.dispatchDue(e, apis, Date.now() + 8 * 3600e3);
+    assert.strictEqual(db.raw.prepare('SELECT status FROM posts WHERE id = ?').get(old.id).status, 'canceled');
+  });
+
   await test('the web screen escapes what it prints', () => {
     const page = ui.dashboardPage({
       accounts: [{ id: 1, handle: 'a', name: '<b>', status: 'ok' }],

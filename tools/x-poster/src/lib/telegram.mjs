@@ -101,9 +101,9 @@ export async function handleUpdate(env, update, { afterConfirm, fetchImpl = fetc
     await call(env, 'answerCallbackQuery', { callback_query_id: q.id }, fetchImpl);
     const edit = (text) =>
       call(env, 'editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, text }, fetchImpl);
-    if (verb === 'ok') {
-      const done = await confirmPost(env, id);
-      await edit(`${q.message.text}\n\n${done.ok ? (done.due ? '→ 投稿します' : '→ 予約しました') : `→ ${done.error}`}`);
+    if (verb === 'ok' || verb === 'sch' || verb === 'now') {
+      const done = await confirmPost(env, id, { now: verb === 'now' });
+      await edit(`${q.message.text}\n\n${done.ok ? (done.due ? '→ 投稿します' : `→ ${formatJst(done.at)} に予約しました`) : `→ ${done.error}`}`);
       if (done.ok && done.due && afterConfirm) await afterConfirm();
       return { confirmed: done.ok };
     }
@@ -153,6 +153,29 @@ export async function handleUpdate(env, update, { afterConfirm, fetchImpl = fetc
     default:
       return say(env, HELP, {}, fetchImpl);
   }
+}
+
+/**
+ * A morning suggestion, sent with its own buttons: book it for the suggested
+ * time, post it now, or drop it. Nothing is queued until one is pressed.
+ */
+export function sendDraft(env, post, fetchImpl = fetch) {
+  const text = [
+    `【案 #${post.id}】@${post.handle}`,
+    `おすすめ: ${formatJst(post.at)}${post.note ? `（${post.note}）` : ''}`,
+    `${weightedLength(post.text)} / 280`,
+    '',
+    post.text,
+  ].join('\n');
+  return say(env, text, {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: `${formatJst(post.at).slice(11)} に予約`, callback_data: `sch:${post.id}` },
+        { text: '今すぐ投稿', callback_data: `now:${post.id}` },
+        { text: 'いらない', callback_data: `no:${post.id}` },
+      ]],
+    },
+  }, fetchImpl);
 }
 
 /** Tell Telegram to deliver to this Worker, with a secret only we know. */

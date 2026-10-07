@@ -6,12 +6,17 @@
  *   POST /connect          make a one-time X sign-in link
  *   GET  /oauth/callback   X sends the account back here
  *   POST /telegram/webhook Telegram commands (secret header + one chat only)
+ *   GET  /api/context      accounts and recent posts, for the morning drafter
+ *   POST /api/drafts       the morning drafter hands in suggestions (DRAFTS_KEY)
  *   cron (every minute)    send what is due
  */
 
 import { sameText, signSession, verifySession } from './lib/crypto.mjs';
 import {
   cancelPost,
+  confirmPost,
+  draftContext,
+  findAccount,
   disconnectAccount,
   dispatchDue,
   finishConnect,
@@ -21,7 +26,7 @@ import {
   queuePost,
   startConnect,
 } from './lib/core.mjs';
-import { handleUpdate, registerWebhook, say } from './lib/telegram.mjs';
+import { handleUpdate, registerWebhook, say, sendDraft } from './lib/telegram.mjs';
 import { parseJst } from './lib/text.mjs';
 import { dashboardPage, loginPage, resultPage } from './ui.mjs';
 
@@ -93,10 +98,54 @@ async function dashboard(request, env, extra = {}) {
   );
 }
 
+const json = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+
+/**
+ * The morning drafter's door. Its key can read what was posted lately and
+ * hand in suggestions - nothing it sends is posted until a person presses a
+ * button, so a leaked key cannot post anything.
+ */
+async function draftsApi(request, env, pathname) {
+  const given = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!env.DRAFTS_KEY || !(await sameText(given, env.DRAFTS_KEY))) return json({ ok: false, error: 'unauthorized' }, 401);
+
+  if (pathname === '/api/context' && request.method === 'GET') return json({ ok: true, ...(await draftContext(env)) });
+
+  if (pathname === '/api/drafts' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const drafts = Array.isArray(body.drafts) ? body.drafts.slice(0, 40) : [];
+    const results = [];
+    for (const draft of drafts) {
+      const account = await findAccount(env, draft.handle);
+      if (!account || account.status === 'removed') {
+        results.push({ handle: draft.handle, ok: false, error: 'unknown-account' });
+        continue;
+      }
+      const at = parseJst(String(draft.at || ''));
+      if (!Number.isFinite(at)) {
+        results.push({ handle: draft.handle, ok: false, error: 'bad-time' });
+        continue;
+      }
+      const queued = await queuePost(env, { accountId: account.id, text: draft.text, at, source: 'drafter', draft: true });
+      if (!queued.ok) {
+        results.push({ handle: draft.handle, ok: false, error: queued.error });
+        continue;
+      }
+      await sendDraft(env, { id: queued.id, handle: account.handle, at, text: String(draft.text).trim(), note: String(draft.note || '').slice(0, 40) });
+      results.push({ handle: account.handle, ok: true, id: queued.id });
+    }
+    return json({ ok: true, results });
+  }
+  return json({ ok: false, error: 'not-found' }, 404);
+}
+
 async function route(request, env, ctx) {
   const url = new URL(request.url);
   const { pathname } = url;
   const method = request.method;
+
+  if (pathname.startsWith('/api/')) return draftsApi(request, env, pathname);
 
   // --- open to the world, each with its own check ---
   if (pathname === '/telegram/webhook' && method === 'POST') {
@@ -162,7 +211,14 @@ async function route(request, env, ctx) {
     return back(now ? `@${queued.handle} に投稿しています（#${queued.id}）。結果は下に出ます` : `@${queued.handle} に予約しました（#${queued.id}）`, true);
   }
 
-  let m = pathname.match(/^\/posts\/(\d+)\/cancel$/);
+  let m = pathname.match(/^\/posts\/(\d+)\/approve$/);
+  if (m && method === 'POST') {
+    const done = await confirmPost(env, Number(m[1]));
+    if (done.ok && done.due) ctx.waitUntil(runDispatch(env));
+    return back(done.ok ? `#${m[1]} を予約しました` : done.error, done.ok);
+  }
+
+  m = pathname.match(/^\/posts\/(\d+)\/cancel$/);
   if (m && method === 'POST') {
     const done = await cancelPost(env, Number(m[1]));
     return back(done.ok ? `#${m[1]} を取り消しました` : `#${m[1]} は取り消せません`, done.ok);
