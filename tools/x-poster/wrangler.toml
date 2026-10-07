@@ -14,8 +14,6 @@ database_id = "REPLACE_WITH_D1_ID"
 
 [vars]
 PUBLIC_URL = "https://x-poster.REPLACE.workers.dev"
-# TELEGRAM_CHAT_ID is set here once known (not secret).
-TELEGRAM_CHAT_ID = ""
 
 # Secrets (set with `npx wrangler secret put NAME`, never written here):
 #   SECRET_KEY       random, encrypts the X tokens and signs the login
@@ -23,3 +21,7 @@ TELEGRAM_CHAT_ID = ""
 #   X_CLIENT_ID      from console.x.com (the app's OAuth 2.0 Client ID)
 #   X_CLIENT_SECRET  from console.x.com (the app's OAuth 2.0 Client Secret)
 #   TELEGRAM_BOT_TOKEN  a NEW bot from @BotFather (not the 02View DM bot)
+#   TELEGRAM_CHAT_ID    the one chat allowed to give commands
+#
+# Real ids and the public URL live in wrangler.deploy.toml (not committed);
+# deploy with `npx wrangler deploy -c wrangler.deploy.toml`.
