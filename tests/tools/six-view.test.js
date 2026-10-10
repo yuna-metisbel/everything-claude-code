@@ -212,9 +212,21 @@ async function runTests() {
     assert.strictEqual(schema.normalizeConfig({ sites: [{ name: 'A' }] }).sites.length, 1);
     assert.strictEqual(schema.normalizeConfig({ sites: new Array(8).fill({ name: 'X' }) }).sites.length, 8);
     assert.strictEqual(
-      schema.normalizeConfig({ sites: new Array(20).fill({ name: 'X' }) }).sites.length,
+      schema.normalizeConfig({ sites: new Array(60).fill({ name: 'X' }) }).sites.length,
       schema.MAX_PANES
     );
+  })) passed++; else failed++;
+
+  if (test('the grid is shaped by the group on screen, not by every pane', () => {
+    const sites = [
+      ...new Array(8).fill(0).map((_, i) => ({ id: `a${i}`, name: 'A', url: 'https://x.com/', group: '' })),
+      ...new Array(10).fill(0).map((_, i) => ({ id: `b${i}`, name: 'B', url: 'https://x.com/', group: 'X②' })),
+    ];
+    const all = schema.normalizeConfig({ sites });
+    const group = schema.normalizeConfig({ sites, activeGroup: 'X②' });
+    assert.strictEqual(all.sites.length, 18, 'more than the old 12 fit');
+    assert.strictEqual(schema.resolveColumns(group), schema.resolveColumns(schema.normalizeConfig({ sites: sites.slice(8) })));
+    assert.ok(schema.resolveColumns(all) >= schema.resolveColumns(group));
   })) passed++; else failed++;
 
   if (test('resolveColumns picks a sensible grid and honours an override', () => {

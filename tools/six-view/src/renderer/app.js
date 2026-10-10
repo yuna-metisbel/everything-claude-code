@@ -320,6 +320,15 @@ function syncPaneContent(pane, site, partition, url) {
   pane.els.body.appendChild(pane.webview);
 }
 
+/** Drop a pane's page to free its memory; the pane itself stays. */
+function unloadPane(pane) {
+  if (pane.webview) {
+    pane.webview.remove();
+    pane.webview = null;
+  }
+  pane.signature = '';
+}
+
 function applyState(state) {
   const pane = panes.get(state.siteId);
   if (!pane) return;
@@ -523,7 +532,11 @@ function render(bootstrap) {
     }
     pane.els.index.textContent = String(index + 1);
     updatePaneShell(pane, site, partition, url);
-    syncPaneContent(pane, site, partition, url);
+    // Only the group on screen is loaded. A pane of another group gives its
+    // page back - its login lives in its session, so it comes back signed in.
+    const inGroup = !activeGroup || (site.group || '') === activeGroup;
+    if (inGroup) syncPaneContent(pane, site, partition, url);
+    else unloadPane(pane);
 
     // "Make this the pane's first page" would otherwise record the tab's page
     // as the pane's own, and there would be no way back to the real one.

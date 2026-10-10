@@ -12,7 +12,7 @@ const sitesRoot = document.getElementById('sites');
 const siteTemplate = document.getElementById('site-template');
 const saveStatus = document.getElementById('save-status');
 
-const MAX_PANES = 12;
+const MAX_PANES = 50;
 
 let currentConfig = null;
 let encryptionAvailable = false;

@@ -9,7 +9,9 @@
 /** Panes the window ships with; the count is editable in settings. */
 const DEFAULT_PANE_COUNT = 6;
 const MIN_PANES = 1;
-const MAX_PANES = 12;
+// Panes beyond what fits on screen live in groups, and only the shown group
+// is loaded (see the renderer), so the cap is about the list, not memory.
+const MAX_PANES = 50;
 
 /**
  * Columns to use when the layout is left on "auto", chosen so the grid stays
@@ -515,9 +517,13 @@ function repointSite(site, { url, name, keep = false } = {}) {
 /** Columns for a pane count, honouring an explicit override. */
 function resolveColumns(config) {
   const explicit = config && config.layout ? Number(config.layout.columns) : 0;
-  // Closed panes are not in the grid, so they must not shape it either.
+  // Closed panes are not in the grid, so they must not shape it either; nor do
+  // panes of a group that is not being shown.
+  const group = (config && config.activeGroup) || '';
   const count =
-    config && Array.isArray(config.sites) ? config.sites.filter(isPaneVisible).length : 0;
+    config && Array.isArray(config.sites)
+      ? config.sites.filter((site) => isPaneVisible(site) && (!group || site.group === group)).length
+      : 0;
   if (Number.isFinite(explicit) && explicit >= 1 && explicit <= MAX_PANES) return Math.floor(explicit);
   return AUTO_COLUMNS[count] || Math.ceil(Math.sqrt(Math.max(1, count)));
 }
