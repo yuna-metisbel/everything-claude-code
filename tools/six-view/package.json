@@ -1,0 +1,84 @@
+{
+  "name": "sixview",
+  "productName": "SixView",
+  "version": "1.0.0",
+  "private": true,
+  "description": "6つの業務サイトを3x2の1画面にまとめて開くデスクトップアプリ (Windows / macOS)",
+  "author": "yuna-metisbel",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuna-metisbel/everything-claude-code.git"
+  },
+  "main": "src/main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "start:02": "electron . --brand-msns",
+    "icon": "node assets/make-icon.js",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:mac:02": "electron-builder --mac --config electron-builder.02.json",
+    "dist:win:02": "electron-builder --win --config electron-builder.02.json"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.sixview.desktop",
+    "productName": "SixView",
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "SixView"
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "category": "Network",
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

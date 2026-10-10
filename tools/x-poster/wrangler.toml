@@ -1,0 +1,27 @@
+name = "x-poster"
+main = "src/index.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Send what is due, every minute.
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "x-poster"
+database_id = "REPLACE_WITH_D1_ID"
+
+[vars]
+PUBLIC_URL = "https://x-poster.REPLACE.workers.dev"
+
+# Secrets (set with `npx wrangler secret put NAME`, never written here):
+#   SECRET_KEY       random, encrypts the X tokens and signs the login
+#   ADMIN_PASSWORD   the password for the web screen
+#   X_CLIENT_ID      from console.x.com (the app's OAuth 2.0 Client ID)
+#   X_CLIENT_SECRET  from console.x.com (the app's OAuth 2.0 Client Secret)
+#   TELEGRAM_BOT_TOKEN  a NEW bot from @BotFather (not the 02View DM bot)
+#   TELEGRAM_CHAT_ID    the one chat allowed to give commands
+#
+# Real ids and the public URL live in wrangler.deploy.toml (not committed);
+# deploy with `npx wrangler deploy -c wrangler.deploy.toml`.

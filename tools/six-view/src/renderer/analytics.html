@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>投稿分析</title>
+    <link rel="stylesheet" href="analytics.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <h1>投稿分析</h1>
+      <label class="field">
+        <span>アカウント</span>
+        <select id="account"></select>
+      </label>
+      <label class="field">
+        <span>件数</span>
+        <select id="max-posts">
+          <option value="50">最新 50 件</option>
+          <option value="100" selected>最新 100 件</option>
+          <option value="200">最新 200 件</option>
+        </select>
+      </label>
+      <button type="button" id="run" class="btn btn-primary">取得する</button>
+      <span id="status" class="status"></span>
+    </header>
+
+    <p class="hint">
+      そのアカウントのプロフィールを、見えないウィンドウで上から順に読みます。読むだけで、いいねやフォローなどの操作は一切しません。
+      見出しを押すと並べ替えます。行を押すと、その投稿をブラウザで開きます。
+    </p>
+
+    <section id="summary" class="summary" hidden></section>
+
+    <table id="table" class="table" hidden>
+      <thead>
+        <tr>
+          <th data-sort="time">日時</th>
+          <th data-sort="text" class="col-text">本文</th>
+          <th data-sort="views" class="num">表示</th>
+          <th data-sort="likes" class="num">いいね</th>
+          <th data-sort="reposts" class="num">リポスト</th>
+          <th data-sort="replies" class="num">返信</th>
+          <th data-sort="bookmarks" class="num">ブクマ</th>
+          <th data-sort="rate" class="num">いいね率</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script src="analytics.js"></script>
+  </body>
+</html>

@@ -1,0 +1,929 @@
+'use strict';
+
+/**
+ * Settings window.
+ *
+ * Site settings are edited as one config object and saved together.
+ * Credentials are written one site at a time through the credential vault and
+ * are never read back into this window.
+ */
+
+const sitesRoot = document.getElementById('sites');
+const siteTemplate = document.getElementById('site-template');
+const saveStatus = document.getElementById('save-status');
+
+const MAX_PANES = 50;
+
+let currentConfig = null;
+let encryptionAvailable = false;
+let credentialStatus = {};
+let savedPageSets = [];
+let presets = [];
+
+/** Copy a pane so a second account on the same site gets its own session. */
+function duplicateSite(site, takenIds) {
+  const copy = JSON.parse(JSON.stringify(site));
+  const used = new Set(takenIds);
+  let suffix = 2;
+  while (used.has(`${site.id}-${suffix}`)) suffix += 1;
+  copy.id = `${site.id}-${suffix}`;
+  copy.name = `${site.name} (${suffix})`;
+  return copy;
+}
+
+/** A new pane, optionally seeded from one of the shipped presets. */
+function blankSite(takenIds, preset = {}) {
+  const used = new Set(takenIds);
+  let index = used.size + 1;
+  while (used.has(`site-${index}`)) index += 1;
+  return {
+    id: preset.key && preset.key !== 'blank' ? `${preset.key}-${index}` : `site-${index}`,
+    name: preset.name || `サイト ${index}`,
+    url: preset.url || '',
+    enabled: true,
+    incognito: false,
+    keepPage: false,
+    group: '',
+    memo: '',
+    zoomFactor: 0,
+    userAgent: '',
+    autofill: {
+      enabled: true,
+      urlPattern: '',
+      usernameSelector: '',
+      passwordSelector: '',
+      submitSelector: '',
+      autoSubmit: false,
+      delayMs: 600,
+    },
+    dm: {
+      enabled: false,
+      openSelector: '',
+      rowSelector: '',
+      nameSelector: '',
+      previewSelector: '',
+      unreadSelector: '',
+      inputSelector: '',
+      sendSelector: '',
+      backSelector: '',
+      intervalSeconds: 90,
+    },
+  };
+}
+
+/** Read `a.b.c` out of an object. */
+function getPath(object, path) {
+  return path.split('.').reduce((acc, key) => (acc === null || acc === undefined ? undefined : acc[key]), object);
+}
+
+/** Write `a.b.c` into an object, creating intermediate objects. */
+function setPath(object, path, value) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  let target = object;
+  for (const key of keys) {
+    if (typeof target[key] !== 'object' || target[key] === null) target[key] = {};
+    target = target[key];
+  }
+  target[last] = value;
+}
+
+function flash(message, isError = false) {
+  saveStatus.textContent = message;
+  saveStatus.style.color = isError ? '#ff6b6b' : '#8b93a7';
+  if (!message) return;
+  setTimeout(() => {
+    if (saveStatus.textContent === message) saveStatus.textContent = '';
+  }, 4000);
+}
+
+function readInput(input) {
+  if (input.type === 'checkbox') return input.checked;
+  if (input.type === 'number') return input.value === '' ? 0 : Number(input.value);
+  return input.value;
+}
+
+function writeInput(input, value) {
+  if (input.type === 'checkbox') {
+    input.checked = Boolean(value);
+    return;
+  }
+  input.value = value === null || value === undefined ? '' : String(value);
+}
+
+function renderCredStatus(creds, hasCredential) {
+  const status = creds.querySelector('.cred-status');
+  if (!encryptionAvailable) {
+    status.textContent = 'この環境では保存できません（Cookie によるログイン保持のみ利用できます）。';
+    return;
+  }
+  status.textContent = hasCredential
+    ? '保存済み — 上書きするには入力して「認証情報を保存」を押してください。'
+    : '未登録 — ID とパスワードを入力して「認証情報を保存」を押してください。';
+}
+
+const PICK_PROBLEMS = {
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。先にその画面を表示してください。',
+  cancelled: '中止しました。',
+  timeout: '時間切れです。もう一度「指定」を押してください。',
+  'already-picking': 'ほかの指定が進行中です。パネルをクリックするか Esc で終わらせてください。',
+  'script-error': 'ページを読み取れませんでした。',
+  'no-result': 'ページを読み取れませんでした。',
+  'bad-request': 'ページを読み取れませんでした。',
+};
+
+const SCAN_PROBLEMS = {
+  'not-configured': '「1件の行」がまだ指定されていません。',
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。',
+  'no-row-selector': '「1件の行」がまだ指定されていません。',
+  'open-not-found': '「DM を開くボタン」が見つかりません。指定し直してください。',
+  'no-rows': 'メッセージの行が見つかりません。DM 一覧を表示した状態で試してください。',
+  busy: '読み取り中です。少し待ってから試してください。',
+  'script-error': 'ページを読み取れませんでした。',
+};
+
+/**
+ * Wire every "指定" button under one section: the user clicks the real element
+ * inside the pane and its selector is recorded.
+ *
+ * Row-relative fields record their selector relative to the row, so the same
+ * one selector works for every conversation in the list.
+ */
+function wirePickerRows(root, site, status) {
+  root.querySelectorAll('.dm-pick').forEach((rowEl) => {
+    const field = rowEl.dataset.pick;
+    const input = rowEl.querySelector(`[data-field="${field}"]`);
+    const relativeField = rowEl.dataset.relative;
+
+    rowEl.querySelector('[data-action="pick"]').addEventListener('click', async () => {
+      const relativeTo = relativeField ? getPath(site, relativeField) || '' : '';
+      if (relativeField && !relativeTo) {
+        status.textContent = '先に「1件の行」を指定してください。';
+        return;
+      }
+
+      status.textContent = 'パネルの中の場所をクリックしてください（Esc で中止）。';
+      const picked = await window.sixview.dmPick(site.id, rowEl.dataset.label || '', relativeTo);
+
+      if (!picked || !picked.ok) {
+        status.textContent = PICK_PROBLEMS[picked && picked.reason] || '指定できませんでした。';
+        return;
+      }
+
+      // Prefer the row-relative form: an absolute path would only ever match
+      // the one conversation that happened to be clicked.
+      const selector = relativeField ? picked.relative || picked.selector : picked.selector;
+      writeInput(input, selector);
+      setPath(site, field, selector);
+      status.textContent = picked.sample
+        ? `指定しました（${picked.sample}）`
+        : '指定しました。';
+    });
+  });
+}
+
+const DETECT_PROBLEMS = {
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。先にそのページを表示してください。',
+  'not-found': '見つかりませんでした。そのページを表示してから、もう一度押してください。',
+  'script-error': 'ページを読み取れませんでした。',
+  'no-result': 'ページを読み取れませんでした。',
+  'bad-request': 'ページを読み取れませんでした。',
+};
+
+/**
+ * Fill a selector field from a detection result.
+ *
+ * A guess never overwrites something already set: a field the user picked by
+ * hand is the one that was verified against the real page, so it wins.
+ */
+function fillSelector(card, site, field, value) {
+  if (!value || getPath(site, field)) return false;
+  const input = card.querySelector(`[data-field="${field}"]`);
+  if (!input) return false;
+  writeInput(input, value);
+  setPath(site, field, value);
+  return true;
+}
+
+/** Japanese for what a detection pass managed to fill in. */
+function describeDmDetection(found, filled) {
+  if (filled === 0) {
+    return found.screen === 'list'
+      ? '新しく埋まった欄はありません（すでに指定済みのようです）。'
+      : '新しく埋まった欄はありません。メッセージ一覧を表示して、もう一度押してください。';
+  }
+  if (found.screen === 'list') {
+    const sample = found.sample || {};
+    const read = sample.name || sample.preview
+      ? `先頭は「${sample.name || '名前なし'} / ${sample.preview || '本文なし'}」と読めました。`
+      : '';
+    return `一覧から ${found.rows} 件の行を見つけ、${filled} か所を埋めました。${read}`
+      + '次に会話を1つ開いて、もう一度押してください。';
+  }
+  return `${filled} か所を埋めました（返信側）。「保存して反映」を押してください。`;
+}
+
+function wireDmDetect(card, site, root, status) {
+  const detectStatus = root.querySelector('.dm-detect-status');
+
+  root.querySelector('[data-action="dm-detect"]').addEventListener('click', async () => {
+    detectStatus.textContent = 'さがしています…';
+    const found = await window.sixview.dmDetect(site.id);
+
+    if (!found || !found.ok) {
+      detectStatus.textContent = DETECT_PROBLEMS[found && found.reason] || '見つかりませんでした。';
+      return;
+    }
+
+    const filled = [
+      ['dm.rowSelector', found.rowSelector],
+      ['dm.nameSelector', found.nameSelector],
+      ['dm.previewSelector', found.previewSelector],
+      ['dm.unreadSelector', found.unreadSelector],
+      ['dm.openSelector', found.openSelector],
+      ['dm.inputSelector', found.inputSelector],
+      ['dm.sendSelector', found.sendSelector],
+      ['dm.backSelector', found.backSelector],
+    ].filter(([field, value]) => fillSelector(card, site, field, value)).length;
+
+    detectStatus.textContent = describeDmDetection(found, filled);
+    if (filled > 0) status.textContent = '「今すぐ読み取ってみる」で確かめられます。';
+  });
+}
+
+function wireDmPickers(card, site) {
+  const root = card.querySelector('[data-section="dm"]');
+  const status = root.querySelector('.dm-status');
+  wirePickerRows(root, site, status);
+  wireDmDetect(card, site, root, status);
+
+  root.querySelector('[data-action="dm-test"]').addEventListener('click', async () => {
+    status.textContent = '読み取り中…';
+    const result = await window.sixview.dmScan(site.id);
+    if (!result || !result.ok) {
+      status.textContent = SCAN_PROBLEMS[result && result.reason] || '読み取れませんでした。';
+      return;
+    }
+    const rows = result.rows || [];
+    const unread = rows.filter((row) => row.unread).length;
+    const first = rows[0];
+    status.textContent = first
+      ? `${rows.length}件を読み取りました（未読 ${unread}件）。先頭: ${first.name || '名前なし'} / ${first.preview || '本文なし'}`
+      : '行が見つかりませんでした。';
+  });
+}
+
+const BOOST_PROBLEMS = {
+  'not-configured': 'ボタンの場所がまだ指定されていません。',
+  'pane-not-loaded': 'パネルがまだ読み込まれていません。',
+  'not-found': 'ボタンが見つかりません。指定し直してください。',
+  'not-visible': 'ボタンが画面に出ていません。そのページを表示してから試してください。',
+  'not-ready': 'まだ押せる状態ではないようです（時間が来ていません）。',
+  busy: '確認中です。少し待ってから試してください。',
+  'script-error': 'ページを読み取れませんでした。',
+  'no-result': 'ページを読み取れませんでした。',
+};
+
+function wireBoost(card, site) {
+  const root = card.querySelector('[data-section="boost"]');
+  const status = root.querySelector('.boost-status');
+  wirePickerRows(root, site, status);
+
+  const detectStatus = root.querySelector('.boost-detect-status');
+  root.querySelector('[data-action="boost-detect"]').addEventListener('click', async () => {
+    detectStatus.textContent = 'さがしています…';
+    const found = await window.sixview.boostDetect(site.id);
+
+    if (!found || !found.ok) {
+      detectStatus.textContent = DETECT_PROBLEMS[found && found.reason] || '見つかりませんでした。';
+      return;
+    }
+
+    // Unlike the DM fields this one replaces what is there: there is a single
+    // boost button, so a fresh reading of the live page is the better value.
+    const input = root.querySelector('[data-field="boost.selector"]');
+    writeInput(input, found.selector);
+    setPath(site, 'boost.selector', found.selector);
+
+    const label = found.text ? `「${found.text}」` : 'ボタン';
+    detectStatus.textContent = found.pressable
+      ? `${label} を見つけました。「このパネルのブーストを自動で押す」にチェックして保存してください。`
+      : `${label} を見つけました（今は押せない状態です）。チェックして保存すれば、押せるようになったときに押します。`;
+  });
+
+  root.querySelector('[data-action="boost-test"]').addEventListener('click', async () => {
+    if (!site.boost || !site.boost.selector) {
+      status.textContent = '先にブーストのボタンを「指定」してください。';
+      return;
+    }
+    status.textContent = '確認中…';
+    const result = await window.sixview.boostPress(site.id);
+
+    if (result && result.pressed) {
+      status.textContent = result.confirmed
+        ? '押しました。'
+        : '押しましたが、反映されたかは確認できませんでした。画面を見て確かめてください。';
+      return;
+    }
+    status.textContent = BOOST_PROBLEMS[result && result.reason] || '押せませんでした。';
+  });
+}
+
+/** Mirrors credentialSlotId in config-schema.js: a pane's login on one tab. */
+function tabSlotId(siteId, setId) {
+  return `${siteId}@${setId}`;
+}
+
+/**
+ * Tabs that already exist in the saved config. A tab typed in just now has no
+ * login slot until "保存して反映" makes it real, so it gets its rows after that.
+ */
+function savedTabs() {
+  return savedPageSets.filter((set) => set.id !== 'home' && set.url);
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+/** Mirrors tabIsOwnSite in config-schema.js: the tab opens the pane's own site. */
+function tabIsOwnSite(site, set) {
+  const own = hostOf(site.url);
+  const tab = hostOf(set.url);
+  return Boolean(own && tab) && (own === tab || own.endsWith(`.${tab}`) || tab.endsWith(`.${own}`));
+}
+
+const CIRCLED = '②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+
+/** The pane id for an X account, the way config-schema's toSiteId keeps it. */
+function paneIdFor(handle) {
+  return `x-${handle.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
+}
+const BULK_GROUP_SIZE = 10;
+
+/** IDs from pasted text: one per line, with bullets, @ and spaces stripped. */
+function parseHandles(text) {
+  const seen = new Set();
+  const handles = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const handle = line.replace(/^[\s*・\-•]+/, '').replace(/^@/, '').trim();
+    if (!/^[A-Za-z0-9_]{1,15}$/.test(handle) || seen.has(handle.toLowerCase())) continue;
+    seen.add(handle.toLowerCase());
+    handles.push(handle);
+  }
+  return handles;
+}
+
+/** Fill the last X group up to ten, then open the next one. */
+function nextBulkGroup() {
+  const counts = new Map();
+  for (const site of currentConfig.sites) {
+    if (site.group && site.group.startsWith('X') && CIRCLED.includes(site.group.slice(1))) {
+      counts.set(site.group, (counts.get(site.group) || 0) + 1);
+    }
+  }
+  for (const mark of CIRCLED) {
+    const name = `X${mark}`;
+    if ((counts.get(name) || 0) < BULK_GROUP_SIZE) return name;
+  }
+  return 'X';
+}
+
+document.getElementById('bulk-x-add').addEventListener('click', async () => {
+  const status = document.getElementById('bulk-x-status');
+  const box = document.getElementById('bulk-x-ids');
+  const handles = parseHandles(box.value);
+  const taken = new Set(currentConfig.sites.map((site) => site.id));
+  const fresh = handles.filter((handle) => !taken.has(paneIdFor(handle)));
+  if (fresh.length === 0) {
+    status.textContent = handles.length ? 'どれもすでに追加されています。' : 'ID を1行に1つずつ入れてください。';
+    return;
+  }
+  if (currentConfig.sites.length + fresh.length > MAX_PANES) {
+    status.textContent = `パネルは最大 ${MAX_PANES} 個です（今 ${currentConfig.sites.length} 個、追加 ${fresh.length} 個）。`;
+    return;
+  }
+
+  for (const handle of fresh) {
+    currentConfig.sites.push({
+      id: paneIdFor(handle),
+      name: `@${handle}`,
+      url: 'https://x.com/i/flow/login',
+      enabled: true,
+      incognito: false,
+      keepPage: false,
+      group: nextBulkGroup(),
+      memo: '',
+      zoomFactor: 0,
+      userAgent: '',
+      autofill: { enabled: true, urlPattern: '', usernameSelector: '', passwordSelector: '', submitSelector: '', autoSubmit: false, advanceWithoutPassword: true, delayMs: 800 },
+      dm: { enabled: false },
+      boost: { enabled: false },
+    });
+  }
+
+  status.textContent = '追加しています…';
+  const saved = await window.sixview.saveConfig(currentConfig);
+  if (saved && saved.credentialStatus) credentialStatus = saved.credentialStatus;
+  let stored = 0;
+  for (const handle of fresh) {
+    const result = await window.sixview.setCredentials(paneIdFor(handle), handle, '');
+    if (result && result.ok) {
+      stored += 1;
+      credentialStatus[paneIdFor(handle)] = true;
+    }
+  }
+  box.value = '';
+  renderSites();
+  const skipped = handles.length - fresh.length;
+  status.textContent = `${fresh.length} 個のパネルを追加しました（ID の保存 ${stored} 件${skipped ? `、すでにあった ${skipped} 件は飛ばしました` : ''}）。上のグループのボタンで切り替えて、パスワードを入れてください。`;
+});
+
+/** Hook one ID / password row up to one vault slot. */
+function wireCreds(creds, slotId, label, hasCredential) {
+  creds.dataset.slot = slotId;
+  creds.dataset.label = label;
+  const usernameInput = creds.querySelector('[data-cred="username"]');
+  const passwordInput = creds.querySelector('[data-cred="password"]');
+  usernameInput.value = '';
+  passwordInput.value = '';
+
+  if (!encryptionAvailable) {
+    usernameInput.disabled = true;
+    passwordInput.disabled = true;
+  }
+
+  creds.querySelector('[data-cred-action="save"]').addEventListener('click', async () => {
+    const username = usernameInput.value;
+    const password = passwordInput.value;
+    if (!username && !password) {
+      flash('ID を入力してください。', true);
+      return;
+    }
+    const ok = await saveCredRow(creds);
+    flash(ok ? `${label} の認証情報を保存しました。` : '認証情報を保存できませんでした。', !ok);
+  });
+
+  creds.querySelector('[data-cred-action="clear"]').addEventListener('click', async () => {
+    await window.sixview.clearCredentials(slotId);
+    usernameInput.value = '';
+    passwordInput.value = '';
+    credentialStatus[slotId] = false;
+    renderCredStatus(creds, false);
+    flash(`${label} の認証情報を削除しました。`);
+  });
+
+  renderCredStatus(creds, hasCredential);
+}
+
+/** Send one row to the vault and clear it. Returns true when it was stored. */
+async function saveCredRow(creds) {
+  const usernameInput = creds.querySelector('[data-cred="username"]');
+  const passwordInput = creds.querySelector('[data-cred="password"]');
+  const result = await window.sixview.setCredentials(creds.dataset.slot, usernameInput.value, passwordInput.value);
+  if (!result || !result.ok) return false;
+  usernameInput.value = '';
+  passwordInput.value = '';
+  credentialStatus[creds.dataset.slot] = true;
+  renderCredStatus(creds, true);
+  return true;
+}
+
+/**
+ * Rows with something typed in that were never sent to the vault. "保存して
+ * 反映" stores these too - typing an ID and pressing the big save button is
+ * the obvious thing to do, and it used to quietly drop the ID.
+ */
+function pendingCredRows() {
+  return Array.from(sitesRoot.querySelectorAll('.creds[data-slot]')).filter((creds) => {
+    const username = creds.querySelector('[data-cred="username"]').value;
+    const password = creds.querySelector('[data-cred="password"]').value;
+    return Boolean(username || password);
+  });
+}
+
+function buildSiteCard(site, index, hasCredential) {
+  const fragment = siteTemplate.content.cloneNode(true);
+  const card = fragment.querySelector('.site');
+
+  card.querySelector('.site-index').textContent = String(index + 1);
+
+  card.querySelector('[data-action="duplicate"]').addEventListener('click', () => {
+    if (currentConfig.sites.length >= MAX_PANES) {
+      flash(`パネルは最大 ${MAX_PANES} 個までです。`, true);
+      return;
+    }
+    currentConfig.sites.splice(index + 1, 0, duplicateSite(site, currentConfig.sites.map((s) => s.id)));
+    renderSites();
+    flash('複製しました。表示名を変えて、別アカウントの ID とパスワードを保存してください。');
+  });
+
+  card.querySelector('[data-action="remove"]').addEventListener('click', () => {
+    if (currentConfig.sites.length <= 1) {
+      flash('パネルは 1 つ以上必要です。', true);
+      return;
+    }
+    currentConfig.sites.splice(index, 1);
+    renderSites();
+    flash(`${site.name} を削除しました。「保存して反映」で確定します（保存済みの認証情報も消えます）。`);
+  });
+  const title = card.querySelector('.site-title');
+  title.textContent = site.name;
+
+  card.querySelectorAll('[data-field]').forEach((input) => {
+    writeInput(input, getPath(site, input.dataset.field));
+    input.addEventListener('input', () => {
+      setPath(site, input.dataset.field, readInput(input));
+      if (input.dataset.field === 'name') title.textContent = site.name;
+    });
+  });
+
+  const detectStatus = card.querySelector('.detect-status');
+  card.querySelector('[data-action="detect"]').addEventListener('click', async () => {
+    detectStatus.textContent = '検出中…';
+    const found = await window.sixview.detectLogin(site.id);
+    const problems = {
+      'pane-not-loaded': 'パネルがまだ読み込まれていません。先にそのサイトを表示してください。',
+      'no-password-field': 'パスワード欄が見つかりません。ログイン画面を表示してから試してください。',
+      'script-error': 'ページを読み取れませんでした。',
+      'no-result': 'ページを読み取れませんでした。',
+      'bad-request': 'ページを読み取れませんでした。',
+    };
+
+    if (!found || !found.ok) {
+      detectStatus.textContent = problems[found && found.reason] || '検出できませんでした。';
+      return;
+    }
+
+    const fill = (field, value) => {
+      if (!value) return false;
+      const input = card.querySelector(`[data-field="${field}"]`);
+      writeInput(input, value);
+      setPath(site, field, value);
+      return true;
+    };
+
+    fill('autofill.usernameSelector', found.usernameSelector);
+    fill('autofill.passwordSelector', found.passwordSelector);
+    fill('autofill.submitSelector', found.submitSelector);
+
+    const patternInput = card.querySelector('[data-field="autofill.urlPattern"]');
+    if (!patternInput.value && found.path && found.path !== '/') {
+      writeInput(patternInput, found.path);
+      setPath(site, 'autofill.urlPattern', found.path);
+    }
+
+    const enabled = card.querySelector('[data-field="autofill.enabled"]');
+    enabled.checked = true;
+    setPath(site, 'autofill.enabled', true);
+
+    detectStatus.textContent = found.usernameSelector
+      ? '検出しました。ID / パスワードを保存して「保存して反映」を押してください。'
+      : 'パスワード欄だけ検出しました。ID 欄のセレクタは手入力してください。';
+  });
+
+  wireDmPickers(card, site);
+  wireBoost(card, site);
+
+  const ownCreds = card.querySelector('.creds');
+  wireCreds(ownCreds, site.id, site.name, hasCredential);
+
+  // One more login per extra tab: on the X tab this pane is an X account, and
+  // that account's ID is kept apart from the pane's own 02 login.
+  for (const set of site.keepPage ? [] : savedTabs().filter((tab) => !tabIsOwnSite(site, tab))) {
+    const tabCreds = ownCreds.cloneNode(true);
+    const tabName = set.name || set.url;
+    tabCreds.classList.add('creds-tab');
+    tabCreds.querySelector('[data-cred="username"]').previousElementSibling.textContent =
+      `「${tabName}」タブでのログイン ID`;
+    tabCreds.querySelector('[data-cred="password"]').previousElementSibling.textContent =
+      `「${tabName}」タブでのパスワード（空欄可）`;
+    ownCreds.parentNode.appendChild(tabCreds);
+    const slotId = tabSlotId(site.id, set.id);
+    wireCreds(tabCreds, slotId, `${site.name}（${tabName}）`, Boolean(credentialStatus[slotId]));
+  }
+  sitesRoot.appendChild(fragment);
+}
+
+/** Redraw the list of pane cards from currentConfig. */
+function renderSites() {
+  sitesRoot.textContent = '';
+  currentConfig.sites.forEach((site, index) => {
+    buildSiteCard(site, index, Boolean(credentialStatus[site.id]));
+  });
+  document.getElementById('pane-count').textContent = `（${currentConfig.sites.length} 画面）`;
+}
+
+const MAX_PAGE_SETS = 8;
+
+/**
+ * The page-switching card: one row per tab.
+ *
+ * The first tab is the way back to each pane's own page, so its URL box is
+ * fixed and it cannot be deleted - without it a switch would be one-way.
+ */
+function renderPageSets() {
+  if (!Array.isArray(currentConfig.pageSets) || currentConfig.pageSets.length === 0) {
+    currentConfig.pageSets = [{ id: 'home', name: 'ホーム', url: '' }];
+  }
+
+  const rows = document.getElementById('page-set-rows');
+  rows.textContent = '';
+
+  currentConfig.pageSets.forEach((set, index) => {
+    const isHome = index === 0;
+
+    const row = document.createElement('div');
+    row.className = 'page-set-row';
+
+    const nameField = document.createElement('label');
+    nameField.className = 'field';
+    const nameLabel = document.createElement('span');
+    nameLabel.textContent = isHome ? 'タブの名前（戻る用）' : 'タブの名前';
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = set.name || '';
+    name.placeholder = '例: X';
+    name.addEventListener('input', () => {
+      set.name = name.value;
+    });
+    nameField.append(nameLabel, name);
+
+    const urlField = document.createElement('label');
+    urlField.className = 'field grow';
+    const urlLabel = document.createElement('span');
+    urlLabel.textContent = isHome ? 'ページ（各パネルの最初のページ）' : '全パネルで開くページ';
+    const url = document.createElement('input');
+    url.type = 'text';
+    url.placeholder = 'https://x.com/login';
+    if (isHome) {
+      url.value = 'それぞれのパネルの最初のページ';
+      url.disabled = true;
+    } else {
+      url.value = set.url || '';
+      url.addEventListener('input', () => {
+        set.url = url.value;
+      });
+    }
+    urlField.append(urlLabel, url);
+
+    row.append(nameField, urlField);
+
+    if (!isHome) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn';
+      remove.textContent = '削除';
+      remove.addEventListener('click', () => {
+        currentConfig.pageSets.splice(index, 1);
+        if (currentConfig.activePageSet === set.id) {
+          currentConfig.activePageSet = currentConfig.pageSets[0].id;
+        }
+        renderPageSets();
+      });
+      row.appendChild(remove);
+    }
+
+    rows.appendChild(row);
+  });
+}
+
+function render(bootstrap) {
+  currentConfig = bootstrap.config;
+  encryptionAvailable = bootstrap.encryptionAvailable;
+  credentialStatus = bootstrap.credentialStatus || {};
+  savedPageSets = JSON.parse(JSON.stringify(bootstrap.config.pageSets || []));
+  presets = bootstrap.presets || [];
+
+  const presetSelect = document.getElementById('preset');
+  presetSelect.textContent = '';
+  for (const preset of presets) {
+    const option = document.createElement('option');
+    option.value = preset.key;
+    option.textContent = preset.label;
+    presetSelect.appendChild(option);
+  }
+
+  // 02View and SixView share this window, so the name has to follow the build.
+  if (bootstrap.appName) {
+    document.querySelectorAll('.brand-name').forEach((el) => {
+      el.textContent = bootstrap.appName;
+    });
+    document.title = `${bootstrap.appName} 設定`;
+  }
+
+  document.getElementById('encryption-warning').hidden = encryptionAvailable;
+  document.getElementById('config-path').textContent = bootstrap.configPath;
+  document.getElementById('config-path').title = bootstrap.configPath;
+
+  const columns = document.getElementById('columns');
+  columns.value = String((currentConfig.layout && currentConfig.layout.columns) || 0);
+  columns.addEventListener('change', () => {
+    if (!currentConfig.layout) currentConfig.layout = {};
+    currentConfig.layout.columns = Number(columns.value);
+  });
+
+  const openAtLogin = document.getElementById('open-at-login');
+  openAtLogin.checked = Boolean(currentConfig.startup && currentConfig.startup.openAtLogin);
+  openAtLogin.disabled = !bootstrap.loginItemSupported;
+  document.getElementById('login-item-note').hidden = Boolean(bootstrap.loginItemSupported);
+  openAtLogin.addEventListener('change', () => {
+    if (!currentConfig.startup) currentConfig.startup = {};
+    currentConfig.startup.openAtLogin = openAtLogin.checked;
+  });
+
+  const defaultZoom = document.getElementById('default-zoom');
+  const defaultUa = document.getElementById('default-ua');
+  writeInput(defaultZoom, currentConfig.defaults.zoomFactor);
+  writeInput(defaultUa, currentConfig.defaults.userAgent);
+  defaultZoom.addEventListener('input', () => {
+    currentConfig.defaults.zoomFactor = readInput(defaultZoom);
+  });
+  defaultUa.addEventListener('input', () => {
+    currentConfig.defaults.userAgent = readInput(defaultUa);
+  });
+
+  renderPageSets();
+  renderXWatch();
+  renderTelegram(bootstrap);
+  renderSites();
+}
+
+/** The X account check card. Plain config, saved with "保存して反映". */
+function renderXWatch() {
+  if (!currentConfig.xWatch) currentConfig.xWatch = { enabled: true, intervalMinutes: 60, notify: true };
+  const watch = currentConfig.xWatch;
+  const enabled = document.getElementById('xw-enabled');
+  const interval = document.getElementById('xw-interval');
+  const notify = document.getElementById('xw-notify');
+  enabled.checked = Boolean(watch.enabled);
+  interval.value = String(watch.intervalMinutes || 60);
+  notify.checked = Boolean(watch.notify);
+  enabled.onchange = () => {
+    watch.enabled = enabled.checked;
+  };
+  interval.onchange = () => {
+    watch.intervalMinutes = Number(interval.value);
+  };
+  notify.onchange = () => {
+    watch.notify = notify.checked;
+  };
+}
+
+/** The Telegram card: token in the vault, the rest in the config. */
+function renderTelegram(bootstrap) {
+  if (!currentConfig.telegram) currentConfig.telegram = { enabled: false, chatId: '', pollSeconds: 30, confirmBeforeSend: true };
+  const telegram = currentConfig.telegram;
+
+  const enabled = document.getElementById('tg-enabled');
+  const confirm = document.getElementById('tg-confirm');
+  const chat = document.getElementById('tg-chat');
+  const token = document.getElementById('tg-token');
+  const tokenStatus = document.getElementById('tg-token-status');
+  const status = document.getElementById('tg-status');
+
+  enabled.checked = Boolean(telegram.enabled);
+  confirm.checked = telegram.confirmBeforeSend !== false;
+  chat.value = telegram.chatId || '';
+  tokenStatus.textContent = bootstrap.telegramTokenStored ? '保存済み' : '未登録';
+
+  enabled.addEventListener('change', () => {
+    telegram.enabled = enabled.checked;
+  });
+  confirm.addEventListener('change', () => {
+    telegram.confirmBeforeSend = confirm.checked;
+  });
+  chat.addEventListener('input', () => {
+    telegram.chatId = chat.value.trim();
+  });
+
+  if (!encryptionAvailable) token.disabled = true;
+
+  document.getElementById('tg-save').addEventListener('click', async () => {
+    const value = token.value.trim();
+    const result = await window.sixview.setTelegramToken(value);
+    if (result && result.ok) {
+      token.value = '';
+      tokenStatus.textContent = value ? '保存済み' : '未登録';
+      status.textContent = value ? 'トークンを保存しました。' : 'トークンを削除しました。';
+    } else {
+      status.textContent = 'トークンを保存できませんでした。';
+    }
+  });
+
+  document.getElementById('tg-find-chat').addEventListener('click', async () => {
+    status.textContent = '取得中…';
+    const found = await window.sixview.discoverChatId(token.value.trim());
+
+    if (found && found.ok) {
+      chat.value = found.chatId;
+      telegram.chatId = found.chatId;
+      status.textContent = found.from
+        ? `チャット ID を取得しました（${found.from}）。「接続テスト」で確認してください。`
+        : 'チャット ID を取得しました。「接続テスト」で確認してください。';
+      return;
+    }
+
+    const problems = {
+      'no-messages': 'まだボットにメッセージが届いていません。Telegram でそのボットを開いて何か一言送ってから、もう一度押してください。',
+      'bad-token': '先にトークンを入れて「トークンを保存」を押してください。',
+      network: 'インターネットに出られませんでした。',
+      timeout: '応答がありませんでした。もう一度押してください。',
+    };
+    status.textContent =
+      problems[found && found.reason] || `取得できませんでした（${(found && found.reason) || 'unknown'}）。`;
+  });
+
+  document.getElementById('tg-test').addEventListener('click', async () => {
+    status.textContent = '接続中…';
+    const result = await window.sixview.testTelegram(token.value.trim(), chat.value.trim());
+    if (!result || !result.ok) {
+      status.textContent =
+        result && result.reason === 'bad-token'
+          ? 'トークンの形式が違います。@BotFather が出した文字列をそのまま貼ってください。'
+          : `接続できませんでした（${(result && result.reason) || 'unknown'}）。`;
+      return;
+    }
+    status.textContent = result.sent
+      ? `つながりました（@${result.username}）。Telegram にテストメッセージを送りました。`
+      : `トークンは有効です（@${result.username}）。チャット ID を入れてもう一度テストしてください。`;
+  });
+}
+
+document.getElementById('add-page-set').addEventListener('click', () => {
+  if (currentConfig.pageSets.length >= MAX_PAGE_SETS) {
+    flash(`タブは最大 ${MAX_PAGE_SETS} 個までです。`, true);
+    return;
+  }
+  const taken = new Set(currentConfig.pageSets.map((set) => set.id));
+  let id = `tab-${currentConfig.pageSets.length + 1}`;
+  while (taken.has(id)) id = `${id}-2`;
+  currentConfig.pageSets.push({ id, name: '', url: '' });
+  renderPageSets();
+});
+
+document.getElementById('add-pane').addEventListener('click', () => {
+  if (currentConfig.sites.length >= MAX_PANES) {
+    flash(`パネルは最大 ${MAX_PANES} 個までです。`, true);
+    return;
+  }
+  const chosen = presets.find((preset) => preset.key === document.getElementById('preset').value) || {};
+  currentConfig.sites.push(blankSite(currentConfig.sites.map((site) => site.id), chosen));
+  renderSites();
+  document.getElementById('sites').lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+document.getElementById('enable-all-autofill').addEventListener('click', () => {
+  // For configs made before auto-login defaulted to on: flip every pane at once
+  // rather than opening eight cards to tick the same box.
+  for (const site of currentConfig.sites) {
+    if (!site.autofill) site.autofill = {};
+    site.autofill.enabled = true;
+  }
+  renderSites();
+  flash('すべてのパネルで自動ログインをオンにしました。「保存して反映」を押してください。');
+});
+
+document.getElementById('save').addEventListener('click', async () => {
+  try {
+    // Remember what was typed before the cards are redrawn.
+    const pending = pendingCredRows().map((creds) => ({
+      slot: creds.dataset.slot,
+      label: creds.dataset.label,
+      username: creds.querySelector('[data-cred="username"]').value,
+      password: creds.querySelector('[data-cred="password"]').value,
+    }));
+
+    const saved = await window.sixview.saveConfig(currentConfig);
+    if (saved && saved.credentialStatus) credentialStatus = saved.credentialStatus;
+    // Only the tab list is taken back; the rest of the window keeps editing
+    // the same currentConfig object its inputs are bound to.
+    if (saved && saved.config) savedPageSets = JSON.parse(JSON.stringify(saved.config.pageSets || []));
+
+    const failed = [];
+    for (const entry of pending) {
+      const result = await window.sixview.setCredentials(entry.slot, entry.username, entry.password);
+      if (result && result.ok) credentialStatus[entry.slot] = true;
+      else failed.push(entry.label);
+    }
+
+    renderSites();
+    if (failed.length > 0) {
+      flash(`設定は保存しましたが、次の ID は保存できませんでした: ${failed.join('、')}`, true);
+    } else if (pending.length > 0) {
+      flash(`保存しました。ID / パスワードも ${pending.length} 件保存しました。`);
+    } else {
+      flash('保存しました。パネルに反映されます。');
+    }
+  } catch (err) {
+    flash(`保存できませんでした: ${err.message}`, true);
+  }
+});
+
+document.getElementById('close').addEventListener('click', () => window.sixview.closeSettings());
+
+window.sixview.bootstrap().then(render);
