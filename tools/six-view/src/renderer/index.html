@@ -21,12 +21,21 @@
         <button type="button" id="open-xstatus" class="btn" hidden>アカウント状態</button>
         <button type="button" id="open-analytics" class="btn" hidden>投稿分析</button>
         <button type="button" id="login-all" class="btn btn-primary">すべて自動ログイン</button>
+        <button type="button" id="open-deal" class="btn" title="1回だけ使える連携リンクなどを、表示中のパネルに1本ずつ開く">リンクを配る</button>
         <button type="button" id="reload-all" class="btn">すべて再読み込み</button>
         <button type="button" id="open-settings" class="btn">設定</button>
       </div>
     </header>
 
     <div id="notice" class="notice" hidden></div>
+
+    <form id="deal-bar" class="deal-bar" hidden>
+      <span class="deal-title">表示中のパネルに、上から順に1本ずつ開きます（1行に1本）</span>
+      <textarea id="deal-links" rows="4" placeholder="https://x-autoposter.onrender.com/auth/x/invite/..."></textarea>
+      <button type="submit" class="btn btn-primary">配る</button>
+      <button type="button" id="deal-cancel" class="btn">やめる</button>
+      <span id="deal-status" class="deal-status"></span>
+    </form>
 
     <div id="xstatus-bar" class="xstatus-bar" hidden>
       <span class="xstatus-title">X アカウントの状態</span>

@@ -25,6 +25,11 @@ const xStatusList = document.getElementById('xstatus-list');
 const xStatusNote = document.getElementById('xstatus-note');
 const xStatusButton = document.getElementById('open-xstatus');
 const analyticsButton = document.getElementById('open-analytics');
+const dealBar = document.getElementById('deal-bar');
+const dealLinks = document.getElementById('deal-links');
+const dealStatus = document.getElementById('deal-status');
+/** siteId -> site, as of the last render, for choosing which panes get links. */
+const siteById = new Map();
 
 /** siteId -> { root, webview, els, signature } */
 const panes = new Map();
@@ -508,7 +513,11 @@ function render(bootstrap) {
 
   renderPageSets(config);
   paneGroupOf.clear();
-  for (const site of config.sites) paneGroupOf.set(site.id, site.group || '');
+  siteById.clear();
+  for (const site of config.sites) {
+    paneGroupOf.set(site.id, site.group || '');
+    siteById.set(site.id, site);
+  }
   renderGroups(config);
   const sets = Array.isArray(config.pageSets) ? config.pageSets : [];
   const homeTab = sets.find((set) => !set.url) || sets[0] || { id: '', name: 'ホーム' };
@@ -585,6 +594,50 @@ document.getElementById('xstatus-check').addEventListener('click', () => {
   void window.sixview.xCheck('');
 });
 analyticsButton.addEventListener('click', () => window.sixview.openAnalytics());
+
+/**
+ * Hand one link to each pane on screen, top-left first - e.g. one-time
+ * "connect this account" links, which only work in the pane signed in to the
+ * account. Panes kept on their own page (a code generator) are skipped.
+ */
+function panesOnScreen() {
+  return Array.from(grid.querySelectorAll('.pane'))
+    .filter((root) => !root.classList.contains('is-hidden'))
+    .map((root) => Array.from(panes.entries()).find(([, pane]) => pane.root === root))
+    .filter((entry) => entry && entry[1].webview && !(siteById.get(entry[0]) || {}).keepPage)
+    .map(([id]) => id);
+}
+
+document.getElementById('open-deal').addEventListener('click', () => {
+  dealBar.hidden = !dealBar.hidden;
+  dealStatus.textContent = dealBar.hidden ? '' : `表示中のパネル: ${panesOnScreen().length} 個`;
+  if (!dealBar.hidden) dealLinks.focus();
+});
+document.getElementById('deal-cancel').addEventListener('click', () => {
+  dealBar.hidden = true;
+});
+dealBar.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const links = dealLinks.value
+    .split(/\s+/)
+    .map((line) => line.trim())
+    .filter((line) => /^https:\/\//.test(line));
+  const targets = panesOnScreen();
+  if (links.length === 0) {
+    dealStatus.textContent = 'https:// で始まるリンクを1行に1本ずつ貼ってください。';
+    return;
+  }
+  const count = Math.min(links.length, targets.length);
+  await Promise.all(
+    targets.slice(0, count).map((siteId, i) => window.sixview.paneNavigate(siteId, links[i]).catch(() => null))
+  );
+  dealLinks.value = '';
+  dealStatus.textContent =
+    `${count} 個のパネルで開きました。` +
+    (links.length > targets.length ? `（リンクが ${links.length - targets.length} 本余りました）` : '') +
+    (links.length < targets.length ? `（${targets.length - links.length} 個のパネルは開いていません）` : '') +
+    ' 各パネルで「信頼できるアプリです」にチェックを入れて「許可」を押してください。';
+});
 
 window.sixview.bootstrap().then((bootstrap) => {
   render(bootstrap);

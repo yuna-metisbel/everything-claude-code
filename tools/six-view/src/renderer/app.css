@@ -131,6 +131,33 @@ body {
   font-weight: 600;
 }
 
+.deal-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #1b1e26;
+  border-bottom: 1px solid #262b36;
+  font-size: 12px;
+}
+
+.deal-bar textarea {
+  flex: 1 1 420px;
+  min-height: 64px;
+  padding: 6px 8px;
+  border: 1px solid #39404f;
+  border-radius: 6px;
+  background: #232834;
+  color: var(--text);
+  font: 12px/1.4 ui-monospace, monospace;
+}
+
+.deal-title,
+.deal-status {
+  color: var(--text-dim);
+}
+
 .xstatus-bar {
   display: flex;
   align-items: center;
