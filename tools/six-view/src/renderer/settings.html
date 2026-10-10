@@ -74,6 +74,24 @@
       </div>
     </section>
 
+    <section class="card" id="bulk-x-card">
+      <h2>X アカウントをまとめて追加</h2>
+      <p class="hint">
+        X の ID（@ のあとの部分）を1行に1つずつ貼って「追加する」を押すと、アカウントごとにパネルを作り、
+        10 個ずつのグループ（X②・X③…）に分けます。各パネルは X のログイン画面で ID を自動で入れて「次へ」まで進むので、
+        あとはパスワードを入れるだけです。ログイン状態はパネルごとに残ります。
+        すでにあるアカウントは飛ばします。上のグループのボタンで、10 個ずつ切り替えて表示できます。
+      </p>
+      <label class="field grow">
+        <span>X の ID（1行に1つ）</span>
+        <textarea id="bulk-x-ids" rows="6" placeholder="例:&#10;willymatze&#10;@dahoue77262574"></textarea>
+      </label>
+      <div class="row">
+        <button type="button" id="bulk-x-add" class="btn btn-primary">追加する</button>
+        <span id="bulk-x-status" class="hint"></span>
+      </div>
+    </section>
+
     <section class="card" id="xwatch-card">
       <h2>X アカウントの状態チェック</h2>
       <p class="hint">

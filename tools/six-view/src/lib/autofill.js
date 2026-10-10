@@ -7,7 +7,7 @@
  * so credentials never travel through the renderer.
  */
 
-const { credentialSlotId, isHomePageSet } = require('./config-schema');
+const { credentialSlotId, isHomePageSet, tabIsOwnSite } = require('./config-schema');
 
 // `<` plus the two line separators JSON.stringify leaves raw (U+2028/U+2029).
 const UNSAFE_JS_CHARS = new RegExp('[<' + String.fromCharCode(0x2028, 0x2029) + ']', 'g');
@@ -100,7 +100,7 @@ function shouldAutofill(site, url, credentials) {
  */
 function loginForTab(site, set) {
   if (!site) return { slotId: '', site: null };
-  if (!set || isHomePageSet(set) || site.keepPage) return { slotId: site.id, site };
+  if (!set || isHomePageSet(set) || site.keepPage || tabIsOwnSite(site, set)) return { slotId: site.id, site };
   const own = site.autofill || {};
   return {
     slotId: credentialSlotId(site.id, set.id),
@@ -132,6 +132,7 @@ function buildAutofillScript(autofill, credentials) {
     passwordSelector: (autofill && autofill.passwordSelector) || '',
     submitSelector: (autofill && autofill.submitSelector) || '',
     autoSubmit: Boolean(autofill && autofill.autoSubmit),
+    advanceWithoutPassword: Boolean(autofill && autofill.advanceWithoutPassword),
     delayMs: Math.max(0, Number((autofill && autofill.delayMs) || 0)),
     username: (credentials && credentials.username) || '',
     password: (credentials && credentials.password) || '',
@@ -255,6 +256,14 @@ function buildAutofillScript(autofill, credentials) {
 
   // Two-step sign-in: the password field only appears after the ID is submitted.
   let twoStep = false;
+  // Only an ID saved, and asked to go on: press "next" and stop at the
+  // password screen. Nothing is submitted with a password here.
+  if (!passEl && filled > 0 && !opts.password && opts.advanceWithoutPassword) {
+    await sleep(250);
+    const advanced = await advance(userEl);
+    return { status: 'filled', filled, submitted: false, twoStep: false, advanced, reason: advanced ? '' : 'no-next-button' };
+  }
+
   if (!passEl && filled > 0 && opts.password) {
     twoStep = true;
     await sleep(250);

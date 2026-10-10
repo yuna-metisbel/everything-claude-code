@@ -1439,7 +1439,11 @@ async function runTests() {
     assert.ok(ids.includes(cast.id));
     assert.ok(ids.includes('msns-cast-1@x'));
     assert.ok(!ids.includes('msns-cast-1@home'));
-    assert.strictEqual(ids.length, config.sites.length * config.pageSets.length);
+    const ownSiteTabs = config.sites.reduce(
+      (n, site) => n + config.pageSets.filter((set) => !schema.isHomePageSet(set) && schema.tabIsOwnSite(site, set)).length,
+      0
+    );
+    assert.strictEqual(ids.length, config.sites.length * config.pageSets.length - ownSiteTabs);
   })) passed++; else failed++;
 
   if (test('on the X tab a pane types its X login on X and nowhere else', () => {
@@ -1482,6 +1486,34 @@ async function runTests() {
     assert.strictEqual(schema.resolvePaneUrl(config, totp), 'https://mudostore.net/totp');
     assert.strictEqual(autofill.loginForTab(totp, schema.currentPageSet(config)).slotId, 'totp');
     assert.ok(!schema.credentialSlotIds(config).includes('totp@x'), 'no X login for a pane that never shows X');
+  })) passed++; else failed++;
+
+  if (test('an X pane on the X tab keeps its own login instead of an empty tab slot', () => {
+    const config = schema.normalizeConfig(
+      {
+        sites: [
+          { id: 'x-tomy18', name: '@Tomy18', url: 'https://x.com/i/flow/login', group: 'X②' },
+          { id: 'cast-1', name: 'キャスト1', url: 'https://m-sns.net/cast/login/' },
+        ],
+        pageSets: [{ id: 'home', name: '02', url: '' }, { id: 'x', name: 'X', url: 'https://x.com/login' }],
+      },
+      'msns'
+    );
+    const [xPane, cast] = config.sites;
+    const xTab = config.pageSets[1];
+    assert.strictEqual(schema.tabIsOwnSite(xPane, xTab), true);
+    assert.strictEqual(schema.tabIsOwnSite(cast, xTab), false);
+    assert.strictEqual(autofill.loginForTab(xPane, xTab).slotId, 'x-tomy18');
+    assert.strictEqual(autofill.loginForTab(cast, xTab).slotId, 'cast-1@x', 'a 02 pane still gets its own X slot');
+    assert.deepStrictEqual(schema.credentialSlotIds(config), ['x-tomy18', 'cast-1', 'cast-1@x']);
+  })) passed++; else failed++;
+
+  if (test('with only an ID, "next" is pressed only when the pane asks for it', () => {
+    const on = autofill.buildAutofillScript({ advanceWithoutPassword: true }, { username: 'Tomy18', password: '' });
+    const off = autofill.buildAutofillScript({}, { username: 'Tomy18', password: '' });
+    assert.ok(/"advanceWithoutPassword":true/.test(on));
+    assert.ok(/"advanceWithoutPassword":false/.test(off));
+    assert.strictEqual(schema.normalizeConfig({ sites: [{ name: 'A' }] }).sites[0].autofill.advanceWithoutPassword, false, 'off unless asked');
   })) passed++; else failed++;
 
   if (test('an ID saved without a password reads back as the ID alone', () => {

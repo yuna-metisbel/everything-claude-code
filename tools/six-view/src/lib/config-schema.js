@@ -163,6 +163,9 @@ const DEFAULT_AUTOFILL = {
   passwordSelector: '',
   submitSelector: '',
   autoSubmit: false,
+  // With only an ID saved, press "next" after typing it, so a two-step sign-in
+  // (X) stops at the password screen for a person to finish.
+  advanceWithoutPassword: false,
   delayMs: 600,
 };
 
@@ -245,6 +248,7 @@ function normalizeAutofill(raw) {
     passwordSelector: toTrimmedString(source.passwordSelector, DEFAULT_AUTOFILL.passwordSelector),
     submitSelector: toTrimmedString(source.submitSelector, DEFAULT_AUTOFILL.submitSelector),
     autoSubmit: toBoolean(source.autoSubmit, DEFAULT_AUTOFILL.autoSubmit),
+    advanceWithoutPassword: toBoolean(source.advanceWithoutPassword, DEFAULT_AUTOFILL.advanceWithoutPassword),
     delayMs: clampNumber(source.delayMs, 0, 15000, DEFAULT_AUTOFILL.delayMs),
   };
 }
@@ -362,6 +366,16 @@ function credentialSlotId(siteId, setId) {
   return `${siteId}@${setId}`;
 }
 
+/**
+ * Does this tab open the pane's own site? An X pane on the X tab is still on
+ * X, so it keeps its own login instead of needing a second, empty one.
+ */
+function tabIsOwnSite(site, set) {
+  const own = hostOfUrl(site && site.url).replace(/^www\./, '');
+  const tab = hostOfUrl(set && set.url).replace(/^www\./, '');
+  return Boolean(own && tab) && (own === tab || own.endsWith(`.${tab}`) || tab.endsWith(`.${own}`));
+}
+
 /** Every vault slot the config can still use: each pane, on each tab. */
 function credentialSlotIds(config) {
   const sites = (config && Array.isArray(config.sites) && config.sites) || [];
@@ -371,7 +385,7 @@ function credentialSlotIds(config) {
     ids.push(site.id);
     if (site.keepPage) continue;
     for (const set of sets) {
-      if (!isHomePageSet(set)) ids.push(credentialSlotId(site.id, set.id));
+      if (!isHomePageSet(set) && !tabIsOwnSite(site, set)) ids.push(credentialSlotId(site.id, set.id));
     }
   }
   return ids;
@@ -689,6 +703,7 @@ module.exports = {
   automationPaused,
   credentialSlotId,
   credentialSlotIds,
+  tabIsOwnSite,
   DEFAULT_X_WATCH,
   X_WATCH_INTERVALS,
   normalizeXWatch,

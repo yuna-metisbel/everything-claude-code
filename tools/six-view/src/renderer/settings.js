@@ -342,6 +342,107 @@ function savedTabs() {
   return savedPageSets.filter((set) => set.id !== 'home' && set.url);
 }
 
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+/** Mirrors tabIsOwnSite in config-schema.js: the tab opens the pane's own site. */
+function tabIsOwnSite(site, set) {
+  const own = hostOf(site.url);
+  const tab = hostOf(set.url);
+  return Boolean(own && tab) && (own === tab || own.endsWith(`.${tab}`) || tab.endsWith(`.${own}`));
+}
+
+const CIRCLED = '②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+
+/** The pane id for an X account, the way config-schema's toSiteId keeps it. */
+function paneIdFor(handle) {
+  return `x-${handle.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
+}
+const BULK_GROUP_SIZE = 10;
+
+/** IDs from pasted text: one per line, with bullets, @ and spaces stripped. */
+function parseHandles(text) {
+  const seen = new Set();
+  const handles = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const handle = line.replace(/^[\s*・\-•]+/, '').replace(/^@/, '').trim();
+    if (!/^[A-Za-z0-9_]{1,15}$/.test(handle) || seen.has(handle.toLowerCase())) continue;
+    seen.add(handle.toLowerCase());
+    handles.push(handle);
+  }
+  return handles;
+}
+
+/** Fill the last X group up to ten, then open the next one. */
+function nextBulkGroup() {
+  const counts = new Map();
+  for (const site of currentConfig.sites) {
+    if (site.group && site.group.startsWith('X') && CIRCLED.includes(site.group.slice(1))) {
+      counts.set(site.group, (counts.get(site.group) || 0) + 1);
+    }
+  }
+  for (const mark of CIRCLED) {
+    const name = `X${mark}`;
+    if ((counts.get(name) || 0) < BULK_GROUP_SIZE) return name;
+  }
+  return 'X';
+}
+
+document.getElementById('bulk-x-add').addEventListener('click', async () => {
+  const status = document.getElementById('bulk-x-status');
+  const box = document.getElementById('bulk-x-ids');
+  const handles = parseHandles(box.value);
+  const taken = new Set(currentConfig.sites.map((site) => site.id));
+  const fresh = handles.filter((handle) => !taken.has(paneIdFor(handle)));
+  if (fresh.length === 0) {
+    status.textContent = handles.length ? 'どれもすでに追加されています。' : 'ID を1行に1つずつ入れてください。';
+    return;
+  }
+  if (currentConfig.sites.length + fresh.length > MAX_PANES) {
+    status.textContent = `パネルは最大 ${MAX_PANES} 個です（今 ${currentConfig.sites.length} 個、追加 ${fresh.length} 個）。`;
+    return;
+  }
+
+  for (const handle of fresh) {
+    currentConfig.sites.push({
+      id: paneIdFor(handle),
+      name: `@${handle}`,
+      url: 'https://x.com/i/flow/login',
+      enabled: true,
+      incognito: false,
+      keepPage: false,
+      group: nextBulkGroup(),
+      memo: '',
+      zoomFactor: 0,
+      userAgent: '',
+      autofill: { enabled: true, urlPattern: '', usernameSelector: '', passwordSelector: '', submitSelector: '', autoSubmit: false, advanceWithoutPassword: true, delayMs: 800 },
+      dm: { enabled: false },
+      boost: { enabled: false },
+    });
+  }
+
+  status.textContent = '追加しています…';
+  const saved = await window.sixview.saveConfig(currentConfig);
+  if (saved && saved.credentialStatus) credentialStatus = saved.credentialStatus;
+  let stored = 0;
+  for (const handle of fresh) {
+    const result = await window.sixview.setCredentials(paneIdFor(handle), handle, '');
+    if (result && result.ok) {
+      stored += 1;
+      credentialStatus[paneIdFor(handle)] = true;
+    }
+  }
+  box.value = '';
+  renderSites();
+  const skipped = handles.length - fresh.length;
+  status.textContent = `${fresh.length} 個のパネルを追加しました（ID の保存 ${stored} 件${skipped ? `、すでにあった ${skipped} 件は飛ばしました` : ''}）。上のグループのボタンで切り替えて、パスワードを入れてください。`;
+});
+
 /** Hook one ID / password row up to one vault slot. */
 function wireCreds(creds, slotId, label, hasCredential) {
   creds.dataset.slot = slotId;
@@ -493,7 +594,7 @@ function buildSiteCard(site, index, hasCredential) {
 
   // One more login per extra tab: on the X tab this pane is an X account, and
   // that account's ID is kept apart from the pane's own 02 login.
-  for (const set of site.keepPage ? [] : savedTabs()) {
+  for (const set of site.keepPage ? [] : savedTabs().filter((tab) => !tabIsOwnSite(site, tab))) {
     const tabCreds = ownCreds.cloneNode(true);
     const tabName = set.name || set.url;
     tabCreds.classList.add('creds-tab');
