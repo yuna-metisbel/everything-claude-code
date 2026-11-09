@@ -5,6 +5,10 @@
 // 確かめられるのはサーバー側だけになる。確かめたら、その人の Supabase 認証ユーザーを
 // 引き当てて（初回は作って）、staff-login と同じく1回だけ使えるトークンを返す。
 //
+// link = true で呼ばれたときは、新しいログインを出す代わりに、呼んだ本人（JWT の
+// 持ち主）の行に LINE をつなぐ。メールで登録した人が、アカウントを増やさずに
+// LINE で通知を受け取れるようにするため（lineLoginOptional のボード）。
+//
 // Secrets（導入する人がダッシュボードで入れる）：
 //   LINE_LOGIN_CHANNEL_SECRET … LINE ログイン チャネルのチャネルシークレット
 // チャネル ID は秘密ではないので line_config 表に置く。
@@ -29,7 +33,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method" }, 405);
 
-  let body: { code?: string; redirectUri?: string; nonce?: string; inviteCode?: string };
+  let body: { code?: string; redirectUri?: string; nonce?: string; inviteCode?: string; link?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -39,6 +43,8 @@ Deno.serve(async (req) => {
   const redirectUri = String(body.redirectUri || "");
   const nonce = String(body.nonce || "");
   const inviteCode = String(body.inviteCode || "").trim();
+  // link = true のときは新しいログインを出さず、呼んだ本人の行に LINE をつなぐだけ。
+  const asLink = body.link === true;
   if (!code || !redirectUri || !nonce) return json({ error: "LINE からの戻り値が足りません" }, 400);
 
   const secret = Deno.env.get("LINE_LOGIN_CHANNEL_SECRET") || "";
@@ -80,6 +86,38 @@ Deno.serve(async (req) => {
   }
   const lineUserId = String(vj.sub);
   const displayName = String(vj.name || "").slice(0, 40);
+
+  // 連携：呼んだ本人（JWT の持ち主）に、この LINE をつなぐ。
+  // 新しい認証ユーザーは作らず、トークンも返さない。
+  if (asLink) {
+    const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    const asUser = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "",
+      { global: { headers: { authorization: `Bearer ${bearer}` } },
+        auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const me = await asUser.auth.getUser();
+    const myId = me.data?.user?.id || null;
+    if (!myId) return json({ error: "ログインが確かめられませんでした。入り直してください" }, 401);
+
+    // すでに別の人につながっている LINE は横取りさせない（line_user_id は一意）。
+    const { data: taken } = await admin.from("line_links")
+      .select("user_id").eq("line_user_id", lineUserId).maybeSingle();
+    if (taken?.user_id && taken.user_id !== myId) {
+      return json({ error: "この LINE は別のアカウントにつながっています" }, 409);
+    }
+
+    const { error } = await admin.from("line_links").upsert({
+      user_id: myId, line_user_id: lineUserId, display_name: displayName,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (error) {
+      console.error("line link failed", error.message);
+      return json({ error: "LINE を連携できませんでした" }, 500);
+    }
+    return json({ linked: true, name: displayName });
+  }
 
   const email = emailFor(lineUserId);
   let userId: string | null = null;

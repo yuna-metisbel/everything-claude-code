@@ -16,10 +16,20 @@ let BRAND_SUB = CONFIG.brandSub || "事務所ボード";
 //   lineOaId    … 通知を送る公式アカウントの ID（@ から）。友だち追加の案内に使う
 //   editableBrand … ボードの名前を「設定」から変えられるようにする
 //   reminders   … ホームにリマインダー欄を出す
+//   lineLoginOptional … lineLogin と一緒に入れると、メールと LINE の両方を1枚の画面に出す
+//                       （入れないと今までどおり LINE だけ）
+//   contracts   … スタッフの契約書（リンクだけ）。addons/line/04 を流したボードだけ
+//   taskProgress … やることの進捗を割合でも出す（DB の変更は要らない）
 const LINE_LOGIN = String(CONFIG.lineLogin || "").trim();
 const LINE_OA = String(CONFIG.lineOaId || "").trim();
 const EDITABLE_BRAND = !!CONFIG.editableBrand;
 const REMINDERS = !!CONFIG.reminders;
+// LINE でしか入れないボード（藤澤家）と、両方から入れるボード（しろspa）を分ける。
+// 「LINE がメールの画面を置き換える」ことを前提にしていた所は、こちらを見る。
+const LINE_ONLY = !!LINE_LOGIN && !CONFIG.lineLoginOptional;
+const LINE_BOTH = !!LINE_LOGIN && !!CONFIG.lineLoginOptional;
+const CONTRACTS = !!CONFIG.contracts;
+const TASK_PROGRESS = !!CONFIG.taskProgress;
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -242,6 +252,9 @@ const S = {
   sites: [], siteId: ls("prime.siteId") || "", siteTab: ls("prime.siteTab") || "att",
   siteDay: today(), siteMonth: today().slice(0, 7), taskSite: ls("prime.taskSite") || "all",
   staff: [], punches: [], keyEvents: [], keyDuty: {}, sshifts: {},
+  // スタッフの契約書（addons/line/04）。staff_id をキーにした1行ずつ。
+  // 本部は拠点の全員ぶん、スタッフは RLS で自分の1行だけが入る。
+  contracts: {},
   // LINE（addons/line）。lineLink は自分のひも付け、lineName は初回の名前の候補。
   lineLink: null, lineName: "", reminders: [],
   // 自由な一覧（addons/line の 02）
@@ -685,7 +698,7 @@ async function createProfile(){
   S.busy = false;
   if (error){
     S.authErr = /row-level security|violates row-level/i.test(error.message)
-      ? (LINE_LOGIN
+      ? (LINE_ONLY
           ? "招待コードが違うか、入っていません。下の「戻る」から、招待コードを入れてもう一度 LINE でログインしてください。"
           : S.mode === "code" ? "招待コードが違うか、登録が許可されていません。管理者に確認してください。"
           : "登録が許可されていません。管理者に確認してください。")
@@ -710,9 +723,13 @@ function randomToken(){
 // 覚えさせたものは戻った先から読めないため（実際にそれでログインが打ち切られた）。
 const b64u = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const unb64u = s => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/"))));
-function startLineLogin(){
+// forLink = true のときは、ログインではなく「いまのアカウントに LINE をつなぐ」。
+// 戻ってきたときにどちらだったかを state に入れて持たせる（別のブラウザに戻ることがあり、
+// 始めたブラウザに覚えさせたものは読めないため、招待コードと同じ扱いにする）。
+function startLineLogin(forLink){
   const nonce = randomToken();
-  const state = randomToken() + "." + b64u(JSON.stringify({ n: nonce, c: valOf("au_code") }));
+  const state = randomToken() + "." +
+    b64u(JSON.stringify({ n: nonce, c: valOf("au_code"), l: forLink ? 1 : 0 }));
   // 同じブラウザに戻ってきたときは、自分が始めたものかどうかも確かめる。
   try { sessionStorage.setItem("board.line", state); } catch(e){ /* 戻り先で state だけを使う */ }
   const q = new URLSearchParams({
@@ -743,10 +760,24 @@ async function finishLineLogin(){
     S.authErr = "ログインを確かめられませんでした。もう一度「LINEでログイン」を押してください。";
     return;
   }
+  // 連携として始めたなら、いまのアカウントに LINE をつなぐだけ。新しいログインはしない。
+  const asLink = !!carried.l;
+  if (asLink){
+    // 連携は「いま誰か」を Edge Function に名乗る必要がある。保存してあるセッションが
+    // 読み込まれる前に呼ぶと名乗れないので、先に読み終わるのを待つ。
+    const s = await sb.auth.getSession();
+    if (!s.data || !s.data.session){
+      S.authErr = "ログインが切れていました。入り直してから、もう一度連携してください。";
+      return;
+    }
+  }
   const out = await sb.functions.invoke("line-login", { body: {
-    code: q.get("code"), redirectUri: lineRedirect(), nonce: carried.n, inviteCode: carried.c || "" } });
-  if (out.error || !out.data || !out.data.tokenHash){
-    let msg = "LINE でログインできませんでした。もう一度お試しください。";
+    code: q.get("code"), redirectUri: lineRedirect(), nonce: carried.n,
+    inviteCode: carried.c || "", link: asLink } });
+  if (out.error || !out.data || !(asLink ? out.data.linked : out.data.tokenHash)){
+    let msg = asLink
+      ? "LINE を連携できませんでした。もう一度お試しください。"
+      : "LINE でログインできませんでした。もう一度お試しください。";
     try {
       const body = out.error && out.error.context ? await out.error.context.json() : null;
       if (body && body.error) msg = body.error;
@@ -754,6 +785,7 @@ async function finishLineLogin(){
     S.authErr = msg; return;
   }
   S.lineName = out.data.name || "";
+  if (asLink){ toast("LINE を連携しました"); return; }
   const v = await sb.auth.verifyOtp({ token_hash: out.data.tokenHash, type: "email" });
   if (v.error) S.authErr = "ログインできませんでした。もう一度お試しください。";
 }
@@ -1031,9 +1063,25 @@ function viewAuthLine(){
     supportLine() +
     "</div></div>";
 }
+// メールと LINE の両方から入れるボード（lineLoginOptional）の、下半分。
+// 招待コードの欄は上のメール側と1つを共用する（どちらの道でも同じコードを使うため、
+// 2つ置くと「どちらに入れればいいのか」が分からなくなる）。
+function authLineBlock(){
+  return '<p class="swap" style="margin-top:18px">または</p>' +
+    '<button class="btn line" style="width:100%" data-act="line-login"' + (S.busy ? " disabled" : "") + ">" +
+      (S.busy ? "処理中…" : "LINEでログイン") + "</button>" +
+    '<p class="lead" style="margin-top:10px;font-size:12.5px">' +
+      "LINE で入ると、予定やリマインダーが LINE に届きます。" +
+      "はじめての人は、途中で出てくる公式アカウントを友だちに追加してください。<br>" +
+      "メールで登録済みの方は、メールで入ってから「設定」で LINE を連携してください" +
+      "（別のアカウントができてしまうのを防ぐため）。</p>";
+}
 function viewAuth(){
-  if (LINE_LOGIN) return viewAuthLine();
+  if (LINE_ONLY) return viewAuthLine();
   const up = S.authMode === "up";
+  // 両方から入れるボードでは、LINE のはじめての人もコードが要るので、
+  // ログインの画面でも招待コードの欄を出しておく。
+  const wantCode = S.mode === "code" && (up || LINE_BOTH);
   return '<div class="gate"><div class="gate-card">' +
     '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span><span class="sub">' + h(BRAND_SUB) + "</span></div>" +
     "<h1>" + (up ? "アカウントを作る" : "ログイン") + "</h1>" +
@@ -1045,13 +1093,15 @@ function viewAuth(){
     '<div class="fields">' +
       '<label class="f">メールアドレス<input type="email" id="au_email" autocomplete="username" inputmode="email" value="' + h(S.form.au_email || "") + '"></label>' +
       '<label class="f">パスワード<input type="password" id="au_pw" autocomplete="' + (up ? "new-password" : "current-password") + '" value="' + h(S.form.au_pw || "") + '"></label>' +
-      (up && S.mode === "code" ? '<label class="f">招待コード<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード" value="' + h(S.form.au_code || "") + '"></label>' : "") +
+      (wantCode ? '<label class="f">招待コード' + (up ? "" : "（はじめての人だけ）") +
+        '<input type="text" id="au_code" autocomplete="off" placeholder="管理者から聞いたコード" value="' + h(S.form.au_code || "") + '"></label>' : "") +
     "</div>" +
     (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
     '<button class="btn primary" style="width:100%" data-act="' + (up ? "signup" : "signin") + '"' + (S.busy ? " disabled" : "") + ">" +
       (S.busy ? "処理中…" : up ? "登録する" : "ログイン") + "</button>" +
     '<p class="swap">' + (up ? "すでにアカウントがある方は " : "はじめての方は ") +
       '<button data-act="authmode" data-v="' + (up ? "in" : "up") + '">' + (up ? "ログイン" : "アカウント作成") + "</button></p>" +
+    (LINE_BOTH ? authLineBlock() : "") +
     privacyLink() +
     "</div></div>";
 }
@@ -1068,7 +1118,7 @@ function viewProfile(){
     (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
     '<button class="btn primary" style="width:100%" data-act="create-profile"' + (S.busy ? " disabled" : "") + ">" +
       (S.busy ? "作成中…" : "はじめる") + "</button>" +
-    '<p class="swap"><button data-act="signout">' + (LINE_LOGIN ? "戻る" : "別のアカウントでログイン") + "</button></p>" +
+    '<p class="swap"><button data-act="signout">' + (LINE_ONLY ? "戻る" : "別のアカウントでログイン") + "</button></p>" +
     "</div></div>";
 }
 
@@ -1228,6 +1278,7 @@ function viewHome(){
         '<div class="panel">' + (wanted.length ? wanted.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">募集中の作業はありません</div>') + "</div></section>" : "") +
     "</div><div>" +
       (tabOn("tasks") ? '<section class="sec"><div class="sec-head"><h2>いまの持ち分</h2></div>' +
+        taskProgressBar(S.tasks) +
         '<div class="panel"><div class="rows" style="border-top:0">' +
         (load.length ? load.map(x =>
           '<div class="row" style="align-items:center"><span class="who" style="flex:1"><span class="pip" style="background:' + h(x.m.color) + '"></span>' +
@@ -1540,6 +1591,20 @@ function viewNotes(){
       : "") +
     "</section>";
 }
+// やることの進み具合を割合で1行にする（config の taskProgress が入ったボードだけ）。
+// 数えるのは「その人に見えているやること」。絞り込み（未完了・募集中…）を掛ける前の
+// 数で出す。見えない件数を混ぜると、合計が人によって違う理由が分からなくなる。
+function taskProgressBar(rows){
+  if (!TASK_PROGRESS || !rows.length) return "";
+  const done = rows.filter(t => t.status === "done").length;
+  const pct = Math.round(done / rows.length * 100);
+  return '<div style="margin-bottom:12px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px">' +
+      "<span>" + rows.length + "件中 " + done + "件 完了</span>" +
+      '<span style="font-variant-numeric:tabular-nums;color:var(--muted)">' + pct + "%</span></div>" +
+    '<div style="height:6px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:5px">' +
+      '<div style="height:100%;width:' + pct + '%;background:var(--brass)"></div></div></div>';
+}
 function viewTasks(){
   if (isHq() && S.noteSide === "mine") return viewNotes();
   const f = S.taskFilter, hq = isHq();
@@ -1571,6 +1636,7 @@ function viewTasks(){
       : "") +
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' +
     chips.map(c => '<button class="btn sm' + (f === c[0] ? " primary" : "") + '" data-act="task-filter" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
+    taskProgressBar(all) +
     '<div class="panel">' + (list.length ? list.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">該当するものはありません</div>') + "</div></section>";
 }
 
@@ -1758,20 +1824,26 @@ const normSShift = r => ({ siteId:r.site_id, staffId:r.staff_id, date:r.date, ki
 const STAFF_COLS = "id,site_id,name,role,key_holder,key_note,active,sort_order,pin_set,last_login_at";
 
 async function loadSite(siteId){
-  if (!siteId){ S.punches = []; S.keyEvents = []; S.keyDuty = {}; S.sshifts = {}; return; }
+  if (!siteId){ S.punches = []; S.keyEvents = []; S.keyDuty = {}; S.sshifts = {}; S.contracts = {}; return; }
   const m = S.siteMonth;
   const from = m + "-01", to = m + "-" + pad(daysInMonth(m));
   // 夜勤が前後の日にはみ出すので、打刻だけは前後1日ぶん広く取る。
   const fromIso = new Date(Date.parse(from + "T00:00:00+09:00") - 26 * 3600000).toISOString();
   const toIso   = new Date(Date.parse(to + "T23:59:59+09:00") + 26 * 3600000).toISOString();
-  const [pch, kev, kdt, shf] = await Promise.all([
+  const [pch, kev, kdt, shf, con] = await Promise.all([
     sb.from("punches").select("*").eq("site_id", siteId).gte("punched_at", fromIso).lte("punched_at", toIso),
     sb.from("key_events").select("*").eq("site_id", siteId).order("happened_at", { ascending: false }).limit(60),
     sb.from("key_duty").select("*").eq("site_id", siteId).gte("date", from).lte("date", to),
-    sb.from("staff_shifts").select("*").eq("site_id", siteId).gte("date", from).lte("date", to)
+    sb.from("staff_shifts").select("*").eq("site_id", siteId).gte("date", from).lte("date", to),
+    // 契約書を入れていないボードでは表そのものが無いので、呼ばない。
+    CONTRACTS ? sb.from("staff_contracts").select("*").eq("site_id", siteId) : null
   ]);
   const ok = r => !(r && r.error);
   if ([pch, kev, kdt, shf].some(r => !ok(r))) S.stale = true;
+  if (CONTRACTS && ok(con)){
+    S.contracts = {};
+    (con.data || []).forEach(function(r){ S.contracts[r.staff_id] = r; });
+  }
   if (ok(pch)) S.punches = (pch.data || []).map(normPunch);
   if (ok(kev)) S.keyEvents = (kev.data || []).map(normKeyEv);
   if (ok(kdt)){ S.keyDuty = {}; (kdt.data || []).forEach(function(r){ S.keyDuty[r.date] = r; }); }
@@ -2060,7 +2132,9 @@ function viewShift(){
       (isHq() || canManageSite() ? "マスを押すと登録できます。" : "自分の行のマスを押すと登録できます。") + "</p>" +
     (people.length
       ? '<div class="cal-scroll"><table class="cal"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>"
-      : '<div class="panel"><div class="empty">まだ名簿にスタッフがいません</div></div>') + "</section>";
+      : '<div class="panel"><div class="empty">まだ名簿にスタッフがいません</div></div>') + "</section>" +
+    // 自分の契約書（スタッフのときだけ出る。本部は名簿の「契約書」から全員ぶんを見る）。
+    myContractSection();
 }
 // 月の頭ではなく今日のあたりが見えている方が、開いてすぐ使える。
 function scrollShiftToToday(){
@@ -2140,7 +2214,8 @@ function viewSiteAdmin(){
     '<div class="sec-head"><h2 style="font-size:15px">名簿</h2>' +
       '<div class="btn-row"><button class="btn sm primary" data-act="new-staff">＋ スタッフ</button></div></div>' +
     '<div class="panel tbl-scroll"><table class="data"><thead><tr>' +
-      "<th>名前</th><th>役割</th><th>鍵</th><th>暗証番号</th><th>最終ログイン</th><th></th></tr></thead><tbody>" +
+      "<th>名前</th><th>役割</th><th>鍵</th><th>暗証番号</th><th>最終ログイン</th>" +
+      (CONTRACTS ? "<th>契約書</th>" : "") + "<th></th></tr></thead><tbody>" +
     (siteStaff().length
       ? siteStaff().map(function(s){
           return '<tr' + (s.active ? "" : ' class="paid"') + ">" +
@@ -2157,11 +2232,60 @@ function viewSiteAdmin(){
                 : '<span class="chip bad">未設定</span>') + "</span></td>" +
             '<td data-label="最終ログイン"><span style="font-size:12.5px;color:var(--muted)">' +
               (s.lastLoginAt ? h(jstDay(s.lastLoginAt).slice(5).replace("-", "/") + " " + jstHM(s.lastLoginAt)) : "—") + "</span></td>" +
+            (CONTRACTS ? '<td data-label="契約書"><span>' + contractCell(s.id) + "</span></td>" : "") +
             '<td class="acts">' +
               '<button class="btn sm" data-act="set-pin" data-id="' + h(s.id) + '">暗証番号</button> ' +
+              (CONTRACTS ? '<button class="btn sm" data-act="edit-contract" data-id="' + h(s.id) + '">契約書</button> ' : "") +
               '<button class="btn sm ghost" data-act="edit-staff" data-id="' + h(s.id) + '">編集</button></td></tr>'; }).join("")
-      : '<tr><td colspan="6" style="text-align:center;padding:22px;color:var(--muted)">まだスタッフがいません</td></tr>') +
+      : '<tr><td colspan="' + (CONTRACTS ? 7 : 6) + '" style="text-align:center;padding:22px;color:var(--muted)">まだスタッフがいません</td></tr>') +
     "</tbody></table></div>";
+}
+/* ---------------------------- 契約書（リンクだけ） ---------------------------- */
+// 実体（PDF・原本）はボードに置かない。置き場所の URL と、いまどの段階かだけ。
+const CONTRACT_STATUS = [["none","未送付"],["sent","送付済み"],["signed","締結済み"]];
+const contractStatusLabel = v =>
+  (CONTRACT_STATUS.find(x => x[0] === v) || CONTRACT_STATUS[0])[1];
+function contractCell(staffId){
+  const c = S.contracts[staffId];
+  if (!c) return '<span class="chip">未送付</span>';
+  const chip = c.status === "signed" ? "ok" : c.status === "sent" ? "warn" : "";
+  return '<span class="chip ' + chip + '">' + h(contractStatusLabel(c.status)) + "</span>" +
+    (c.url ? ' <a href="' + h(c.url) + '" target="_blank" rel="noopener">開く</a>' : "");
+}
+function modalContract(staffId){
+  const s = staffOf(staffId);
+  if (!s) return;
+  const c = S.contracts[staffId] || {};
+  showModal((s.name || "") + " の契約書",
+    '<div class="fields">' +
+    '<label class="f">契約書の場所（URL）<input type="url" id="ct_url" placeholder="https://…" value="' + h(c.url || "") + '"></label>' +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">書面そのものはここに置きません。' +
+      "置き場所（ドライブ・管理画面など）のリンクを貼ってください。本人は自分の分だけを読めます。</p>" +
+    '<label class="f">いまの段階<select id="ct_status">' +
+      CONTRACT_STATUS.map(x => '<option value="' + x[0] + '"' +
+        ((c.status || "none") === x[0] ? " selected" : "") + ">" + x[1] + "</option>").join("") +
+      "</select></label>" +
+    '<label class="f">メモ<textarea id="ct_note" maxlength="300">' + h(c.note || "") + "</textarea></label>" +
+    "</div>",
+    (S.contracts[staffId]
+      ? '<button class="btn danger left" data-act="clear-contract" data-id="' + h(staffId) + '">消す</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-contract" data-id="' + h(staffId) + '">保存</button>');
+}
+// スタッフ自身の画面に出す1枚。自分の分だけ（他人の行は RLS で届かない）。
+function myContractSection(){
+  if (!CONTRACTS || !S.staffMe) return "";
+  const c = S.contracts[S.staffMe.id];
+  return '<section class="sec"><div class="sec-head"><h2>契約書</h2>' +
+    '<span class="hint">本部が用意します。内容の質問は本部へ。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    (c
+      ? '<div class="row" style="align-items:center;gap:10px"><span style="flex:1">' +
+          h(contractStatusLabel(c.status)) + (c.note ? '<br><span style="font-size:12px;color:var(--muted)">' + h(c.note) + "</span>" : "") +
+        "</span>" +
+        (c.url ? '<a class="btn sm" href="' + h(c.url) + '" target="_blank" rel="noopener">開く</a>' : "") + "</div>"
+      : '<div class="empty">まだ用意されていません</div>') +
+    "</div></div></section>";
 }
 function modalSite(t){
   t = t || {};
@@ -2651,7 +2775,13 @@ function settingsLine(){
             '<button class="btn sm' + (n[k[0]] ? " primary" : "") + '" data-act="line-notify" data-v="' + k[0] + '">' +
             (n[k[0]] ? "受け取る" : "止めている") + "</button></div>";
         }).join("")
-      : '<div class="empty">LINE とつながっていません。一度ログアウトして、LINE でログインし直してください。</div>') +
+      : LINE_BOTH
+        // メールで入った人は、ここで LINE をつなげば同じアカウントのまま通知が届く。
+        // ログアウトして LINE で入り直すと別のアカウントになってしまう。
+        ? '<div class="row" style="align-items:center;gap:10px"><span style="flex:1">' +
+            "LINE とつながっていません。つなぐと、このアカウントのまま通知が LINE に届きます。</span>" +
+            '<button class="btn sm primary" data-act="line-link"' + (S.busy ? " disabled" : "") + ">LINE を連携する</button></div>"
+        : '<div class="empty">LINE とつながっていません。一度ログアウトして、LINE でログインし直してください。</div>') +
     (LINE_OA
       ? '<div class="row" style="align-items:center;gap:10px"><span style="flex:1">通知が来ないとき</span>' +
           '<a class="btn sm" href="https://line.me/R/ti/p/' + encodeURIComponent(LINE_OA) + '" target="_blank" rel="noopener">公式アカウントを友だち追加</a></div>'
@@ -3314,7 +3444,8 @@ document.addEventListener("click", async function(ev){
       case "authmode": S.authMode = btn.dataset.v; S.authErr = ""; render(); break;
       case "draft-color": S.draftColor = btn.dataset.v; render(); break;
       case "create-profile": await createProfile(); break;
-      case "line-login": startLineLogin(); break;
+      case "line-login": startLineLogin(false); break;
+      case "line-link": startLineLogin(true); break;
       case "fb-done": {
         const f = S.feedback.find(x => x.id === id); if (!f) return;
         await run(sb.from("feedback").update({ done: !f.done }).eq("id", id)); break;
@@ -3636,6 +3767,25 @@ document.addEventListener("click", async function(ev){
       }
       case "new-staff": modalStaff(null); break;
       case "edit-staff": modalStaff(staffOf(id)); break;
+
+      case "edit-contract": modalContract(id); break;
+      case "save-contract": {
+        const url = valOf("ct_url");
+        // 置き場所のリンクなので、http(s) 以外は受け取らない。
+        if (url && !/^https?:\/\//i.test(url)){ toast("URL は http:// か https:// で始めてください"); break; }
+        await run(sb.from("staff_contracts").upsert({
+          staff_id: id, site_id: S.siteId, url: url,
+          status: valOf("ct_status"), note: valOf("ct_note"),
+          updated_at: nowIso(), updated_by: S.user ? S.user.id : null
+        }, { onConflict: "staff_id" }), "保存しました");
+        // 契約書は realtime に入れていないので、自分で読み直す。
+        await loadSite(S.siteId);
+        closeModal(); break;
+      }
+      case "clear-contract":
+        await run(sb.from("staff_contracts").delete().eq("staff_id", id), "消しました");
+        await loadSite(S.siteId);
+        closeModal(); break;
       case "save-staff": {
         const name = valOf("sf_name");
         if (!name){ toast("名前を入力してください"); break; }

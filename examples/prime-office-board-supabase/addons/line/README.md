@@ -21,6 +21,9 @@ PRIME の本番には入れていない。
 | 情報タブ（元の店舗）の分類を自由に増やす | 同上。`shops.kind` の制限を外す |
 | 自由な一覧（買い物リストなど） | `lists` / `list_items` |
 | 公式アカウントのトークに送られた要望・感想を残す | `03_line_feedback.sql` と Edge Function `line-webhook` |
+| メールと LINE の**両方**から入れる（本部メンバー） | `config.js` の `lineLoginOptional`。メールで登録した人は「設定」→ LINE の通知 →「LINE を連携する」 |
+| スタッフの契約書（リンクだけ） | `04_staff_contracts.sql`。`config.js` の `contracts` |
+| やることの進捗を割合で出す | `config.js` の `taskProgress`（DB の変更なし） |
 
 LINE への送信は、既存の Edge Function `push` が Web Push と一緒に行う。
 `LINE_MESSAGING_TOKEN` が無いボード（PRIME）では何もしない。
@@ -29,6 +32,7 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
 
 1. `migrations/` の35本を流す（SETUP.md の手順2）
 2. `01_line_login_reminders.sql`、`02_board_customize.sql`、`03_line_feedback.sql` を順に流す
+   （契約書も使うなら続けて `04_staff_contracts.sql`）
 3. Edge Function `push`（新しい版）と `line-login` を置く。`verify_jwt` は有効のまま。
    `line-webhook` は **`verify_jwt` を外して**置く（LINE からの呼び出しには JWT が無い。
    代わりに中で署名を確かめる）
@@ -70,10 +74,25 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
    その `config.<名前>.js` に `lineLogin`・`lineOaId`・`editableBrand: true`・`reminders: true`
    （例：`../../../prime-office-board-web/config.fujisawa.js`）
 
+   足せる設定：
+
+   | 設定 | 何が変わるか |
+   |------|-------------|
+   | `lineLoginOptional: true` | `lineLogin` と一緒に入れると、メールと LINE の**両方**を1枚のログイン画面に出す。入れないと今までどおり LINE だけ（藤澤家） |
+   | `contracts: true` | 名簿に「契約書」の列と、スタッフ自身の画面に自分の契約書が出る（`04` が要る） |
+   | `taskProgress: true` | やることの一覧とホームに「10件中6件完了（60%）」を出す |
+
+   `lineLogin` を空のままにしておくと、LINE のボタンは出ず、メールとパスワードだけで
+   入れる。チャネルを作ってから入れればよい（例：`config.shirospa.js`）。
+
 ## 気をつけること
 
 - **LINE 公式アカウントの無料枠は月200通。** 1人に1通が1と数える。超えるとその月は
   送れなくなる（勝手に課金はされない）。全員宛ては会議の30分前と、お知らせの登録だけ
 - LINE のログインは、LINE アプリ内のブラウザではなく Safari や Chrome で開いた方が確実
+- **メールと LINE の両方を開けたボードでは、同じ人が2つのアカウントを持ちうる。**
+  メールで登録した人が、連携せずに LINE から入ると別のアカウントになる。
+  ログイン画面と「設定」の両方にその旨を出してあるが、仕組みで止めてはいない
+  （LINE 側の利用者 ID とメールアドレスを突き合わせる手段が無いため）
 - LINE で入った人の認証ユーザーは `line-<LINEの利用者ID>@line.board.invalid` という
   宛先で作る。メールは一度も送らない
