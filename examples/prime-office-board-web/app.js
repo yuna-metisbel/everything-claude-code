@@ -686,6 +686,17 @@ async function signUp(){
     render(); return;
   }
   if (!data.session){
+    // 既に登録済みのアドレスで「作成」を押すと、Supabase は
+    // 「そのアドレスが登録済みかどうか」を外から当てられないように、
+    // エラーを返さず、中身を伏せた利用者（identities が空）を返す。
+    // ここを「作成できた」と読むと、入れないのに「このままログインして
+    // ください」と出てしまうので、登録済みだと伝えてログイン画面に戻す。
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0){
+      S.authMode = "in";
+      S.authErr = "このメールアドレスは登録済みです。「ログイン」からお入りください。"
+                + "パスワードが分からないときは、管理者に再設定してもらってください。";
+      render(); return;
+    }
     // The address is confirmed on insert when it is allow-listed, so signing in
     // right away works even though sign-up did not hand back a session.
     S.busy = true; render();
