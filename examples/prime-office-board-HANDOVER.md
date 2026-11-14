@@ -35,20 +35,43 @@ PR [#1](https://github.com/yuna-metisbel/everything-claude-code/pull/1)（draft�
 
 ## 3. 動いているもの
 
-| | |
-|---|---|
-| 画面 | <https://prime-office-board.onrender.com> |
-| Render | 静的サイト `srv-dadetn2fngtc73b4avv0`（workspace `tea-d71ts795pdvs7385o86g`）。上記ブランチから自動デプロイ |
-| Supabase | `ixsycdkazorljshjejcz`（PRIME Office Board、東京） |
-| 組織 | `Nanase`（`kxywywiurxnwljbzssup`）。**Free プラン** |
+**PRIME は 2026-11-15 に畳んだ。** Supabase プロジェクト（`ixsycdkazorljshjejcz`）は
+削除済み。**Render のサイト `prime-office-board` はまだ残っている**
+（workspace `tea-d71ts795pdvs7385o86g`。Claude の Render コネクタからは見えないので、
+ユーザーがダッシュボードで消す）。DB が無いので開いても何も読めないが、消すまでは URL が生きている。
+中身の控えは Mac の
+`01_プライム関連（メンエス）/04_配布物・アーカイブ/2026-11-12_事務所ボード_DB控え_v01/`。
+媒体の ID とパス（34行）だけをリーブルゲートのボードに移した。
 
-**Supabase が Free であることの影響が大きい。**
+いま動いている設置：
 
-- ダッシュボードから戻せるバックアップが**無い**（自動バックアップは Pro 以上）
-- **7日間ほど使われないとプロジェクトが止まる**（停止後90日は再開可）
-- 無料枠は**1ユーザー2プロジェクトまで**。いま2つとも埋まっている
-- Pro にすると組織単位で課金。1プロジェクトなら $25/月だが、組織には
-  `Nana's Project` もあるので**そのまま上げると $35/月**
+| 会社 | 画面 | Supabase | Render |
+|---|---|---|---|
+| 合同会社リーブルゲート（大元） | <https://lg-board-k7w2qm9x.onrender.com> | `zdctkdchovarrkxbrvsr`（東京） | `srv-dbsd1nbbc2fs73b82b1g` |
+| しろspa（ナディア滋賀店） | <https://shirospa-board.onrender.com> | `qnmkzhjkgaaeqqnplubd`（東京） | `srv-dbqp5drbc2fs73e1u31g` |
+| 藤澤家 | <https://fujisawa-board.onrender.com> | `gsuzsdoinoowiuuxomue`（東京） | `srv-db1vv2jncjis73b6g68g` |
+
+Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチから自動デプロイ。
+
+**リーブルゲートが大元。** そこから各社のボードを開ける（`config.js` の `clients`）。
+**片方向**で、各社のボードはこの設定を持たないので、各社からリーブルゲートへは入れない。
+これから入る会社も、しろspa と同じ形（1社＝1 Supabase プロジェクト）で足す。
+
+### Supabase の組織とお金
+
+| 組織 | プラン | 中身 |
+|---|---|---|
+| `Nanase`（`kxywywiurxnwljbzssup`） | **Pro** | 優生活（`jfhjtrhzcaoujgjgfhuy`） |
+| `合同会社リーブルゲート`（`pzllurefwhhqomscqnqg`） | Free | リーブルゲート事務所ボード |
+
+- **プランは組織ごと。** Nanase は Pro なので、そこに足すプロジェクトは
+  **2つ目から $10/月**。プロジェクトを消しても、組織が Pro なら安くならない。
+  だから新しい会社ぶんは**無料の組織を別に作って**そこに置く
+- Free の制約：ダッシュボードから戻せる自動バックアップが**無い**、
+  **7日間ほど使われないと止まる**（停止後90日は再開可）、1組織2プロジェクトまで
+- **Claude の Supabase コネクタは `Nanase` にしか権限が無い。** リーブルゲートの
+  組織は見えないので、そちらの作業は **Supabase CLI**（`supabase link` /
+  `db push` / `functions deploy`）と psycopg2 で行う
 
 ## 4. 壊してはいけない決定
 
@@ -123,6 +146,14 @@ node --check examples/prime-office-board-web/app.js
 > 結果と、手順書に足したメモは `SETUP.md` 冒頭と各手順の「通したときのメモ」。
 > 「怪しいと睨んでいる所」の4つは、どれも詰まらなかった（下に結果を追記）。
 > 以下は実施前に書いた計画として残してある。
+
+> **2026-11-15 追記。** その後、しろspa（3社目）とリーブルゲート（4社目）を本番で立てた。
+> 下の「無料枠を空けるために `Nana's Project` を止める」はもう使わない。
+> **新しい会社ぶんは、無料の組織を別に作ってそこに置く**（プランは組織ごとなので、
+> Pro の組織に足すと2つ目から $10/月かかる）。
+> リーブルゲートは Supabase CLI で通した（`db push` で39本、`functions deploy` で4本）。
+> その際、各マイグレーションの先頭に `set search_path = public, extensions;` を足した
+> （SQL Editor 以外から流すと `gen_random_bytes` が見つからないため。`SETUP.md` 手順2のメモ）。
 
 手順書（`SETUP.md`、7段階）は書いてあるが、**まだ誰も通しで実行していない。**
 新しい Supabase プロジェクトを立てて最後まで通し、詰まる場所を見つけて

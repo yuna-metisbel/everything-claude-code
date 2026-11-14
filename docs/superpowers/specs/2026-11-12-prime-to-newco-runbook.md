@@ -99,3 +99,35 @@ PRIME と同じアカウントに作れば、2 で取り出したものをその
 - 媒体の ID とパスをリポジトリに入れない
 - `service_role` の鍵を `config.js` に書かない
 - 藤澤家（`gsuzsdoinoowiuuxomue`）としろspa（`qnmkzhjkgaaeqqnplubd`）には触らない
+
+---
+
+## 実施結果（2026-11-15）
+
+| 手順 | 結果 |
+|---|---|
+| 1. 控え | 済。`01_プライム関連（メンエス）/04_配布物・アーカイブ/2026-11-12_事務所ボード_DB控え_v01/`（schema・data・home_sync・媒体のIDとパス.csv 34行） |
+| 2. 媒体の ID とパスを抜く | 済。34行・19媒体。DB の `group by media` と一致 |
+| 3. 新しい Supabase | 済。`zdctkdchovarrkxbrvsr`（Libregate Office Board、東京）。組織は**新しく作った無料の**`合同会社リーブルゲート`（`pzllurefwhhqomscqnqg`） |
+| 4. 入れ直す | 済。`vault` 34行・19媒体。`updated_by` と共有先は空に戻した（旧メンバーの id は無いため） |
+| 5. 新しい画面 | 済。<https://lg-board-k7w2qm9x.onrender.com>（当てにくい名前にした） |
+| 6. 古いものを消す | Supabase `ixsycdkazorljshjejcz` は削除済み。**Render `prime-office-board` は未削除**（workspace `tea-d71ts795pdvs7385o86g`、Claude からは見えない） |
+| 7. 確かめる | 画面が出る・`config.js` の接続先が新しい・`vault` 34・`signup_mode='code'`。**`members` は 0**（最初の管理者がまだ登録していない） |
+
+### 手順書と違ったところ
+
+- **$10/月 の見積もりはプロジェクト数ではなく組織のプランで決まる。** PRIME を
+  消しても `Nanase` が Pro なので2つ目は $10。**無料の組織を別に作る**のが答えだった
+- **Claude の Supabase コネクタは `Nanase` にしか権限が無い。** 新しい組織は
+  `list_organizations` にも出ず、`get_organization` は permission denied。
+  CLI（`supabase orgs list`）からは両方見える。以降は CLI と psycopg2 で作業した
+- **`supabase db push` では `gen_random_bytes` が見つからない。** SQL Editor の
+  `search_path` が前提のため。各マイグレーションの先頭に
+  `set search_path = public, extensions;` を足して流した（リポジトリのファイルは変えていない）
+- **Render の静的サイトを新規に作ると `yarn install` で落ちる。** リポジトリの
+  `package.json` が `packageManager: yarn@4.9.2` を宣言しているため。
+  環境変数 `SKIP_INSTALL_DEPS=true` を入れたら通った。既存の3サイトは
+  この挙動の前に作られているので影響なし
+- **`supabase projects api-keys` は `service_role` の鍵を画面に出す。** 使わないので
+  呼ぶ必要が無かった。新しいプロジェクトでは**旧形式（JWT）の鍵を無効にして**、
+  `sb_publishable_` だけ使うのが安全
