@@ -30,6 +30,12 @@ const LINE_ONLY = !!LINE_LOGIN && !CONFIG.lineLoginOptional;
 const LINE_BOTH = !!LINE_LOGIN && !!CONFIG.lineLoginOptional;
 const CONTRACTS = !!CONFIG.contracts;
 const TASK_PROGRESS = !!CONFIG.taskProgress;
+// 自社ボードから、関わっている会社のボードを開くための一覧（config.js の clients）。
+// 片方向。入れた側（リーブルゲート）からは開けるが、相手のボードはこの設定を持たない
+// ので、相手からはこちらの存在も分からない。URL を並べるだけで、中身は何も共有しない。
+const CLIENTS = (Array.isArray(CONFIG.clients) ? CONFIG.clients : [])
+  .filter(c => c && c.name && /^https?:\/\//i.test(String(c.url || "")));
+const CLIENTS_TITLE = String(CONFIG.clientsTitle || "").trim() || "関わっている会社のボード";
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -1277,6 +1283,7 @@ function viewHome(){
         '<span class="hint">担当が決まっていない作業です。引き受けると自分のタスクになります。</span></div>' +
         '<div class="panel">' + (wanted.length ? wanted.map(function(t){ return taskRow(t); }).join("") : '<div class="empty">募集中の作業はありません</div>') + "</div></section>" : "") +
     "</div><div>" +
+      (CLIENTS.length ? homeClients() : "") +
       (tabOn("tasks") ? '<section class="sec"><div class="sec-head"><h2>いまの持ち分</h2></div>' +
         taskProgressBar(S.tasks) +
         '<div class="panel"><div class="rows" style="border-top:0">' +
@@ -1301,6 +1308,23 @@ function viewHome(){
       (REMINDERS && uiHome("reminders") ? homeReminders() : "") +
       (uiHome("notes") ? homeNotes() : "") +
     "</div></div>";
+}
+
+// 関わっている会社のボードへの入り口。config.js の clients があるボードだけに出る。
+// 別のログインが要る別のボードなので、ここは URL を開くだけ。データは行き来しない。
+function homeClients(){
+  return '<section class="sec"><div class="sec-head"><h2>' + h(CLIENTS_TITLE) + "</h2>" +
+    '<span class="hint">別のボードが開きます。それぞれのログインが必要です。</span></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+    CLIENTS.map(function(c){
+      return '<div class="row" style="align-items:center;gap:10px">' +
+        '<span style="flex:1;min-width:0">' +
+          '<span style="font-size:13.5px;font-weight:500">' + h(c.name) + "</span>" +
+          (c.note ? '<div style="font-size:11.5px;color:var(--muted)">' + h(c.note) + "</div>" : "") +
+        "</span>" +
+        '<a class="btn sm primary" href="' + h(c.url) + '" target="_blank" rel="noopener noreferrer">開く</a>' +
+      "</div>";
+    }).join("") + "</div></div></section>";
 }
 
 // 事務所から持ち出すもの。鍵と同じで、状態は最後の記録から決まる。
