@@ -8,6 +8,10 @@ window.BOARD_CONFIG = {
   brand: "しろspa",
   brandSub: "事務所ボード",
   support: "",
+  // 盤の色の既定。白地に緑で、マーク（緑の「S」）と合わせる。
+  // ボードの「設定 → 色」で選べば、そちらが勝つ。
+  season: "summer",
+  themeColor: "#FFFFFF",
   // 追加機能（../prime-office-board-supabase/addons/line）
   // LINE のチャネル ID は、チャネルを作ってから入れる。空のあいだは
   // メールとパスワードだけで入れる（LINE のボタンは出ない）。

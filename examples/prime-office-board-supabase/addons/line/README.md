@@ -82,6 +82,8 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
    | `lineLoginOptional: true` | `lineLogin` と一緒に入れると、メールと LINE の**両方**を1枚のログイン画面に出す。入れないと今までどおり LINE だけ（藤澤家） |
    | `contracts: true` | 名簿に「契約書」の列と、スタッフ自身の画面に自分の契約書が出る（`04` が要る） |
    | `taskProgress: true` | やることの一覧とホームに「10件中6件完了（60%）」を出す |
+   | `season: "spring"｜"summer"｜"autumn"｜"winter"` | 盤の色の**既定**。白地＋ピンク／緑／金茶／青。ボードの「設定 → 色」で選べばそちらが勝つので、渡したあと先方が自由に変えられる。入れなければ今までどおり秋（金茶） |
+   | `themeColor: "#FFFFFF"` | ホーム画面から開いたときの下地の色（manifest の background/theme）。`season` を白地のものにしたら、これも白にする |
    | `clients: [{ name, url, note }]` | ホームの右側に「関わっている会社のボード」が出て、別のボードを新しいタブで開ける。`clientsTitle` で見出しを変えられる。**片方向**：入れたボードからは開けるが、相手のボードはこの設定を持たないので、相手からこちらへは入れない。`http`/`https` 以外の URL は捨てる |
 
    `lineLogin` を空のままにしておくと、LINE のボタンは出ず、メールとパスワードだけで

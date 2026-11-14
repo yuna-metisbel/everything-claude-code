@@ -36,6 +36,9 @@ const TASK_PROGRESS = !!CONFIG.taskProgress;
 const CLIENTS = (Array.isArray(CONFIG.clients) ? CONFIG.clients : [])
   .filter(c => c && c.name && /^https?:\/\//i.test(String(c.url || "")));
 const CLIENTS_TITLE = String(CONFIG.clientsTitle || "").trim() || "関わっている会社のボード";
+// 盤の色の既定（spring / summer / autumn / winter）。ボードの「設定 → 色」で
+// 選んでいないあいだだけ効く。入れなければ今までどおり秋（金茶）。
+const CONFIG_SEASON = String(CONFIG.season || "").trim();
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -2482,8 +2485,12 @@ function tabOn(id){
 function visibleTabs(){ return TABS.filter(function(t){ return tabOn(t.id); }); }
 const kindChoices = cur => KIND_ORDER.filter(k => k === "" || k === (cur || "") ||
   !(UI && UI.kinds && UI.kinds[k] && UI.kinds[k].off));
-// 端末で選んだ色 → ボードの色 → 秋（今までの色）
-function seasonNow(){ return ls("prime.season") || (UI && UI.theme) || BOARD_SEASON || "autumn"; }
+// 端末で選んだ色 → ボードの色（設定で選んだもの）→ config.js の既定 → 秋（今までの色）
+// config.js の season は一番弱い。ボードの「設定 → 色」で選べば、そちらが勝つ。
+function seasonNow(){
+  const c = SEASONS.some(s => s[0] === CONFIG_SEASON) ? CONFIG_SEASON : "";
+  return ls("prime.season") || (UI && UI.theme) || BOARD_SEASON || c || "autumn";
+}
 function applySeason(){
   const s = seasonNow();
   if (s && s !== "autumn") document.documentElement.setAttribute("data-season", s);
