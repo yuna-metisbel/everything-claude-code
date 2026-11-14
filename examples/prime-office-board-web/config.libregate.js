@@ -8,6 +8,8 @@ window.BOARD_CONFIG = {
   brand: "リーブルゲート",
   brandSub: "事務所ボード",
   support: "",
+  // ホーム画面から開いたときの下地の色。ボードの色（白地）に合わせる。
+  themeColor: "#FFFFFF",
 
   // LINE はチャネルを作ってから入れる。空のあいだはメールとパスワードだけで入れる。
   lineLogin: "",

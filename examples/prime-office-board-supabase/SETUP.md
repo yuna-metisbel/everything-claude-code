@@ -152,10 +152,21 @@ window.BOARD_CONFIG = {
 | `index.html` | `<title>` | ブラウザのタブ（最初の一瞬） |
 | `index.html` | `apple-mobile-web-app-title` | iPhone でホーム画面に置いたときの名前 |
 | `manifest.webmanifest` | `name` と `short_name` | Android でホーム画面に置いたときの名前 |
-| `icon-192.png` / `icon-512.png` | 画像そのもの | ホーム画面のアイコン（任意） |
+| `icon-192.png` / `icon-512.png` | 画像そのもの | ホーム画面とタブのマーク |
 
 `app.js` と `sw.js` は**全社共通**。社名は入っていないので触らない。
 ここを1社ぶん直すと、次の会社にもその名前が付いて回る。
+
+アイコンは `make-icon.py` で作る。**元の `icon-192.png` を直に上書きしない**
+（全社共通のファイルなので、次の会社にもその文字が付いて回る）。
+
+```sh
+python3 make-icon.py <名前> L "#1A56DB" "#FFFFFF"   # icon-192.<名前>.png と 512 ができる
+```
+
+`build-site.sh` が、その会社ぶんがあるときだけ `icon-192.png` / `icon-512.png` に写し、
+タブのマーク（既定は 🏢 の絵文字）もそれに替える。無い会社は元のまま。
+`config.js` に `themeColor` を入れると、ホーム画面から開いたときの下地の色も替わる。
 
 `config.js` を書き忘れると画面に「設定がありません」と出る。
 白い画面にはならないので、出たらこの手順の書き換え漏れ。
