@@ -3469,8 +3469,8 @@ function modalMember(m){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-member" data-id="' + h(m.id || "") + '">保存</button>');
 }
-// 本部のパスワードを自分で変える。このボードには「忘れた」の画面がまだ無いので、
-// 決めたものは控えておいてもらう。スタッフ側は暗証番号（modalPin）なのでここには出ない。
+// 本部のパスワードを自分で変える。スタッフ側は暗証番号（modalPin）なのでここには出ない。
+// 「忘れた」の入り口が無いボードでは、控えておくよう添える。
 function modalPassword(){
   showModal("パスワードを変える",
     '<div class="fields">' +
@@ -3479,7 +3479,9 @@ function modalPassword(){
     '<label class="f">確認（もう一度）<input type="password" id="pw_new2" autocomplete="new-password"></label>' +
     '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
       "保存すると、いまのパスワードは使えなくなります。次に入り直すときは新しいものを使ってください。<br>" +
-      "忘れたときに自分で戻す画面がまだ無いので、決めたものは控えておいてください。</p></div>",
+      (PW_RESET
+        ? "忘れたときは、ログイン画面の「パスワードを忘れた」から決め直せます。"
+        : "忘れたときに自分で戻す画面がまだ無いので、決めたものは控えておいてください。") + "</p></div>",
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-pw">保存</button>');
 }
