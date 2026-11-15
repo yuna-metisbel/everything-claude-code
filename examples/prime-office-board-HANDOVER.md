@@ -69,6 +69,17 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
   **「パスワードを忘れた」の画面はまだ無い**ので、分からなくなったら
   管理者が Supabase の admin API（`auth/v1/admin/users/{id}` に PUT）で再設定する。
   スタッフ側は4桁の暗証番号で、前から自分で変えられる（ヘッダーの自分の名前）。
+- **「パスワードを忘れた」を足した**（`e999d3c` / `4da89e5`）。ログイン画面から
+  決め直すリンクをメールで送り、リンクで戻った人には中に入れる前に決めてもらう。
+  `config.js` の `passwordReset: true` を入れたボードだけに出る（いまはリーブルゲートのみ）。
+  出す前に Supabase の **Site URL** と **Redirect URLs** をそのボードの URL にする
+  （既定は `http://localhost:3000`。リーブルゲートは設定済み）。
+  **送信は1時間に2通まで**（Supabase 付属のメール）。本番として使うなら独自 SMTP を入れる。
+  手順は `prime-office-board-supabase/addons/line/README.md`。
+- 調べていて分かったこと：**招待コードが違っても `auth.users` に未確認の行はできる**。
+  メールが送れる設定だと行が残る（送信が断られると残らない）。名簿（`members`）の
+  作成は RLS で止まり、未確認なのでログインもできないので、中には入れない。
+  ただし行は溜まるので、見慣れないアドレスは消してよい。
 
 ### Supabase の組織とお金
 
