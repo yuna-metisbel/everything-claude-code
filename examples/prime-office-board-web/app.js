@@ -39,6 +39,10 @@ const CLIENTS_TITLE = String(CONFIG.clientsTitle || "").trim() || "関わって�
 // 盤の色の既定（spring / summer / autumn / winter）。ボードの「設定 → 色」で
 // 選んでいないあいだだけ効く。入れなければ今までどおり秋（金茶）。
 const CONFIG_SEASON = String(CONFIG.season || "").trim();
+// 「パスワードを忘れた」を出すか。メールを送るので、Supabase 側で
+// 送れる設定（独自 SMTP など）になっているボードだけ true にする。
+// 既定は off。入れていないボードは今までどおり、この入り口が出ない。
+const PW_RESET = CONFIG.passwordReset === true;
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -112,6 +116,12 @@ if (!window.supabase || !window.supabase.createClient){
     "</div></div>";
   return;
 }
+// 「パスワードを決め直す」メールのリンクから戻ってきたか。クライアントを作ると
+// URL の # を読んで消してしまうので、作る前に見る。
+// 期限切れ・使用済みのリンクは、セッションの代わりに error_code が付いて返る。
+const URL_HASH = String(location.hash || "");
+const URL_RECOVERY = /(^|[#&])type=recovery(&|$)/.test(URL_HASH);
+const URL_AUTH_ERR = (URL_HASH.match(/[#&]error_code=([^&]*)/) || [])[1] || "";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true }
 });
@@ -242,6 +252,8 @@ const S = {
   shops: [], notices: [], allowed: [],
   month: today().slice(0, 7), tab: ls("prime.tab") || "home",
   authErr: "", authMode: "in", busy: false,
+  // メールのリンクで入ったところか／決め直しのメールを送ったアドレス
+  recovery: false, resetSent: "",
   theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
   barSize: ls("prime.barsize") || "m", tabBar: [],
   settings: null, form: {}, mode: "",
@@ -578,6 +590,14 @@ async function boot(){
     } catch(e){ /* 既定の名前のまま */ }
     applySeason();
   }
+  // 決め直しのリンクから来たときは、ログイン済みでも中に入れず、先に決めてもらう。
+  S.recovery = URL_RECOVERY;
+  if (URL_AUTH_ERR){
+    S.recovery = false;
+    S.authErr = /expired/.test(URL_AUTH_ERR)
+      ? "このリンクは期限が切れています。もう一度「パスワードを忘れた」からやり直してください。"
+      : "このリンクは使えません。もう一度「パスワードを忘れた」からやり直してください。";
+  }
   // LINE の許可画面から戻ってきたところなら、先にログインを済ませる。
   if (LINE_LOGIN) await finishLineLogin();
   const { data } = await sb.auth.getSession();
@@ -617,6 +637,8 @@ function modalPrivacy(){
 }
 async function refresh(){
   if (S.user) S.form = {};
+  // メールのリンクで入ったところ。中には入れず、新しいパスワードを決めてもらう。
+  if (S.recovery && S.user){ S.screen = "newpw"; S.ready = true; render(); return; }
   if (!S.user){
     // 入り口コード付きの URL はスタッフ用。素の URL は本部のログイン。
     await loadPrivacy();
@@ -725,6 +747,45 @@ async function createProfile(){
       : error.message;
     render(); return;
   }
+  await refresh();
+}
+// 決め直しのリンクをメールで送る。登録の有無は返ってこない（Supabase が伏せる）ので、
+// 画面も「送りました」としか言わない。
+async function sendReset(){
+  const email = valOf("au_email");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){
+    S.authErr = "メールアドレスを入れてください。"; render(); return;
+  }
+  S.busy = true; S.authErr = ""; render();
+  // 戻り先。Supabase の「Redirect URLs」に入っていないと、ここには戻らず
+  // Site URL に飛ばされる。設置のときに入れておく。
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: location.origin + location.pathname });
+  S.busy = false;
+  if (error){
+    S.authErr = /rate limit|too many|over_email_send/i.test(error.message + (error.code || ""))
+      ? "送信が立て込んでいます。1時間ほど待ってから、もう一度お試しください。"
+      : /not authorized|is invalid|email_address/i.test(error.message + (error.code || ""))
+      ? "このボードからは、このアドレスにメールを送れません。管理者に再設定してもらってください。"
+      : fail(error);
+    render(); return;
+  }
+  S.resetSent = email; S.authErr = ""; render();
+}
+// メールのリンクで入ったあと、新しいパスワードを決める。
+async function saveNewPassword(){
+  // ログイン画面と同じく前後の空白は落とす（空白付きだと入れなくなる）。
+  const a = valOf("np_pw"), b = valOf("np_pw2");
+  if (a.length < 8){ S.authErr = "パスワードは8文字以上にしてください。"; render(); return; }
+  if (a !== b){ S.authErr = "確認用のパスワードが一致しません。"; render(); return; }
+  S.busy = true; S.authErr = ""; render();
+  const { error } = await sb.auth.updateUser({ password: a });
+  S.busy = false;
+  if (error){ S.authErr = fail(error); render(); return; }
+  S.recovery = false; S.form = {}; S.authErr = "";
+  // URL に残ったトークンを消す。残すと、再読み込みでまたこの画面に戻る。
+  try { history.replaceState(null, "", location.origin + location.pathname); } catch(e){}
+  toast("パスワードを変えました");
   await refresh();
 }
 async function signOut(){ await sb.auth.signOut(); S.reveal = {}; await refresh(); }
@@ -929,6 +990,7 @@ function render(){
   if (!S.ready){ v.innerHTML = '<p class="empty" style="border:0">読み込み中…</p>'; return; }
   if (S.screen === "auth"){ v.className = ""; v.innerHTML = viewAuth(); return; }
   if (S.screen === "sitegate"){ v.className = ""; v.innerHTML = viewSiteGate(); return; }
+  if (S.screen === "newpw"){ v.className = ""; v.innerHTML = viewNewPassword(); return; }
   if (S.screen === "profile"){ v.className = ""; v.innerHTML = viewProfile(); return; }
   v.className = "wrap";
   if (staff){
@@ -1098,6 +1160,7 @@ function authLineBlock(){
 }
 function viewAuth(){
   if (LINE_ONLY) return viewAuthLine();
+  if (PW_RESET && S.authMode === "forgot") return viewForgot();
   const up = S.authMode === "up";
   // 両方から入れるボードでは、LINE のはじめての人もコードが要るので、
   // ログインの画面でも招待コードの欄を出しておく。
@@ -1121,8 +1184,61 @@ function viewAuth(){
       (S.busy ? "処理中…" : up ? "登録する" : "ログイン") + "</button>" +
     '<p class="swap">' + (up ? "すでにアカウントがある方は " : "はじめての方は ") +
       '<button data-act="authmode" data-v="' + (up ? "in" : "up") + '">' + (up ? "ログイン" : "アカウント作成") + "</button></p>" +
+    (!up && PW_RESET
+      ? '<p class="swap" style="margin-top:6px">' +
+          '<button data-act="authmode" data-v="forgot">パスワードを忘れた</button></p>'
+      : "") +
     (LINE_BOTH ? authLineBlock() : "") +
     privacyLink() +
+    "</div></div>";
+}
+// パスワードが分からなくなったとき。決め直すためのリンクをメールで送る。
+// 「送った」と出すだけで、そのアドレスが登録済みかどうかは言わない
+// （誰のアドレスが使われているかを、外から当てられないようにするため）。
+function viewForgot(){
+  const sent = S.resetSent || "";
+  return '<div class="gate"><div class="gate-card">' +
+    '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span>' +
+    '<span class="sub">' + h(BRAND_SUB) + "</span></div>" +
+    "<h1>パスワードを決め直す</h1>" +
+    (sent
+      ? '<p class="lead">' + h(sent) + " にメールを送りました。<br>" +
+          "中のリンクを開くと、新しいパスワードを決められます。</p>" +
+        '<div class="note" style="margin-bottom:14px">リンクは1時間で切れます。<br>' +
+          "届かないときは、迷惑メールのフォルダも見てください。<br>" +
+          "それでも無いときは、管理者に再設定してもらってください。</div>" +
+        '<button class="btn primary" style="width:100%" data-act="authmode" data-v="in">ログインに戻る</button>'
+      : '<p class="lead">登録しているメールアドレスを入れてください。<br>' +
+          "決め直すためのリンクをお送りします。</p>" +
+        '<div class="fields">' +
+          '<label class="f">メールアドレス<input type="email" id="au_email" autocomplete="username" ' +
+            'inputmode="email" value="' + h(S.form.au_email || "") + '"></label>' +
+        "</div>" +
+        (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
+        '<button class="btn primary" style="width:100%" data-act="send-reset"' + (S.busy ? " disabled" : "") + ">" +
+          (S.busy ? "送信中…" : "メールを送る") + "</button>" +
+        '<p class="swap"><button data-act="authmode" data-v="in">ログインに戻る</button></p>') +
+    privacyLink() +
+    "</div></div>";
+}
+// メールのリンクから来た人に、新しいパスワードを決めてもらう。
+// ここに来た時点でログインは済んでいるので、いまのパスワードは聞かない。
+function viewNewPassword(){
+  return '<div class="gate"><div class="gate-card">' +
+    '<div class="brand" style="display:flex"><span class="mark">' + h(BRAND) + '</span>' +
+    '<span class="sub">' + h(BRAND_SUB) + "</span></div>" +
+    "<h1>新しいパスワードを決める</h1>" +
+    '<p class="lead">8文字以上にしてください。<br>決めると、そのまま中に入れます。</p>' +
+    '<div class="fields">' +
+      '<label class="f">新しいパスワード<input type="password" id="np_pw" autocomplete="new-password" value="' +
+        h(S.form.np_pw || "") + '"></label>' +
+      '<label class="f">確認（もう一度）<input type="password" id="np_pw2" autocomplete="new-password" value="' +
+        h(S.form.np_pw2 || "") + '"></label>' +
+    "</div>" +
+    (S.authErr ? '<p class="err">' + h(S.authErr) + "</p>" : "") +
+    '<button class="btn primary" style="width:100%" data-act="save-newpw"' + (S.busy ? " disabled" : "") + ">" +
+      (S.busy ? "保存中…" : "これにする") + "</button>" +
+    '<p class="swap"><button data-act="cancel-newpw">やめる</button></p>' +
     "</div></div>";
 }
 function viewProfile(){
@@ -3524,7 +3640,13 @@ document.addEventListener("click", async function(ev){
 
       case "signin": await signIn(); break;
       case "signup": await signUp(); break;
-      case "authmode": S.authMode = btn.dataset.v; S.authErr = ""; render(); break;
+      case "authmode": S.authMode = btn.dataset.v; S.authErr = ""; S.resetSent = ""; render(); break;
+      case "send-reset": await sendReset(); break;
+      case "save-newpw": await saveNewPassword(); break;
+      case "cancel-newpw":
+        S.recovery = false; S.form = {}; S.authErr = "";
+        try { history.replaceState(null, "", location.origin + location.pathname); } catch(e){}
+        await signOut(); break;
       case "draft-color": S.draftColor = btn.dataset.v; render(); break;
       case "create-profile": await createProfile(); break;
       case "line-login": startLineLogin(false); break;
@@ -3986,7 +4108,7 @@ document.addEventListener("click", async function(ev){
 document.addEventListener("input", function(ev){
   const t = ev.target;
   if (!t || !t.id) return;
-  if (/^(au_|pf_|st_)/.test(t.id)) S.form[t.id] = t.value;
+  if (/^(au_|pf_|st_|np_)/.test(t.id)) S.form[t.id] = t.value;
   // カスタマイズ欄を書きかけの間は、読み直しで描き直さない（保存すると戻る）。
   if (/^(ct_|ck_|ch_|c_|set_brand)/.test(t.id) || t.classList.contains("c_cat")) S.uiDirty = true;
   if (t.id === "v_q"){
@@ -4015,8 +4137,13 @@ document.addEventListener("change", function(ev){
 });
 document.addEventListener("keydown", function(ev){
   if (ev.key === "Escape" && el("modalRoot").innerHTML) closeModal();
+  if (ev.key === "Enter" && S.screen === "newpw"){
+    const b = $('[data-act="save-newpw"]');
+    if (b && document.activeElement && document.activeElement.tagName === "INPUT") b.click();
+  }
   if (ev.key === "Enter" && S.screen === "auth"){
-    const b = $('[data-act="' + (S.authMode === "up" ? "signup" : "signin") + '"]');
+    const b = $('[data-act="' +
+      (S.authMode === "forgot" ? "send-reset" : S.authMode === "up" ? "signup" : "signin") + '"]');
     if (b && document.activeElement && document.activeElement.tagName === "INPUT") b.click();
   }
 });

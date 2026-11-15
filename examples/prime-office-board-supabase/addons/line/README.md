@@ -84,10 +84,34 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
    | `taskProgress: true` | やることの一覧とホームに「10件中6件完了（60%）」を出す |
    | `season: "spring"｜"summer"｜"autumn"｜"winter"` | 盤の色の**既定**。白地＋ピンク／緑／金茶／青。ボードの「設定 → 色」で選べばそちらが勝つので、渡したあと先方が自由に変えられる。入れなければ今までどおり秋（金茶） |
    | `themeColor: "#FFFFFF"` | ホーム画面から開いたときの下地の色（manifest の background/theme）。`season` を白地のものにしたら、これも白にする |
+   | `passwordReset: true` | ログイン画面に「パスワードを忘れた」が出る。決め直すリンクをメールで送るので、**メールが実際に届くボードだけ**入れる（下の「パスワードを忘れた を出す前に」）。入れなければ入り口が出ない |
    | `clients: [{ name, url, note }]` | ホームの右側に「関わっている会社のボード」が出て、別のボードを新しいタブで開ける。`clientsTitle` で見出しを変えられる。**片方向**：入れたボードからは開けるが、相手のボードはこの設定を持たないので、相手からこちらへは入れない。`http`/`https` 以外の URL は捨てる |
 
    `lineLogin` を空のままにしておくと、LINE のボタンは出ず、メールとパスワードだけで
    入れる。チャネルを作ってから入れればよい（例：`config.shirospa.js`）。
+
+### 「パスワードを忘れた」を出す前に
+
+`passwordReset: true` の前に、Supabase 側（Authentication → URL Configuration）で2つ。
+
+- **Site URL** をそのボードの URL にする（既定は `http://localhost:3000`。
+  そのままだと、メールのリンクが localhost に飛んで戻ってこない）。
+- **Redirect URLs** に同じ URL を足す（`/` 付きも入れておく）。
+
+そのうえで、**メールが届くかどうかが本当の関門**。Supabase に付いている
+メール送信は、**その Supabase 組織のメンバーのアドレスにしか送らない**
+（組織外は「Email address not authorized」で断られ、画面には何も届かない）。
+送信も1時間に2通まで。つまり素のままでは、スタッフのアドレスには届かない。
+
+届くようにする方法は2つ。
+
+1. **独自 SMTP を入れる**（Authentication → SMTP Settings）。Google Workspace の
+   アプリパスワード、Resend、SendGrid など。これが本来の形。
+2. そのアドレスを **Supabase 組織のメンバーに加える**。無料でその場で済むが、
+   そのアドレスから Supabase の管理画面に入れてしまうので、自分のものだけに留める。
+
+どちらもしていないボードでは `passwordReset` を入れない。入れると、
+押しても何も届かない入り口ができてしまう。
 
 ## 気をつけること
 
