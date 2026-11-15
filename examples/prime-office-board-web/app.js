@@ -2975,6 +2975,8 @@ function viewSettings(){
       '<button class="btn sm" data-act="edit-member" data-id="' + h(S.me ? S.me.id : "") + '">変更</button></div>' +
       '<div class="row" style="align-items:center"><span style="flex:1">メールアドレス</span>' +
       '<span class="num" style="font-size:12.5px;color:var(--muted)">' + h(S.user ? S.user.email : "") + "</span></div>" +
+      '<div class="row" style="align-items:center"><span style="flex:1">パスワード</span>' +
+      '<button class="btn sm" data-act="edit-pw">変更</button></div>' +
       '<div class="row" style="align-items:center"><span style="flex:1">ログアウト</span>' +
       '<button class="btn sm" data-act="signout">ログアウト</button></div>' +
     "</div></div></section>" +
@@ -3351,6 +3353,20 @@ function modalMember(m){
     '<button class="btn" data-act="close-modal">やめる</button>' +
     '<button class="btn primary" data-act="save-member" data-id="' + h(m.id || "") + '">保存</button>');
 }
+// 本部のパスワードを自分で変える。このボードには「忘れた」の画面がまだ無いので、
+// 決めたものは控えておいてもらう。スタッフ側は暗証番号（modalPin）なのでここには出ない。
+function modalPassword(){
+  showModal("パスワードを変える",
+    '<div class="fields">' +
+    '<label class="f">いまのパスワード<input type="password" id="pw_now" autocomplete="current-password"></label>' +
+    '<label class="f">新しいパスワード（8文字以上）<input type="password" id="pw_new" autocomplete="new-password"></label>' +
+    '<label class="f">確認（もう一度）<input type="password" id="pw_new2" autocomplete="new-password"></label>' +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
+      "保存すると、いまのパスワードは使えなくなります。次に入り直すときは新しいものを使ってください。<br>" +
+      "忘れたときに自分で戻す画面がまだ無いので、決めたものは控えておいてください。</p></div>",
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-pw">保存</button>');
+}
 function modalAllowed(){
   showModal("ログインを許可するメールアドレス",
     '<div class="fields">' +
@@ -3468,6 +3484,31 @@ async function saveShopFromModal(id){
   closeModal();
 }
 
+// パスワードを変える。端末を置いたままにしていても、いまのパスワードを
+// 知らない人には変えられないよう、先に本人であることを確かめる。
+async function savePassword(){
+  // ログイン画面と同じく前後の空白は落とす。空白付きを通すと、
+  // ログイン画面（valOf で落とす）からは二度と入れなくなる。
+  const now = valOf("pw_now"), a = valOf("pw_new"), b = valOf("pw_new2");
+  const email = S.user ? S.user.email : "";
+  if (!email){ toast("ログインし直してください"); return; }
+  if (!now){ toast("いまのパスワードを入れてください"); return; }
+  if (a.length < 8){ toast("新しいパスワードは8文字以上にしてください"); return; }
+  if (a !== b){ toast("確認用のパスワードが一致しません"); return; }
+  if (a === now){ toast("いまと同じパスワードです"); return; }
+  // 同じ利用者で入り直すだけなので、onAuthStateChange は何もしない（画面は消えない）。
+  const chk = await sb.auth.signInWithPassword({ email: email, password: now });
+  if (chk.error){ toast("いまのパスワードが違います"); return; }
+  const { error } = await sb.auth.updateUser({ password: a });
+  if (error){
+    toast(/different from the old|should be different|same.*password/i.test(error.message)
+      ? "いまと同じパスワードです" : fail(error));
+    return;
+  }
+  closeModal();
+  toast("パスワードを変えました");
+}
+
 /* ============================ events ============================ */
 document.addEventListener("click", async function(ev){
   const tabBtn = ev.target.closest("[data-tab]");
@@ -3552,6 +3593,8 @@ document.addEventListener("click", async function(ev){
         applyBrand();
         break;
       }
+      case "edit-pw": modalPassword(); return;
+      case "save-pw": await savePassword(); break;
       case "signout": await signOut(); break;
 
       case "door":
