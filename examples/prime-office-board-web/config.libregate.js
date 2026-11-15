@@ -16,6 +16,10 @@ window.BOARD_CONFIG = {
   lineOaId: "",
   lineLoginOptional: true,
 
+  // ログイン画面に「パスワードを忘れた」を出す。決め直すリンクをメールで送るので、
+  // Supabase 側の Site URL と Redirect URLs をこのボードの URL にしてある。
+  passwordReset: true,
+
   editableBrand: true,
   reminders: true,
   contracts: true,
