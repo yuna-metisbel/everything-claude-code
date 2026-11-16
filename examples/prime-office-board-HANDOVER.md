@@ -76,6 +76,9 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
   （既定は `http://localhost:3000`。リーブルゲートは設定済み）。
   **送信は1時間に2通まで**（Supabase 付属のメール）。本番として使うなら独自 SMTP を入れる。
   手順は `prime-office-board-supabase/addons/line/README.md`。
+  **2026-11-15、`director.y@libre-gate.co.jp` に実際に届くことを確認した**
+  （Supabase 付属のメールのまま）。ただし1時間に2通の上限は変わらないので、
+  人が増えたら独自 SMTP に替える。
 - 調べていて分かったこと：**招待コードが違っても `auth.users` に未確認の行はできる**。
   メールが送れる設定だと行が残る（送信が断られると残らない）。名簿（`members`）の
   作成は RLS で止まり、未確認なのでログインもできないので、中には入れない。
