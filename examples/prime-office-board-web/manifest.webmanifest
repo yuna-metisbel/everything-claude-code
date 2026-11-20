@@ -1,0 +1,14 @@
+{
+  "name": "PRIME 事務所ボード",
+  "short_name": "PRIME",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FCFAF7",
+  "theme_color": "#FCFAF7",
+  "lang": "ja",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
