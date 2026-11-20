@@ -20,6 +20,10 @@ window.BOARD_CONFIG = {
   // Supabase 側の Site URL と Redirect URLs をこのボードの URL にしてある。
   passwordReset: true,
 
+  // ホームに「メモ」の欄を出す（全員で使う覚え書き。通知なし）。
+  // notices の kind に 'memo' を足す migration を流したボードだけ。
+  memos: true,
+
   editableBrand: true,
   reminders: true,
   contracts: true,

@@ -43,6 +43,10 @@ const CONFIG_SEASON = String(CONFIG.season || "").trim();
 // 送れる設定（独自 SMTP など）になっているボードだけ true にする。
 // 既定は off。入れていないボードは今までどおり、この入り口が出ない。
 const PW_RESET = CONFIG.passwordReset === true;
+// 「メモ」の欄を出すか。お知らせと同じ表に kind='memo' で置くので、
+// その値を許していない（migrations を流していない）ボードでは保存できない。
+// 入れたボードだけ出す。既定は off。
+const MEMOS = CONFIG.memos === true;
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -254,6 +258,8 @@ const S = {
   authErr: "", authMode: "in", busy: false,
   // メールのリンクで入ったところか／決め直しのメールを送ったアドレス
   recovery: false, resetSent: "",
+  // 終わったお知らせを開いているか。見た目だけなので保存しない。
+  doneNotices: false,
   theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
   barSize: ls("prime.barsize") || "m", tabBar: [],
   settings: null, form: {}, mode: "",
@@ -1300,8 +1306,17 @@ function noticeRow(n){
       '<button class="btn sm ghost" data-act="edit-notice" data-id="' + h(n.id) + '">編集</button>' +
     "</div></article>";
 }
+// 終わったもの。日付が過ぎたら、もう読む用事は無い。
+// 「重要」で上に固定したものは、本人が出したままにしたいので隠さない。
+// 日付の無いお知らせは、終わりが分からないので隠さない。
+function noticeDone(n){
+  if (n.pinned || !n.date) return false;
+  const d = daysUntil(n.date);
+  return d !== null && d < 0;
+}
 function sortedNotices(){
-  return S.notices.slice().sort(function(a, b){
+  // メモは同じ表に入れているが、お知らせの一覧にもカレンダーにも出さない。
+  return S.notices.filter(function(n){ return n.kind !== "memo"; }).sort(function(a, b){
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     const ad = a.date ? daysUntil(a.date) : null, bd = b.date ? daysUntil(b.date) : null;
     // upcoming dated items first, then undated, then past
@@ -1353,6 +1368,44 @@ async function saveNoticeFromModal(id){
   closeModal();
 }
 
+/* ============================ メモ ============================ */
+// 全員で使う覚え書き。お知らせと違って、日付も通知も無い。
+// 表はお知らせと同じ notices（kind='memo'）。見出しは使わないので空で入れる。
+function memoList(){
+  return S.notices.filter(function(n){ return n.kind === "memo"; }).sort(function(a, b){
+    return String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || ""));
+  });
+}
+function memoRow(n){
+  return '<article class="note">' +
+    '<div class="note-body">' + linkify(n.body) + "</div>" +
+    '<div class="note-foot">' +
+      "<span>" + h((member(n.created_by) || {}).name || "") +
+        (n.updated_at || n.created_at ? " ・ " + h(stamp(n.updated_at || n.created_at)) : "") + "</span>" +
+      '<button class="btn sm ghost" data-act="edit-memo" data-id="' + h(n.id) + '">編集</button>' +
+    "</div></article>";
+}
+function modalMemo(n){
+  n = n || {};
+  showModal(n.id ? "メモを直す" : "メモを書く",
+    '<div class="fields">' +
+    '<label class="f">内容<textarea id="mm_body" rows="6" placeholder="あとで見返したいこと、言づて、覚え書きなど">' +
+      h(n.body || "") + "</textarea></label>" +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">' +
+      "メモは全員が読めます。通知は出ません。</p></div>",
+    (n.id ? '<button class="btn danger left" data-act="del-memo" data-id="' + h(n.id) + '">削除</button>' : "") +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-memo" data-id="' + h(n.id || "") + '">保存</button>');
+}
+async function saveMemo(id){
+  const body = valOf("mm_body");
+  if (!body){ toast("内容を入力してください"); return; }
+  if (id) await run(sb.from("notices").update({ body: body, updated_at: nowIso() }).eq("id", id), "保存しました");
+  else await run(sb.from("notices").insert({ kind: "memo", title: "", body: body, date: null,
+    created_by: S.me.id, updated_at: nowIso() }), "書きました");
+  closeModal();
+}
+
 /* ============================ view: ホーム ============================ */
 const kindChip = k => '<span class="chip ' + KINDS[k || ""].chip + '">' + KINDS[k || ""].label + "</span>";
 function todayRow(m){
@@ -1396,15 +1449,30 @@ function viewHome(){
   const wanted = wantedTasks().sort((a,b) => (a.due||"9").localeCompare(b.due||"9"));
   const bills = unpaid().sort((a,b) => (a.due||"9").localeCompare(b.due||"9")).slice(0, 4);
   const load = S.members.map(m => ({ m: m, n: openTasks().filter(t => t.assignee === m.id).length }));
-  const notices = sortedNotices();
+  const all = sortedNotices();
+  const notices = all.filter(function(n){ return !noticeDone(n); });
+  const done = all.filter(noticeDone);
+  const memos = memoList();
   return '<div class="grid-home"><div>' +
       '<section class="sec"><div class="sec-head"><h2>お知らせ・共通予定</h2>' +
         '<span class="hint">全体ミーティングや打ち合わせ、共有事項など。</span>' +
         '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
         '<div class="panel"><div class="rows" style="border-top:0">' +
         (notices.length ? notices.map(function(x){ return noticeRow(x); }).join("")
-          : '<div class="empty">お知らせはありません</div>') + "</div></div>" +
+          : '<div class="empty">' + (done.length ? "出ているお知らせはありません" : "お知らせはありません") + "</div>") +
+        // 日付が過ぎたものは、消さずにしまっておく。見たいときだけ開く。
+        (done.length
+          ? '<div class="rows-more"><button class="btn sm ghost" data-act="toggle-done-notices">' +
+            (S.doneNotices ? "終わったものを隠す" : "終わったものを見る（" + done.length + "件）") + "</button></div>" +
+            (S.doneNotices ? '<div class="rows-past">' + done.map(function(x){ return noticeRow(x); }).join("") + "</div>" : "")
+          : "") + "</div></div>" +
       "</section>" +
+      (MEMOS ? '<section class="sec"><div class="sec-head"><h2>メモ</h2>' +
+        '<span class="hint">全員で使う覚え書き。日付も通知もありません。</span>' +
+        '<div class="spacer"></div><button class="btn sm primary" data-act="new-memo">＋ 追加</button></div>' +
+        '<div class="panel"><div class="rows" style="border-top:0">' +
+        (memos.length ? memos.map(function(x){ return memoRow(x); }).join("")
+          : '<div class="empty">メモはありません</div>') + "</div></div></section>" : "") +
       '<section class="sec"><div class="sec-head"><div class="eyebrow">' + h(today().replace(/-/g,"/")) + " (" + DOW[new Date().getDay()] + ")" +
         '</div><div class="spacer"></div><span class="hint">今日の全員の動き</span></div>' +
         '<h2 style="font-family:var(--serif);font-size:19px;margin-bottom:12px">今日は誰が、何をしていますか</h2>' +
@@ -4079,6 +4147,11 @@ document.addEventListener("click", async function(ev){
         S.privacy = txt;
         break;
       }
+      case "toggle-done-notices": S.doneNotices = !S.doneNotices; render(); return;
+      case "new-memo": modalMemo(null); break;
+      case "edit-memo": modalMemo(S.notices.find(x => x.id === id)); break;
+      case "save-memo": await saveMemo(id); break;
+      case "del-memo": await run(sb.from("notices").delete().eq("id", id), "削除しました"); closeModal(); break;
       case "new-notice": modalNotice(null); break;
       case "edit-notice": modalNotice(S.notices.find(x => x.id === id)); break;
       case "save-notice": await saveNoticeFromModal(id); break;
