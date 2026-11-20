@@ -259,7 +259,7 @@ const S = {
   // メールのリンクで入ったところか／決め直しのメールを送ったアドレス
   recovery: false, resetSent: "",
   // 終わったお知らせを開いているか。見た目だけなので保存しない。
-  doneNotices: false,
+  doneNotices: false, farNotices: false,
   theme: ls("prime.theme") || "light", fontSize: ls("prime.fontsize") || "m",
   barSize: ls("prime.barsize") || "m", tabBar: [],
   settings: null, form: {}, mode: "",
@@ -1314,6 +1314,20 @@ function noticeDone(n){
   const d = daysUntil(n.date);
   return d !== null && d < 0;
 }
+// 何日先まで出すか。0 は「ぜんぶ出す」。設定（board_settings.ui）で変える。
+// ui が無いボードと、決めていないボードは今までどおり全部出す。
+function noticeDays(){
+  const n = UI && UI.noticeDays;
+  return typeof n === "number" && n > 0 ? n : 0;
+}
+// まだ先すぎるもの。期限の一覧ではなく掲示板なので、近いものだけ出す。
+// 「重要」で固定したものと、日付の無いものは出したままにする（noticeDone と同じ考え）。
+function noticeFar(n){
+  const days = noticeDays();
+  if (!days || n.pinned || !n.date) return false;
+  const d = daysUntil(n.date);
+  return d !== null && d > days;
+}
 function sortedNotices(){
   // メモは同じ表に入れているが、お知らせの一覧にもカレンダーにも出さない。
   return S.notices.filter(function(n){ return n.kind !== "memo"; }).sort(function(a, b){
@@ -1450,8 +1464,9 @@ function viewHome(){
   const bills = unpaid().sort((a,b) => (a.due||"9").localeCompare(b.due||"9")).slice(0, 4);
   const load = S.members.map(m => ({ m: m, n: openTasks().filter(t => t.assignee === m.id).length }));
   const all = sortedNotices();
-  const notices = all.filter(function(n){ return !noticeDone(n); });
+  const notices = all.filter(function(n){ return !noticeDone(n) && !noticeFar(n); });
   const done = all.filter(noticeDone);
+  const far = all.filter(noticeFar);
   const memos = memoList();
   return '<div class="grid-home"><div>' +
       '<section class="sec"><div class="sec-head"><h2>お知らせ・共通予定</h2>' +
@@ -1459,7 +1474,13 @@ function viewHome(){
         '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
         '<div class="panel"><div class="rows" style="border-top:0">' +
         (notices.length ? notices.map(function(x){ return noticeRow(x); }).join("")
-          : '<div class="empty">' + (done.length ? "出ているお知らせはありません" : "お知らせはありません") + "</div>") +
+          : '<div class="empty">' + (done.length || far.length ? "いま出すお知らせはありません" : "お知らせはありません") + "</div>") +
+        // まだ先のもの。消してはいないので、見たいときに開ける。
+        (far.length
+          ? '<div class="rows-more"><button class="btn sm ghost" data-act="toggle-far-notices">' +
+            (S.farNotices ? "先の予定を隠す" : "先の予定を見る（" + far.length + "件）") + "</button></div>" +
+            (S.farNotices ? '<div class="rows-past">' + far.map(function(x){ return noticeRow(x); }).join("") + "</div>" : "")
+          : "") +
         // 日付が過ぎたものは、消さずにしまっておく。見たいときだけ開く。
         (done.length
           ? '<div class="rows-more"><button class="btn sm ghost" data-act="toggle-done-notices">' +
@@ -2666,6 +2687,8 @@ const DEFAULT_KINDS = {};
 KIND_ORDER.forEach(function(k){ DEFAULT_KINDS[k] = { label:KINDS[k].label, cell:KINDS[k].cell, mini:KINDS[k].mini }; });
 const DEFAULT_SHOP_KINDS = SHOP_KINDS.map(k => k.slice());
 const GENERIC_SHOP_HINT = "まとめておきたい情報を、■ の見出しのまま貼って置いておく場所です。";
+// お知らせ・共通予定を、何日先まで出すか。0 は「ぜんぶ出す」。
+const NOTICE_SPANS = [[7,"1週間先まで"],[14,"2週間先まで"],[31,"1か月先まで"],[92,"3か月先まで"],[0,"ぜんぶ出す"]];
 // ホームに出すもの。使わないものは外せる。
 const HOME_PARTS = [["door","開け閉め（「〇〇 あいてます」）"],["present","在席（入った・出た）"],
                     ["devices","持ち出すもの"],["reminders","リマインダー"],["notes","自分用"]];
@@ -2770,6 +2793,7 @@ function modalListName(L){
 /* ---- 設定：カスタマイズ ---- */
 function settingsCustomize(){
   const ui = UI || {}, tabs = ui.tabs || {}, kinds = ui.kinds || {}, home = ui.home || {};
+  const curDays = noticeDays();
   const board = ui.theme || "autumn", mine = ls("prime.season") || "";
   const swatch = function(s, on, act){
     return '<button class="btn' + (on ? " primary" : "") + '" data-act="' + act + '" data-v="' + s[0] + '">' +
@@ -2823,6 +2847,13 @@ function settingsCustomize(){
     }).join("") +
       '<div class="row" style="align-items:center;gap:8px"><span style="min-width:120px">開け閉めする場所</span>' +
         '<input type="text" id="c_place" maxlength="10" placeholder="事務所" value="' + h(ui.place || "") + '" style="flex:1"></div>' +
+      // 先の予定まで全部並ぶと、近いものが埋もれる。どこまで出すかはボードごとに違う。
+      '<div class="row" style="align-items:center;gap:8px"><span style="min-width:120px">お知らせに出す先ゆき</span>' +
+        '<select id="c_notice_days" style="flex:1">' +
+        NOTICE_SPANS.map(function(x){
+          return '<option value="' + x[0] + '"' + (x[0] === curDays ? " selected" : "") + ">" + h(x[1]) + "</option>";
+        }).join("") + "</select></div>" +
+      '<div class="row"><span class="hint">先のものは消えません。ホームの「先の予定を見る」で開けます。</span></div>' +
     "</div></div></section>" +
 
     '<section class="sec"><div class="sec-head"><h2>情報タブの分類</h2>' +
@@ -2850,6 +2881,7 @@ function collectUi(){
   });
   ui.home = {}; HOME_PARTS.forEach(function(p){ ui.home[p[0]] = el("ch_" + p[0]).checked; });
   ui.place = valOf("c_place");
+  ui.noticeDays = Number(valOf("c_notice_days")) || 0;
   const cats = Array.from(document.querySelectorAll(".c_cat"))
     .map(function(x){ return { id: x.dataset.id, label: x.value.trim() }; }).filter(c => c.label);
   const add = valOf("c_cat_new");
@@ -4148,6 +4180,7 @@ document.addEventListener("click", async function(ev){
         break;
       }
       case "toggle-done-notices": S.doneNotices = !S.doneNotices; render(); return;
+      case "toggle-far-notices": S.farNotices = !S.farNotices; render(); return;
       case "new-memo": modalMemo(null); break;
       case "edit-memo": modalMemo(S.notices.find(x => x.id === id)); break;
       case "save-memo": await saveMemo(id); break;
