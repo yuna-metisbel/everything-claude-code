@@ -1647,6 +1647,17 @@ function shiftMonth(delta){
 function noticesOn(date){
   return sortedNotices().filter(function(n){ return n.date === date; });
 }
+// 予定（カレンダー）に、期限のあるタスクも出す。「自分だけ」と「全員」を
+// 端末ごとに切り替える。担当が決まっていないものは、全員のときだけ出す。
+function schedWho(){ return ls("prime.schedWho") === "me" ? "me" : "all"; }
+function tasksOn(date){
+  const mine = schedWho() === "me";
+  return openTasks().filter(function(t){
+    // 期限の無いものは、出す日が決まらないので予定には出さない。
+    if (!date || !t.due || t.due !== date) return false;
+    return mine ? taskIsMine(t) : true;
+  }).sort(function(a, b){ return String(a.title).localeCompare(String(b.title), "ja"); });
+}
 // 月のマス1つ。誰がどう動くかを、名前と1〜2文字の区分で並べる。
 function monthCell(ym, d, t){
   const date = ym + "-" + pad(d), w = dow(ym, d);
@@ -1665,7 +1676,7 @@ function monthCell(ym, d, t){
       ((day.ngFrom || day.ngTo) ? '<span class="m ngm"></span>' : "") +
       (day.done ? '<span class="m donem"></span>' : "") + "</span>";
   }).join("");
-  const nt = noticesOn(date);
+  const nt = noticesOn(date), tk = tasksOn(date);
   return '<td class="mc' + (w === 0 ? " sun" : w === 6 ? " sat" : "") +
     (date === t ? " today" : "") + '">' +
     '<button class="mc-in" data-act="open-day" data-date="' + date + '" aria-label="' + h(date) + '">' +
@@ -1673,6 +1684,9 @@ function monthCell(ym, d, t){
       nt.map(function(x){
         return '<span class="mc-nt' + (x.kind === "meeting" ? " meet" : "") + '">' +
           h(x.at_time ? x.at_time + " " : "") + h(x.title) + "</span>"; }).join("") +
+      // やることの期限。お知らせとは別の見た目にして、混ぜて読まないようにする。
+      tk.map(function(x){
+        return '<span class="mc-nt tk" title="' + h(x.title) + '">' + h(x.title) + "</span>"; }).join("") +
       who +
     "</button></td>";
 }
@@ -1706,7 +1720,12 @@ function viewSched(){
   });
 
   return '<section class="sec"><div class="sec-head"><h2>' + h(label) + "</h2>" +
-    '<span class="hint">日を押すと、その日の全員の動きが出ます。</span>' +
+    '<span class="hint">日を押すと、その日の全員の動きが出ます。やることの期限も出ます。</span>' +
+    '<div class="btn-row" style="margin-right:8px">' +
+    ["all", "me"].map(function(v){
+      return '<button class="btn sm' + (schedWho() === v ? " primary" : "") +
+        '" data-act="sched-who" data-v="' + v + '">' + (v === "me" ? "自分だけ" : "全員") + "</button>";
+    }).join("") + "</div>" +
     '<div class="btn-row month-nav">' +
     '<button class="btn sm" data-act="month" data-delta="-1" aria-label="前の月">' +
       '<span class="t-lg">← 前の月</span><span class="t-sm">←</span></button>' +
@@ -3291,7 +3310,7 @@ function memberOptions(sel, blankLabel){
 // マスに全部は入らないので、読む場所と書く場所をここで分ける。
 function modalDayAll(date){
   const ym = date.slice(0, 7), w = DOW[dow(ym, Number(date.slice(8, 10)))];
-  const nt = noticesOn(date);
+  const nt = noticesOn(date), tk = tasksOn(date);
   const rows = S.members.map(function(m){
     const d = dayOf(m.id, date) || {};
     const K = KINDS[d.kind || ""];
@@ -3313,6 +3332,15 @@ function modalDayAll(date){
   showModal(date.replace(/-/g, "/") + "（" + w + "）",
     (nt.length ? '<div class="panel" style="margin-bottom:12px"><div class="rows" style="border-top:0">' +
       nt.map(function(x){ return noticeRow(x); }).join("") + "</div></div>" : "") +
+    // この日が期限のやること。直すのはタスクの画面からなので、ここでは読むだけ。
+    (tk.length ? '<div class="panel" style="margin-bottom:12px"><div class="rows" style="border-top:0">' +
+      '<div class="row" style="padding-bottom:4px"><span class="hint">この日が期限のやること</span></div>' +
+      tk.map(function(x){
+        return '<div class="row" style="align-items:flex-start;gap:8px">' +
+          '<span style="flex:1;min-width:0">' + h(x.title) +
+          (x.detail ? '<div style="margin-top:3px;font-size:12px;color:var(--muted)">' + h(x.detail) + "</div>" : "") +
+          "</span>" + taskOwnerChip(x) + "</div>";
+      }).join("") + "</div></div>" : "") +
     '<div class="panel"><div class="rows" style="border-top:0">' +
     (S.members.length ? rows : '<div class="empty">メンバーがいません</div>') + "</div></div>",
     '<button class="btn" data-act="close-modal">閉じる</button>');
@@ -4181,6 +4209,7 @@ document.addEventListener("click", async function(ev){
       }
       case "toggle-done-notices": S.doneNotices = !S.doneNotices; render(); return;
       case "toggle-far-notices": S.farNotices = !S.farNotices; render(); return;
+      case "sched-who": ls("prime.schedWho", btn.dataset.v); render(); return;
       case "new-memo": modalMemo(null); break;
       case "edit-memo": modalMemo(S.notices.find(x => x.id === id)); break;
       case "save-memo": await saveMemo(id); break;
