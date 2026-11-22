@@ -1721,7 +1721,7 @@ function viewSched(){
 
   return '<section class="sec"><div class="sec-head"><h2>' + h(label) + "</h2>" +
     '<span class="hint">日を押すと、その日の全員の動きが出ます。やることの期限も出ます。</span>' +
-    '<div class="btn-row" style="margin-right:8px">' +
+    '<div class="btn-row who-nav">' +
     ["all", "me"].map(function(v){
       return '<button class="btn sm' + (schedWho() === v ? " primary" : "") +
         '" data-act="sched-who" data-v="' + v + '">' + (v === "me" ? "自分だけ" : "全員") + "</button>";
