@@ -23,6 +23,7 @@ PRIME の本番には入れていない。
 | 公式アカウントのトークに送られた要望・感想を残す | `03_line_feedback.sql` と Edge Function `line-webhook` |
 | メールと LINE の**両方**から入れる（本部メンバー） | `config.js` の `lineLoginOptional`。メールで登録した人は「設定」→ LINE の通知 →「LINE を連携する」 |
 | スタッフの契約書（リンクだけ） | `04_staff_contracts.sql`。`config.js` の `contracts` |
+| 書類にサイン（本部のメンバーが、書類を読んでその場でサインする） | `05_doc_sign.sql`。`config.js` の `docs` |
 | やることの進捗を割合で出す | `config.js` の `taskProgress`（DB の変更なし） |
 | 自社ボードから、関わっている会社のボードを開く | `config.js` の `clients`（DB の変更なし） |
 
@@ -33,7 +34,8 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
 
 1. `migrations/` の35本を流す（SETUP.md の手順2）
 2. `01_line_login_reminders.sql`、`02_board_customize.sql`、`03_line_feedback.sql` を順に流す
-   （契約書も使うなら続けて `04_staff_contracts.sql`）
+   （契約書も使うなら続けて `04_staff_contracts.sql`、
+   書類にサインも使うなら `05_doc_sign.sql`）
 3. Edge Function `push`（新しい版）と `line-login` を置く。`verify_jwt` は有効のまま。
    `line-webhook` は **`verify_jwt` を外して**置く（LINE からの呼び出しには JWT が無い。
    代わりに中で署名を確かめる）
@@ -84,7 +86,8 @@ LINE への送信は、既存の Edge Function `push` が Web Push と一緒に�
    | `taskProgress: true` | やることの一覧とホームに「10件中6件完了（60%）」を出す |
    | `season: "spring"｜"summer"｜"autumn"｜"winter"` | 盤の色の**既定**。白地＋ピンク／緑／金茶／青。ボードの「設定 → 色」で選べばそちらが勝つので、渡したあと先方が自由に変えられる。入れなければ今までどおり秋（金茶） |
    | `themeColor: "#FFFFFF"` | ホーム画面から開いたときの下地の色（manifest の background/theme）。`season` を白地のものにしたら、これも白にする |
-   | `memos: true` | ホームに「メモ」の欄が出る（全員で使う覚え書き。日付も通知も無い）。お知らせと同じ `notices` 表に `kind='memo'` で入れるので、**`migrations/20261120090000_memos.sql` を流したボードだけ**。流していないと保存のときに弾かれる |
+   | `docs: true` | 「書類」のタブが出る。本部のメンバーが、置いてある書類（PDF のリンク）を読んで、指で書くか名前を打ち込むかでサインする。誰がサイン済みかと、サインの控えが残る（`05` が要る） |
+| `memos: true` | ホームに「メモ」の欄が出る（全員で使う覚え書き。日付も通知も無い）。お知らせと同じ `notices` 表に `kind='memo'` で入れるので、**`migrations/20261120090000_memos.sql` を流したボードだけ**。流していないと保存のときに弾かれる |
    | `passwordReset: true` | ログイン画面に「パスワードを忘れた」が出る。決め直すリンクをメールで送るので、**メールが実際に届くボードだけ**入れる（下の「パスワードを忘れた を出す前に」）。入れなければ入り口が出ない |
    | `clients: [{ name, url, note }]` | ホームの右側に「関わっている会社のボード」が出て、別のボードを新しいタブで開ける。`clientsTitle` で見出しを変えられる。**片方向**：入れたボードからは開けるが、相手のボードはこの設定を持たないので、相手からこちらへは入れない。`http`/`https` 以外の URL は捨てる |
 

@@ -24,6 +24,10 @@ window.BOARD_CONFIG = {
   // notices の kind に 'memo' を足す migration を流したボードだけ。
   memos: true,
 
+  // 「書類」のタブを出す（書類を読んでサインする）。
+  // addons/line/05_doc_sign.sql を流したボードだけ。
+  docs: true,
+
   editableBrand: true,
   reminders: true,
   contracts: true,

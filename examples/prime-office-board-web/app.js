@@ -47,6 +47,8 @@ const PW_RESET = CONFIG.passwordReset === true;
 // その値を許していない（migrations を流していない）ボードでは保存できない。
 // 入れたボードだけ出す。既定は off。
 const MEMOS = CONFIG.memos === true;
+// 「書類にサイン」を出すか。addons/line/05 を流したボードだけ。既定は off。
+const DOCS = CONFIG.docs === true;
 // 困ったときの連絡先。設置した人が config.js に書く。空なら何も出さない
 // （嘘の窓口を出すより、出さないほうがまし）。
 const SUPPORT = String(CONFIG.support || "").trim();
@@ -282,6 +284,9 @@ const S = {
   // スタッフの契約書（addons/line/04）。staff_id をキーにした1行ずつ。
   // 本部は拠点の全員ぶん、スタッフは RLS で自分の1行だけが入る。
   contracts: {},
+  // 書類にサイン（addons/line/05）。docs は書類、docSigns は誰がサインしたか。
+  // docOpen は「みんなの状況」を開いている書類、signKind はサインの書き方。
+  docs: [], docSigns: [], docOpen: "", signKind: "draw", signDrawn: false,
   // LINE（addons/line）。lineLink は自分のひも付け、lineName は初回の名前の候補。
   lineLink: null, lineName: "", reminders: [],
   // 自由な一覧（addons/line の 02）
@@ -413,6 +418,7 @@ async function loadAll(){
     if (customizable()) applyUi(S.settings.ui);
   }
   if (LINE_LOGIN || REMINDERS || customizable()) await loadLineExtras();
+  if (DOCS) await loadDocs();
   S.me = S.members.find(m => m.id === (S.user && S.user.id)) || null;
   if (ok(sit)) S.sites = sit.data || [];
   if (ok(stf)) S.staff = (stf.data || []).map(normStaff);
@@ -420,6 +426,16 @@ async function loadAll(){
   if (ok(dlg)) S.deviceLog = (dlg.data || []).map(normDevLog);
   if (!site(S.siteId)) S.siteId = S.sites.length ? S.sites[0].id : "";
   await loadSite(S.siteId);
+}
+
+// 書類とサイン（addons/line/05）。realtime に入れていないので、ここで読み直す。
+async function loadDocs(){
+  const [doc, sig] = await Promise.all([
+    sb.from("docs").select("*").order("created_at", { ascending: false }),
+    sb.from("doc_signs").select("*")
+  ]);
+  if (doc && !doc.error) S.docs = doc.data || [];
+  if (sig && !sig.error) S.docSigns = sig.data || [];
 }
 
 // 追加機能のぶん。表が無いボードでは呼ばない（呼んでも前の値を残すだけ）。
@@ -926,6 +942,7 @@ const TABS = [
   { id:"pay",    label:"支払い",         short:"支払" },
   { id:"sites",  label:"スタッフ拠点",   short:"拠点" },
   { id:"shops",  label:"店舗",           short:"店舗" },
+  { id:"docs",   label:"書類",           short:"書類" },
   { id:"vault",  label:"ID /パス",       short:"ID" },
   { id:"set",    label:"設定",           short:"設定" }
 ];
@@ -1016,6 +1033,7 @@ function render(){
     : S.tab === "tasks" ? viewTasks()
     : S.tab === "pay"   ? viewPay()
     : S.tab === "sites" ? viewSites()
+    : S.tab === "docs"  ? viewDocs()
     : S.tab === "vault" ? viewVault()
     : S.tab === "set"   ? viewSettings()
     : viewHome();
@@ -1041,6 +1059,7 @@ function renderStaffTabs(){
 }
 function tabBadges(){
   return { set: S.feedback.filter(f => !f.done).length, tasks: wantedTasks().length,
+           docs: docsToSign().length,
            pay: unpaid().filter(p => { const n = daysUntil(p.due); return n !== null && n <= 0; }).length };
 }
 function tabButton(t, badges){
@@ -1468,7 +1487,19 @@ function viewHome(){
   const done = all.filter(noticeDone);
   const far = all.filter(noticeFar);
   const memos = memoList();
+  const toSign = docsToSign();
   return '<div class="grid-home"><div>' +
+      // サインがまだの書類。待たせると止まるので、ホームのいちばん上に出す。
+      (toSign.length
+        ? '<section class="sec"><div class="panel"><div class="rows" style="border-top:0">' +
+          toSign.map(function(d){
+            return '<div class="row" style="align-items:center;gap:10px">' +
+              '<span style="flex:1;min-width:0"><strong>' + h(d.title || "書類") + "</strong> " +
+                dueChip(d.due) +
+                '<br><span style="font-size:12px;color:var(--muted)">サインがまだです</span></span>' +
+              '<button class="btn sm primary" data-act="sign-doc" data-id="' + h(d.id) + '">サインする</button></div>';
+          }).join("") + "</div></div></section>"
+        : "") +
       '<section class="sec"><div class="sec-head"><h2>お知らせ・共通予定</h2>' +
         '<span class="hint">全体ミーティングや打ち合わせ、共有事項など。</span>' +
         '<div class="spacer"></div><button class="btn sm primary" data-act="new-notice">＋ 追加</button></div>' +
@@ -2716,6 +2747,8 @@ const customizable = () => !!(S.settings && Object.prototype.hasOwnProperty.call
 function uiHome(k){ return !UI || !UI.home || UI.home[k] !== false; }
 function tabOn(id){
   if (id === "set" || id === "home") return true;
+  // 書類は、表を足したボード（config.js の docs）だけ。
+  if (id === "docs") return DOCS && !(UI && UI.tabs && UI.tabs.docs && UI.tabs.docs.off === true);
   if (!UI) return id !== "lists";
   return !(UI.tabs && UI.tabs[id] && UI.tabs[id].off === true);
 }
@@ -3034,6 +3067,275 @@ function viewVault(){
     "</div>" +
     '<div id="vaultList">' + renderVaultList() + "</div>" +
     '<p style="font-size:12px;color:var(--muted);margin-top:10px">ログインできるスタッフは全員このページを見られます。銀行やクレジットカードの認証情報は登録しないでください。</p></section>';
+}
+
+/* ============================ view: 書類にサイン ============================ */
+// 紙の同意書と同じ順番でやる。開いて読む → 同意する → 氏名・住所・連絡先 → サイン。
+// 書類そのもの（PDF）はボードに置かず、置き場所のリンクを開いて読んでもらう。
+// 残すのは「誰が・いつ・何に同意して・どう署名したか」のほう。
+const docOf = id => S.docs.find(d => d.id === id) || null;
+const docSignOf = (docId, memberId) =>
+  S.docSigns.find(x => x.doc_id === docId && x.member_id === memberId) || null;
+const mySign = d => (S.me ? docSignOf(d.id, S.me.id) : null);
+const docsToSign = () => (DOCS && S.me ? S.docs.filter(d => d.active && !mySign(d)) : []);
+// 書いた人しか入れられない値だが、画面に出す前にもう一度だけ形を確かめる。
+const signImg = v => /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(String(v || "")) ? String(v) : "";
+function signDateText(iso){
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+}
+function sortedDocs(){
+  return S.docs.slice().sort(function(a, b){
+    // 出ているものが先。そのなかは期限の近い順、同じなら新しい順。
+    if (!!a.active !== !!b.active) return a.active ? -1 : 1;
+    return String(a.due || "9999-99-99").localeCompare(String(b.due || "9999-99-99")) ||
+      String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+}
+function docRow(d){
+  const mine = mySign(d);
+  const n = S.docSigns.filter(x => x.doc_id === d.id).length;
+  const open = S.docOpen === d.id;
+  return '<div class="row" style="align-items:flex-start;gap:10px;flex-wrap:wrap">' +
+    '<span style="flex:1;min-width:0">' +
+      '<strong' + (d.active ? "" : ' style="color:var(--muted)"') + ">" + h(d.title || "（名前なし）") + "</strong> " +
+      (mine ? '<span class="chip ok">サイン済み</span>' : '<span class="chip warn">サインがまだ</span>') + " " +
+      (d.active ? "" : '<span class="chip">しまってある</span> ') + dueChip(d.due, !!mine) +
+      (d.body ? '<br><span style="font-size:12px;color:var(--muted);white-space:pre-wrap">' + h(d.body) + "</span>" : "") +
+      '<br><span style="font-size:12px;color:var(--muted)">' +
+        S.members.length + "人中 " + n + "人がサイン済み" +
+        (mine && mine.signed_at ? "・あなたは " + h(stamp(mine.signed_at)) + " に済み" : "") + "</span></span>" +
+    '<span class="btn-row doc-btns">' +
+      (d.url ? '<a class="btn sm" href="' + h(d.url) + '" target="_blank" rel="noopener">開く</a>' : "") +
+      (mine
+        ? '<button class="btn sm" data-act="show-sign" data-id="' + h(d.id) + '" data-who="' +
+            h(S.me ? S.me.id : "") + '">控え</button>' +
+          '<button class="btn sm ghost" data-act="sign-doc" data-id="' + h(d.id) + '">サインし直す</button>'
+        : '<button class="btn sm primary" data-act="sign-doc" data-id="' + h(d.id) + '">サインする</button>') +
+      '<button class="btn sm ghost" data-act="toggle-doc" data-id="' + h(d.id) + '">' +
+        (open ? "閉じる" : "みんなの状況") + "</button>" +
+      '<button class="btn sm ghost" data-act="edit-doc" data-id="' + h(d.id) + '">直す</button></span>' +
+    (open ? '<div style="flex:1 0 100%">' + docWhoList(d) + "</div>" : "") +
+    "</div>";
+}
+function docWhoList(d){
+  return '<div class="doc-who">' + (S.members.length
+    ? S.members.map(function(m){
+        const sg = docSignOf(d.id, m.id);
+        return '<div class="doc-who-row"><span style="flex:1">' + whoChip(m.id) + "</span>" +
+          (sg
+            ? '<span class="chip ok">' + h(stamp(sg.signed_at)) + "</span>" +
+              '<button class="btn sm ghost" data-act="show-sign" data-id="' + h(d.id) +
+                '" data-who="' + h(m.id) + '">控え</button>'
+            : '<span class="chip">まだ</span>') + "</div>";
+      }).join("")
+    : '<div class="empty">メンバーがいません</div>') + "</div>";
+}
+function viewDocs(){
+  const list = sortedDocs();
+  return '<section class="sec"><div class="sec-head"><h2>書類</h2>' +
+    '<span class="hint">読んでサインする書類です。サインした控えはここに残ります。</span>' +
+    '<div class="spacer"></div><button class="btn primary" data-act="new-doc">＋ 追加</button></div>' +
+    '<div class="panel"><div class="rows" style="border-top:0">' +
+      (list.length ? list.map(docRow).join("") : '<div class="empty">書類はありません</div>') +
+    "</div></div>" +
+    '<p style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.7">' +
+      "書類そのものはボードに置きません。置き場所のリンクを開いて読んでもらいます。<br>" +
+      "サインの内容（氏名・住所・連絡先）は、本部の全員が見られます。</p></section>";
+}
+function modalDoc(d){
+  d = d || {};
+  const isNew = !d.id;
+  const yesNo = function(id, on){
+    return '<select id="' + id + '"><option value="1"' + (on ? " selected" : "") + ">書いてもらう</option>" +
+      '<option value="0"' + (on ? "" : " selected") + ">要らない</option></select>";
+  };
+  showModal(isNew ? "書類を追加" : "書類を直す",
+    '<div class="fields">' +
+    '<label class="f">書類の名前<input type="text" id="dc_title" maxlength="60" value="' +
+      h(d.title || "") + '" placeholder="例：同意書（収納代行業務）"></label>' +
+    '<label class="f">置き場所（URL）<input type="url" id="dc_url" placeholder="https://…" value="' +
+      h(d.url || "") + '"></label>' +
+    '<p style="font-size:12px;color:var(--muted);line-height:1.7">PDF そのものはここに置きません。' +
+      "ドライブなどに置いて、そのリンクを貼ってください。空のままでも出せます。</p>" +
+    '<label class="f">説明（任意）<textarea id="dc_body" maxlength="600" placeholder="何の書類か、いつまでにサインしてほしいか">' +
+      h(d.body || "") + "</textarea></label>" +
+    '<label class="f">いつまで<input type="date" id="dc_due" value="' + h(d.due || "") + '"></label>' +
+    '<div class="fields two">' +
+      '<label class="f">住所' + yesNo("dc_addr", d.need_address !== false) + "</label>" +
+      '<label class="f">連絡先' + yesNo("dc_contact", d.need_contact !== false) + "</label></div>" +
+    '<label class="f">いまの扱い<select id="dc_active">' +
+      '<option value="1"' + (d.active === false ? "" : " selected") + ">出す（サインを集める）</option>" +
+      '<option value="0"' + (d.active === false ? " selected" : "") + ">しまう（控えは残る）</option></select></label>" +
+    "</div>",
+    (isNew ? "" : '<button class="btn danger left" data-act="del-doc" data-id="' + h(d.id) + '">消す</button>') +
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-doc" data-id="' + h(d.id || "") + '">保存</button>');
+}
+async function saveDocFromModal(id){
+  const title = valOf("dc_title");
+  if (!title){ toast("書類の名前を入れてください"); return; }
+  const url = valOf("dc_url");
+  // 置き場所のリンクなので、http(s) 以外は受け取らない。
+  if (url && !/^https?:\/\//i.test(url)){ toast("URL は http:// か https:// で始めてください"); return; }
+  const body = {
+    title: title, url: url, body: valOf("dc_body"), due: valOf("dc_due") || null,
+    need_address: valOf("dc_addr") === "1", need_contact: valOf("dc_contact") === "1",
+    active: valOf("dc_active") === "1", updated_at: nowIso()
+  };
+  if (id) await run(sb.from("docs").update(body).eq("id", id), "保存しました");
+  else await run(sb.from("docs").insert(Object.assign({ created_by: S.me ? S.me.id : null }, body)), "追加しました");
+  closeModal();
+}
+// サインする画面。draft は「指で書く／打ち込む」を切り替えたときに、
+// それまで打った字を消さないために持ち回すもの。
+function modalSign(docId, draft){
+  const d = docOf(docId);
+  if (!d || !S.me) return;
+  const prev = mySign(d) || {};
+  const v = draft || {};
+  const val = function(key, fallback){ return v[key] !== undefined ? v[key] : fallback; };
+  const agreed = v.agree !== undefined ? v.agree : !!prev.doc_id;
+  // 書き方は、前にその書類でやったやり方から始める（無ければ、この端末で最後に選んだやり方）。
+  if (!draft) S.signKind = prev.kind === "type" || prev.kind === "draw" ? prev.kind : (S.signKind || "draw");
+  S.signDrawn = false;
+  showModal(d.title || "書類",
+    '<div class="sign-wrap">' +
+    (d.body ? '<p class="sign-body">' + h(d.body) + "</p>" : "") +
+    (d.url
+      ? '<p style="margin-bottom:12px"><a class="btn primary" href="' + h(d.url) +
+        '" target="_blank" rel="noopener">書類を開いて読む</a></p>'
+      : "") +
+    '<label class="sign-agree"><input type="checkbox" id="dg_agree"' + (agreed ? " checked" : "") + ">" +
+      "<span>上の書類を読みました。内容に同意します。</span></label>" +
+    '<div class="fields">' +
+      '<label class="f">氏名<input type="text" id="dg_name" maxlength="40" value="' +
+        h(val("name", prev.name || S.me.name || "")) + '"></label>' +
+      (d.need_address === false ? ""
+        : '<label class="f">住所<input type="text" id="dg_address" maxlength="120" value="' +
+          h(val("address", prev.address || "")) + '"></label>') +
+      (d.need_contact === false ? ""
+        : '<label class="f">連絡先<input type="text" id="dg_contact" maxlength="60" placeholder="電話番号やメール" value="' +
+          h(val("contact", prev.contact || "")) + '"></label>') +
+    "</div>" +
+    '<div class="btn-row sign-kind">' +
+      [["draw","指で書く"],["type","名前を打ち込む"]].map(function(k){
+        return '<button class="btn sm' + (S.signKind === k[0] ? " primary" : "") +
+          '" data-act="sign-kind" data-v="' + k[0] + '" data-id="' + h(d.id) + '">' + k[1] + "</button>";
+      }).join("") + "</div>" +
+    (S.signKind === "draw"
+      ? '<div class="sign-pad-box"><canvas id="dg_pad" class="sign-pad"></canvas></div>' +
+        '<div class="sign-pad-foot"><button class="btn sm ghost" data-act="sign-clear">書き直す</button>' +
+        '<span class="hint">枠の中に、指かマウスで名前を書いてください。</span></div>'
+      : '<p class="hint" style="margin-top:4px">上の「氏名」に打ち込んだ名前が、そのままサインになります。</p>') +
+    '<p class="hint" style="margin-top:12px;line-height:1.7">日付は今日（' +
+      h(today().replace(/-/g, "/")) + "）で入ります。<br>" +
+      "サインの内容は本部の全員が見られます。</p></div>",
+    '<button class="btn" data-act="close-modal">やめる</button>' +
+    '<button class="btn primary" data-act="save-sign" data-id="' + h(d.id) + '">サインする</button>');
+  setupSignPad();
+}
+// 画面に出ている字の下書きを拾う（書き方を切り替えても消えないように）。
+function signDraft(){
+  const box = el("dg_agree");
+  return { name: valOf("dg_name"), address: valOf("dg_address"),
+           contact: valOf("dg_contact"), agree: !!(box && box.checked) };
+}
+// 手書きの枠。指とマウスの両方を pointer で受ける。
+function setupSignPad(){
+  const c = el("dg_pad");
+  if (!c) return;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const box = c.getBoundingClientRect();
+  const w = Math.max(Math.round(box.width) || 280, 120), hgt = 150;
+  c.width = Math.round(w * ratio);
+  c.height = Math.round(hgt * ratio);
+  c.style.height = hgt + "px";
+  const g = c.getContext("2d");
+  g.lineWidth = 2.4 * ratio; g.lineCap = "round"; g.lineJoin = "round";
+  // 紙に近い濃さ。白地の枠に出すので、盤の色が変わっても読める。
+  g.strokeStyle = "#1A1A1A";
+  let drawing = false, last = null;
+  // 指の位置 → 絵の座標。枠の見た目の幅と中の粗さがずれても、
+  // そのつど測って合わせる（ずれると、指と線が離れて書けなくなる）。
+  const at = function(e){
+    const r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (c.width / (r.width || 1)),
+             y: (e.clientY - r.top) * (c.height / (r.height || 1)) };
+  };
+  c.addEventListener("pointerdown", function(e){
+    drawing = true; last = at(e); S.signDrawn = true;
+    try { c.setPointerCapture(e.pointerId); } catch(err){}
+    // 点だけ打っても線が残るように。
+    g.beginPath(); g.moveTo(last.x, last.y); g.lineTo(last.x + 0.2, last.y); g.stroke();
+    e.preventDefault();
+  });
+  c.addEventListener("pointermove", function(e){
+    if (!drawing) return;
+    const p = at(e);
+    g.beginPath(); g.moveTo(last.x, last.y); g.lineTo(p.x, p.y); g.stroke();
+    last = p; e.preventDefault();
+  });
+  const up = function(){ drawing = false; last = null; };
+  c.addEventListener("pointerup", up);
+  c.addEventListener("pointercancel", up);
+  c.addEventListener("pointerleave", up);
+}
+function clearSignPad(){
+  const c = el("dg_pad");
+  if (!c) return;
+  c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  S.signDrawn = false;
+}
+async function saveSign(docId){
+  const d = docOf(docId);
+  if (!d || !S.me) return;
+  const agree = el("dg_agree");
+  if (!agree || !agree.checked){ toast("「読みました」にチェックを入れてください"); return; }
+  const name = valOf("dg_name");
+  if (!name){ toast("氏名を入れてください"); return; }
+  if (d.need_address !== false && !valOf("dg_address")){ toast("住所を入れてください"); return; }
+  if (d.need_contact !== false && !valOf("dg_contact")){ toast("連絡先を入れてください"); return; }
+  let image = "";
+  if (S.signKind === "draw"){
+    const pad = el("dg_pad");
+    if (!pad || !S.signDrawn){ toast("サイン欄に名前を書いてください"); return; }
+    image = pad.toDataURL("image/png");
+    // 表の上限（40万字）に当てない。ふつうの手書きなら数万字で収まる。
+    if (image.length > 380000){ toast("サインが大きすぎました。書き直してください"); return; }
+  }
+  await run(sb.from("doc_signs").upsert({
+    doc_id: d.id, member_id: S.me.id, kind: S.signKind, image: image,
+    name: name, address: valOf("dg_address"), contact: valOf("dg_contact"),
+    signed_at: nowIso()
+  }, { onConflict: "doc_id,member_id" }), "サインしました");
+  closeModal();
+}
+// サインの控え。紙に戻せるよう、そのまま印刷できる形にしてある。
+function modalSignView(docId, memberId){
+  const d = docOf(docId), sg = docSignOf(docId, memberId);
+  if (!d || !sg) return;
+  const who = member(memberId);
+  const img = signImg(sg.image);
+  showModal((d.title || "書類") + " の控え",
+    '<div class="sign-copy">' +
+    '<p class="sign-copy-title">' + h(d.title || "") + "</p>" +
+    (d.url ? '<p><a href="' + h(d.url) + '" target="_blank" rel="noopener">書類を開く</a></p>' : "") +
+    "<p>上の書類を読み、内容に同意しました。</p>" +
+    '<table class="sign-table"><tbody>' +
+      "<tr><th>日付</th><td>" + h(signDateText(sg.signed_at)) + "</td></tr>" +
+      "<tr><th>氏名</th><td>" + h(sg.name || (who ? who.name : "")) + "</td></tr>" +
+      (sg.address ? "<tr><th>住所</th><td>" + h(sg.address) + "</td></tr>" : "") +
+      (sg.contact ? "<tr><th>連絡先</th><td>" + h(sg.contact) + "</td></tr>" : "") +
+    "</tbody></table>" +
+    '<div class="sign-shown">' +
+      (sg.kind === "draw" && img
+        ? '<img src="' + h(img) + '" alt="サイン">'
+        : '<span class="sign-typed">' + h(sg.name) + "</span>") + "</div>" +
+    "</div>",
+    '<button class="btn" data-act="close-modal">閉じる</button>' +
+    '<button class="btn primary" data-act="print-sign">印刷する</button>');
 }
 
 /* ============================ view: 設定 ============================ */
@@ -4214,6 +4516,24 @@ document.addEventListener("click", async function(ev){
       case "edit-memo": modalMemo(S.notices.find(x => x.id === id)); break;
       case "save-memo": await saveMemo(id); break;
       case "del-memo": await run(sb.from("notices").delete().eq("id", id), "削除しました"); closeModal(); break;
+      case "new-doc": modalDoc(null); break;
+      case "edit-doc": modalDoc(docOf(id)); break;
+      case "save-doc": await saveDocFromModal(id); break;
+      case "del-doc":
+        if (!confirm("この書類を消しますか？ サインした控えも一緒に消えます。")) return;
+        await run(sb.from("docs").delete().eq("id", id), "消しました");
+        closeModal(); break;
+      case "toggle-doc": S.docOpen = S.docOpen === id ? "" : id; render(); return;
+      case "sign-doc": modalSign(id); return;
+      case "sign-kind": {
+        const draft = signDraft();
+        S.signKind = btn.dataset.v === "type" ? "type" : "draw";
+        modalSign(id, draft); return;
+      }
+      case "sign-clear": clearSignPad(); return;
+      case "save-sign": await saveSign(id); break;
+      case "show-sign": modalSignView(id, btn.dataset.who); return;
+      case "print-sign": window.print(); return;
       case "new-notice": modalNotice(null); break;
       case "edit-notice": modalNotice(S.notices.find(x => x.id === id)); break;
       case "save-notice": await saveNoticeFromModal(id); break;
