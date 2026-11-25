@@ -94,10 +94,11 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
   出さず、`notices_push()` の先頭で弾くので鳴らない。
   `migrations/20261120090000_memos.sql`（kind の check に 'memo' を足す＋トリガ）を
   流したボードで、`config.js` に `memos: true` を入れたときだけ出る。
-  **いまはリーブルゲートだけ。** しろspa・藤澤家の Supabase は別アカウント
+  **リーブルゲートと しろspa に入っている**（しろspa は 2026-11-26）。藤澤家はまだ。
+  しろspa・藤澤家の Supabase は別アカウント
   （`yuna-fujisawa@manabit.co.jp` の組織「藤澤家」`qxwnsodraoogyekpgmou`）にあり、
   Mac のキーチェーンのトークンでは触れない。**ユーザーにダッシュボードへ
-  ログインしてもらえば流せる**（2026-11-25 にその方法で しろspa の設定を直した）。
+  ログインしてもらえば流せる**（2026-11-25・26 にその方法で流した）。
 - ホーム右の「自分用」は前からある**自分だけ**の欄。新しい「メモ」は**全員が読む**ほう。
 - **先の予定も、決めた日数より先なら一覧から外す**。「設定 → ボードのカスタマイズ →
   ホームに出すもの → お知らせに出す先ゆき」で、1週間／2週間／1か月／3か月／ぜんぶ から選ぶ
@@ -126,7 +127,7 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
 - 残すのは「誰が・いつ・何に同意して・何と署名したか」。氏名のほかに
   住所・連絡先を書いてもらうかは、書類ごとに選ぶ（紙の同意書がその形だったため）。
 - `addons/line/05_doc_sign.sql` と `config.js` の `docs: true` の両方が要る。
-  リーブルゲートだけに入れてある。
+  **リーブルゲートと しろspa に入れてある**（しろspa は 2026-11-26）。藤澤家はまだ。
 - 新しい書類を出すと、既存の `push_send()` で全員に通知が飛ぶ（`docs_push` トリガ）。
   試すときは `alter table public.docs disable trigger docs_push_ins` で止めてから。
 - 手書きの枠は、指の位置を毎回測って絵の座標に直している。
@@ -160,6 +161,30 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
   （鍵を会話に出さずに済む）。`/platform/pg-meta/<ref>/query` は
   `x-connection-encrypted` を要求してくるので使わない。
   これで しろspa・藤澤家にも migration を流せる（やるかはユーザーが決める）。
+
+### しろspa にメモと書類サインを入れた（2026-11-26）
+
+ダッシュボードから流せる道が見つかったので、リーブルゲートにだけ入れていた2つを
+しろspa にも入れた。ユーザーの指示は「入れて」。
+
+- 流したのは2つ。`migrations/20261120090000_memos.sql`（`notices.kind` の check に
+  `'memo'` を足す＋`notices_push()` の差し替え）と `addons/line/05_doc_sign.sql`
+  （`docs`・`doc_signs`・RLS・`docs_push` トリガ）。
+  ユーザーがダッシュボードにログインした状態で、ブラウザのページから
+  `localStorage['supabase.dashboard.auth.token']` の access_token を使って
+  `https://api.supabase.com/v1/projects/qnmkzhjkgaaeqqnplubd/database/query` を叩いた。
+- 流す前に **`is_member()` と `push_send(text,text,text,text)` があることを確かめた**。
+  どちらも 05 が当てにしている。`staff_contracts` もあったので 01〜04 は入っている。
+- ファイルの `$$` は、JS のテンプレート文字列に入れるので `$fn$` に書き換えて流した
+  （中身は同じ）。`create policy` は `drop policy if exists` を前に足して、
+  二度流しても落ちないようにした。
+- 流したあと、**リーブルゲートと列・ポリシー・check を突き合わせて同じことを確かめた**
+  （`docs` 11列・`doc_signs` 8列・ポリシー4つ・kind は notice/meeting/memo）。
+- `config.shirospa.js` に `memos: true` と `docs: true` を足した（コミット `6010311`）。
+  変えたのは config だけなので、他の2つのボードは今までどおり。
+- **書類を1枚出すと全員に通知が飛ぶ**（`docs_push`）。しろspa はまだメンバー0人なので
+  いま飛ぶ先は無いが、人が入ったあとに試すときは
+  `alter table public.docs disable trigger docs_push_ins` で止めてから。
 
 ### Supabase の組織とお金
 
