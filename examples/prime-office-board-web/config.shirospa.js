@@ -19,6 +19,10 @@ window.BOARD_CONFIG = {
   lineOaId: "",
   // メールと LINE の両方を1枚のログイン画面に出す（本部メンバーだけ）。
   lineLoginOptional: true,
+
+  // ログイン画面に「パスワードを忘れた」を出す。決め直すリンクをメールで送るので、
+  // Supabase 側の Site URL と Redirect URLs をこのボードの URL にしてある。
+  passwordReset: true,
   editableBrand: true,
   reminders: true,
   // スタッフの契約書（リンクだけ）。addons/line/04_staff_contracts.sql を流したボードだけ。
