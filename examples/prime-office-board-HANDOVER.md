@@ -94,7 +94,10 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
   出さず、`notices_push()` の先頭で弾くので鳴らない。
   `migrations/20261120090000_memos.sql`（kind の check に 'memo' を足す＋トリガ）を
   流したボードで、`config.js` に `memos: true` を入れたときだけ出る。
-  **いまはリーブルゲートだけ**（しろspa・藤澤家は Supabase が別アカウントで流せない）。
+  **いまはリーブルゲートだけ。** しろspa・藤澤家の Supabase は別アカウント
+  （`yuna-fujisawa@manabit.co.jp` の組織「藤澤家」`qxwnsodraoogyekpgmou`）にあり、
+  Mac のキーチェーンのトークンでは触れない。**ユーザーにダッシュボードへ
+  ログインしてもらえば流せる**（2026-11-25 にその方法で しろspa の設定を直した）。
 - ホーム右の「自分用」は前からある**自分だけ**の欄。新しい「メモ」は**全員が読む**ほう。
 - **先の予定も、決めた日数より先なら一覧から外す**。「設定 → ボードのカスタマイズ →
   ホームに出すもの → お知らせに出す先ゆき」で、1週間／2週間／1か月／3か月／ぜんぶ から選ぶ
@@ -130,6 +133,33 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
   `clientWidth` を一度だけ測って決め打つと、**指と線がずれる**（スマホで踏んだ）。
 - サイン欄と控えは、盤の色に関わらず白地。手書きの線が黒なので、暗い色の上だと読めない。
 - 控えは `@media print` で、開いているところだけを紙に出せる。
+
+### しろspa のボードを渡せるようにした（2026-11-25）
+
+「しろspa のボードそのものを、本部メンバーとして入ってもらう形で渡したい」という依頼。
+ボードは前から公開されていたが、**中身が空で、誰も入れない状態**だった
+（`members` 0 件・`auth.users` 0 件・`sites` 0 件）。
+
+- **招待コード式の登録は前から入っていた。** `board_settings.signup_mode='code'`、
+  `invite_code='BWKFHMM6'`。`auto_confirm_allowed` トリガがコードの一致を見て
+  その場で確認済みにするので、**確認メールが要らない**（SMTP は未設定のままでよい）。
+  渡すのは「URL ＋ 招待コード」だけ。相手が自分でアカウントと表示名を作る。
+- **直したのは2つ。**
+  1. Supabase の Site URL と Redirect URLs が `http://localhost:3000` のままだった →
+     `https://shirospa-board.onrender.com` に変えた。
+  2. `config.shirospa.js` に `passwordReset: true` を足した（コミット `f81cb85`）。
+     これで「パスワードを忘れた」が出る。`redirectTo` は
+     `location.origin + location.pathname` なので、上の Redirect URLs と合っている。
+- **本番で通しで確かめた。** 招待コード → アカウント作成 → 表示名 → ホーム画面まで入れた。
+  console にエラーなし。確かめに使ったアカウントは消した（また 0 件）。
+- **渡す文面は接続情報メモにある。**
+  `~/Documents/仕事と趣味/08_その他事業/90_共通管理/01_書類/2026-11-25_しろspa事務所ボード_接続情報_v01.md`
+- **別アカウントの Supabase に触る方法。** ユーザーがダッシュボードにログインしていれば、
+  ブラウザのページから `localStorage['supabase.dashboard.auth.token']` の access_token を
+  使って `https://api.supabase.com/v1/projects/<ref>/database/query` を叩ける
+  （鍵を会話に出さずに済む）。`/platform/pg-meta/<ref>/query` は
+  `x-connection-encrypted` を要求してくるので使わない。
+  これで しろspa・藤澤家にも migration を流せる（やるかはユーザーが決める）。
 
 ### Supabase の組織とお金
 
