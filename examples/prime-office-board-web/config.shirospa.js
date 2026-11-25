@@ -23,6 +23,15 @@ window.BOARD_CONFIG = {
   // ログイン画面に「パスワードを忘れた」を出す。決め直すリンクをメールで送るので、
   // Supabase 側の Site URL と Redirect URLs をこのボードの URL にしてある。
   passwordReset: true,
+
+  // ホームに「メモ」の欄を出す（全員で使う覚え書き。通知なし）。
+  // notices の kind に 'memo' を足す migration を流したボードだけ。
+  memos: true,
+
+  // 「書類」のタブを出す（書類を読んでサインする）。
+  // addons/line/05_doc_sign.sql を流したボードだけ。
+  docs: true,
+
   editableBrand: true,
   reminders: true,
   // スタッフの契約書（リンクだけ）。addons/line/04_staff_contracts.sql を流したボードだけ。
