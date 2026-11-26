@@ -56,6 +56,7 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
 **リーブルゲートが大元。** そこから各社のボードを開ける（`config.js` の `clients`）。
 **片方向**で、各社のボードはこの設定を持たないので、各社からリーブルゲートへは入れない。
 これから入る会社も、しろspa と同じ形（1社＝1 Supabase プロジェクト）で足す。
+しろspa の行だけ `enter` が入っていて、**ログインなしで入れる**（下の「ログインなしで入る」）。
 
 ### ログインまわり（2026-11-15 に直した）
 
@@ -185,6 +186,45 @@ Render はどれも workspace `tea-dau5b2jncjis73aqtfeg`、上記ブランチか
 - **書類を1枚出すと全員に通知が飛ぶ**（`docs_push`）。しろspa はまだメンバー0人なので
   いま飛ぶ先は無いが、人が入ったあとに試すときは
   `alter table public.docs disable trigger docs_push_ins` で止めてから。
+
+### リーブルゲートから しろspa へログインなしで入る（2026-11-26）
+
+ユーザーの指示は「リーブルゲートからはログインなしで入りたいの」「一緒に書き込む」。
+読むだけではなく**本部メンバーとして書き込める**。設計は
+`docs/superpowers/specs/2026-11-26-libregate-to-shirospa-enter-design.md`（コミット `d921868`）。
+実装は `b500ff2e`。**プロジェクトは分けたまま**で、行き来するのは members の1行だけ。
+
+- **しろspa に `functions/partner-enter` を置いた**（service_role）。やることは4つ。
+  1. リーブルゲートの `/auth/v1/user` に、見せられた access_token を渡して本物か確かめる。
+  2. **同じ証明で リーブルゲートの `/rest/v1/members?id=eq.<id>&select=name,color` を1行読む。**
+     これが読めるのは本部メンバーだけ（`members_select` の qual が
+     `(is_member() OR (id = auth.uid()))`）。行があれば本部メンバー、無ければ断る。
+     名前と色も同じ読みで手に入る。
+  3. `lg-<リーブルゲートのid>@partner.prime-office-board.invalid` の認証ユーザーを初回だけ作る。
+     2回目以降は `createUser` が落ちるがそれでよく、`generateLink` の戻りからユーザーIDを拾う。
+  4. こちらの `members` を upsert（名前と色は毎回あちらに合わせる）して、
+     1回だけ使えるトークンを返す。スタッフの暗証番号ログインと同じ作り。
+  - リーブルゲートの URL と公開キーはコードに直書き（どちらも公開してよい値）。
+    Secrets に `PARTNER_URL` / `PARTNER_ANON` を入れればそちらが優先される。
+  - デプロイは MCP では無理（別アカウント）。ダッシュボードの access_token で
+    `POST https://api.supabase.com/v1/projects/<ref>/functions/deploy?slug=partner-enter` に
+    multipart（metadata + index.ts）を投げた。ソースは GitHub の raw をページから fetch した。
+- **リーブルゲート側は config だけ。** `clients` の行に `enter`（窓口のURL）と
+  `enterKey`（しろspa の公開キー）を足した。`enter` が無い行は今までどおり URL を開くだけなので、
+  **藤澤家と しろspa のボードは何も変わらない**。
+- **`app.js` に足したのは3つ。** `homeClients()` の `enter` 付きの行は
+  「開く（ログイン済み）」ボタン、`enterClient()`（**押した瞬間に空タブを開く**。
+  待ってから開くとブラウザに止められる → 入場券が来たらそこへ飛ばす、失敗したら
+  ふつうの URL に飛ばして理由を toast）、`finishPartnerEnter()`（`?enter=` を
+  `verifyOtp` で1回だけ使い、`history.replaceState` で URL から消す）。
+- **確かめたこと。** 窓口は ACTIVE（version 1, verify_jwt true）。
+  偽のトークンで 401（リーブルゲートに届いている証拠）、トークン無しで 400。
+  本番の `config.js` に `partner-enter`、両ボードの `app.js` に新しい関数が載っている。
+  **通って入るところは、リーブルゲートにログインしているユーザー本人が押して確かめる。**
+- **引き換え。** リーブルゲートの本部メンバーは**全員 しろspa に入れる**（名簿での絞り込みはしない）。
+  人が離れたら **しろspa 側の `members` 行は手で消す**（消さないと名前が残る。
+  ただしリーブルゲート側で消えていれば、次からは窓口が断る）。
+  しろspa の名簿には**リーブルゲートで使っている名前がそのまま**並ぶ（印は付けていない）。
 
 ### Supabase の組織とお金
 
