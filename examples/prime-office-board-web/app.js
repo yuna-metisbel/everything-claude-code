@@ -622,6 +622,8 @@ async function boot(){
   }
   // LINE の許可画面から戻ってきたところなら、先にログインを済ませる。
   if (LINE_LOGIN) await finishLineLogin();
+  // 親のボードの一覧から「開く（ログイン済み）」で来たところなら、入場券を使う。
+  await finishPartnerEnter();
   const { data } = await sb.auth.getSession();
   S.user = data && data.session ? data.session.user : null;
   sb.auth.onAuthStateChange(function(_e, session){
@@ -811,6 +813,19 @@ async function saveNewPassword(){
   await refresh();
 }
 async function signOut(){ await sb.auth.signOut(); S.reveal = {}; await refresh(); }
+
+/* ============================ 親のボードから入る（?enter=） ============================ */
+// 親のボード（リーブルゲート）の窓口が出した入場券。1回しか使えない。
+// 使ったらアドレス欄から消す。残すと、再読み込みで2回目を使おうとして失敗する。
+async function finishPartnerEnter(){
+  const m = /[?&]enter=([^&#]+)/.exec(location.search || "");
+  if (!m) return;
+  let hash = "";
+  try { hash = decodeURIComponent(m[1]); } catch(e){ hash = m[1]; }
+  try { history.replaceState(null, "", location.origin + location.pathname + location.hash); } catch(e){}
+  const v = await sb.auth.verifyOtp({ token_hash: hash, type: "email" });
+  if (v.error) S.authErr = "この入場券は使えませんでした。もう一度やり直してください。";
+}
 
 /* ============================ LINE でログイン（addons/line） ============================ */
 // 戻り先は LINE Developers の「コールバックURL」に登録したものと一字一句同じでないと断られる。
@@ -1561,20 +1576,79 @@ function viewHome(){
 }
 
 // 関わっている会社のボードへの入り口。config.js の clients があるボードだけに出る。
-// 別のログインが要る別のボードなので、ここは URL を開くだけ。データは行き来しない。
+// 既定は URL を開くだけ（相手のボードのログインが要る）。相手側に「窓口」(partner-enter)
+// を置いた行だけ enter を入れてあり、そこは押すだけで入れる。データは行き来しない。
 function homeClients(){
+  const anyEnter = CLIENTS.some(function(c){ return !!c.enter; });
+  const allEnter = CLIENTS.every(function(c){ return !!c.enter; });
   return '<section class="sec"><div class="sec-head"><h2>' + h(CLIENTS_TITLE) + "</h2>" +
-    '<span class="hint">別のボードが開きます。それぞれのログインが必要です。</span></div>' +
+    '<span class="hint">' + (allEnter
+      ? "別のボードが開きます。ログインはいりません。"
+      : (anyEnter
+        ? "別のボードが開きます。「ログイン済み」のものはそのまま入れます。"
+        : "別のボードが開きます。それぞれのログインが必要です。")) + "</span></div>" +
     '<div class="panel"><div class="rows" style="border-top:0">' +
-    CLIENTS.map(function(c){
+    CLIENTS.map(function(c, i){
       return '<div class="row" style="align-items:center;gap:10px">' +
         '<span style="flex:1;min-width:0">' +
           '<span style="font-size:13.5px;font-weight:500">' + h(c.name) + "</span>" +
           (c.note ? '<div style="font-size:11.5px;color:var(--muted)">' + h(c.note) + "</div>" : "") +
         "</span>" +
-        '<a class="btn sm primary" href="' + h(c.url) + '" target="_blank" rel="noopener noreferrer">開く</a>' +
+        (c.enter
+          ? '<button class="btn sm primary" data-act="enter-client" data-i="' + i + '">開く（ログイン済み）</button>'
+          : '<a class="btn sm primary" href="' + h(c.url) + '" target="_blank" rel="noopener noreferrer">開く</a>') +
       "</div>";
     }).join("") + "</div></div></section>";
+}
+
+// 相手のボードの窓口に、いまのログイン証明を見せて入場券をもらい、その券で相手を開く。
+// タブは押した瞬間に開ける。待ってから開くと、ブラウザが勝手に開いた窓として止める。
+async function enterClient(i){
+  const c = CLIENTS[i];
+  if (!c || !c.enter) return;
+  const tab = window.open("", "_blank");
+  if (tab){
+    try {
+      tab.document.write('<!doctype html><meta charset="utf-8">' +
+        '<title>' + h(c.name) + '</title>' +
+        '<body style="margin:0;background:#fff;color:#1A1A1A;' +
+        'font-family:\'Noto Sans JP\',system-ui,sans-serif;font-size:15px;' +
+        'display:flex;align-items:center;justify-content:center;height:100vh">' +
+        h(c.name) + " に入っています…</body>");
+      tab.document.close();
+    } catch(e){ /* 文字が出ないだけ。入ることには関わらない */ }
+  }
+  function giveUp(msg){
+    toast(msg);
+    if (tab) { try { tab.location.replace(c.url); } catch(e){} }
+  }
+  let token = "";
+  try {
+    const { data } = await sb.auth.getSession();
+    token = (data && data.session && data.session.access_token) || "";
+  } catch(e){}
+  if (!token){ giveUp("ログインを確かめられませんでした"); return; }
+  let out = null, ok = false;
+  try {
+    const r = await fetch(c.enter, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: c.enterKey || "",
+        Authorization: "Bearer " + (c.enterKey || "")
+      },
+      body: JSON.stringify({ token: token })
+    });
+    ok = r.ok;
+    out = await r.json().catch(function(){ return null; });
+  } catch(e){ giveUp("つながりませんでした。ログイン画面を開きます"); return; }
+  if (!ok || !out || !out.tokenHash){
+    giveUp((out && out.error) || "入れませんでした。ログイン画面を開きます");
+    return;
+  }
+  const url = c.url + (c.url.indexOf("?") >= 0 ? "&" : "?") + "enter=" + encodeURIComponent(out.tokenHash);
+  if (tab) { try { tab.location.replace(url); } catch(e){ location.href = url; } }
+  else location.href = url;
 }
 
 // 事務所から持ち出すもの。鍵と同じで、状態は最後の記録から決まる。
@@ -4501,6 +4575,7 @@ document.addEventListener("click", async function(ev){
         await run(sb.from("board_settings").update({ recruit_url: valOf("set_recruit"), updated_at: nowIso() }).eq("id", 1), "保存しました");
         break;
       case "privacy": modalPrivacy(); return;
+      case "enter-client": await enterClient(Number(btn.dataset.i)); return;
       case "save-privacy": {
         // 空にするのは「スタッフから見えなくする」操作なので、取り消しが効かない旨を出す。
         const txt = valOf("set_privacy").trim();

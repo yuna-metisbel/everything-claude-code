@@ -36,7 +36,16 @@ window.BOARD_CONFIG = {
   // 関わっている会社のボードへの入り口。ホームの右側に出る。
   // 増やすときはここに1行足すだけ（相手のボードは何も変えない）。
   clientsTitle: "関わっている会社のボード",
+  // enter を入れた行は、押すだけで入れる（相手のボードに partner-enter の窓口がある行だけ）。
+  // enterKey は相手のボードの公開キー（config.js に載せているものと同じ）。
+  // enter を入れていない行は今までどおり URL を開くだけ。
   clients: [
-    { name: "しろspa（ナディア滋賀店）", url: "https://shirospa-board.onrender.com", note: "" }
+    {
+      name: "しろspa（ナディア滋賀店）",
+      url: "https://shirospa-board.onrender.com",
+      note: "",
+      enter: "https://qnmkzhjkgaaeqqnplubd.supabase.co/functions/v1/partner-enter",
+      enterKey: "sb_publishable_FrUgK__HEStLMlJ8M3jv9Q_BBKeKkmU"
+    }
   ]
 };
